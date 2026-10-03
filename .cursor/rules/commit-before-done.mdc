@@ -1,0 +1,16 @@
+---
+description: Commit every change and confirm a clean working tree before reporting done
+alwaysApply: true
+---
+
+# Commit before done
+
+Before reporting a step as done:
+
+1. Run `git status`.
+2. Commit every change in the working tree, including files you did not edit.
+3. Confirm the report says **working tree clean**.
+
+If a file should stay uncommitted (secrets such as `.env`, credentials, or local data), ask first and do not commit it.
+
+Leave ignored files (`node_modules/`, `.venv/`, `data/`, caches) untracked.
