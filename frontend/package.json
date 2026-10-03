@@ -12,6 +12,8 @@
   },
   "dependencies": {
     "lightweight-charts": "^5.2.1",
+    "monaco-editor": "^0.57.0",
+    "pinets": "^0.11.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "zustand": "^5.0.0"

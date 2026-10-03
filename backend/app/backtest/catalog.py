@@ -124,9 +124,17 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     if extra:
         raise RunRequestError(f"unknown field(s) {extra}")
     strategy = body.get("strategy")
-    if strategy not in _CATALOG:
+    user_strategy = isinstance(strategy, str) and strategy.startswith("user:")
+    if not user_strategy and strategy not in _CATALOG:
         raise RunRequestError(f"unknown strategy {strategy!r}")
-    cls, fields = _CATALOG[strategy]
+    if user_strategy:
+        from app.pine.save import USER_DIR
+        slug = str(strategy).split(":", 1)[1]
+        if not (USER_DIR / f"{slug}.py").is_file():
+            raise RunRequestError(f"unknown strategy {strategy!r}")
+        fields = {}
+    else:
+        cls, fields = _CATALOG[strategy]
     raw_params = body.get("params", {})
     if not isinstance(raw_params, dict):
         raise RunRequestError("params must be an object")
@@ -136,10 +144,11 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     params: dict[str, Any] = {}
     for key, field in fields.items():
         params[key] = _coerce(key, raw_params[key], field) if key in raw_params else field.default
-    try:
-        cls(**params)
-    except (TypeError, ValueError) as exc:
-        raise RunRequestError(str(exc)) from exc
+    if not user_strategy:
+        try:
+            cls(**params)
+        except (TypeError, ValueError) as exc:
+            raise RunRequestError(str(exc)) from exc
 
     symbol = body.get("symbol")
     if not isinstance(symbol, str) or not symbol:
@@ -182,7 +191,14 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
 
 
 def build_strategy(config: dict[str, Any]) -> Strategy:
-    cls, _fields = _CATALOG[config["strategy"]]
+    name = config["strategy"]
+    if isinstance(name, str) and name.startswith("user:"):
+        # Every mode (backtest, walk-forward, and later paper/live) loads user code in the worker.
+        from app.pine.isolated import IsolatedStrategy
+        from app.pine.save import USER_DIR
+        slug = name.split(":", 1)[1]
+        return IsolatedStrategy(USER_DIR / f"{slug}.py", **dict(config.get("params") or {}))
+    cls, _fields = _CATALOG[name]
     return cls(**config["params"])
 
 

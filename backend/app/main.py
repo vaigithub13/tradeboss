@@ -16,6 +16,7 @@ from app.routes.backtests import router as backtests_router
 from app.routes.candles import router as candles_router
 from app.routes.indicators import router as indicators_router
 from app.routes.live import router as live_router
+from app.routes.pine import router as pine_router
 from app.routes.upstox import router as upstox_router
 from app.upstox.instruments import snapshot_due, take_snapshot
 
@@ -57,6 +58,7 @@ app.include_router(candles_router)
 app.include_router(indicators_router)
 app.include_router(upstox_router)
 app.include_router(live_router)
+app.include_router(pine_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin, "http://127.0.0.1:5173"],

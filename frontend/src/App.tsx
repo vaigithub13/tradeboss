@@ -1,10 +1,11 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 
 import { ChartView } from "./chart/ChartView";
 import { TimeframeBar } from "./chart/TimeframeBar";
 import { BacktestPanel } from "./panels/BacktestPanel";
+import { PinePanel } from "./panels/PinePanel";
 import { BacktestResults, TradeCard } from "./panels/BacktestResults";
 import { IndicatorsMenu } from "./panels/IndicatorsMenu";
 import { DataTokenBadge } from "./panels/DataTokenBadge";
@@ -115,6 +116,7 @@ export default function App() {
   const ui = STATUS_UI[backendStatus];
   const panelOpen = useBacktestStore((s) => s.panelOpen);
   const setPanelOpen = useBacktestStore((s) => s.setPanelOpen);
+  const [pineOpen, setPineOpen] = useState(false);
   const activeRun = useBacktestStore((s) => s.active);
   const focus = useBacktestStore((s) => s.focus);
   const selectTrade = useBacktestStore((s) => s.selectTrade);
@@ -158,6 +160,13 @@ export default function App() {
         >
           Backtest
         </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 px-2 py-1 text-xs text-white/80"
+          onClick={() => setPineOpen(!pineOpen)}
+        >
+          Pine
+        </button>
         {status === "loading" && <span className="text-xs text-white/40">loading…</span>}
         <div className="ml-auto flex items-center gap-2">
           <LiveBadge />
@@ -170,6 +179,11 @@ export default function App() {
       </header>
 
       <div className="flex min-h-0 flex-1">
+      {pineOpen && (
+        <div className="h-full shrink-0">
+          <PinePanel />
+        </div>
+      )}
       {panelOpen && <BacktestPanel />}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
       <main className="relative min-h-0 flex-1">
