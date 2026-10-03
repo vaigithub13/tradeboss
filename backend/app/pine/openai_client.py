@@ -109,7 +109,7 @@ class OpenAIPineClient:
             data=body,
             headers={"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},
         )
-        timeout = 180 if self.purpose == "conversion" else 90
+        timeout = 360 if self.purpose == "conversion" else 90
         with urllib.request.urlopen(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode())
         choice = payload["choices"][0]
