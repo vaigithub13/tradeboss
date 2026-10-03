@@ -12,6 +12,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from pydantic import BaseModel
 
 from app.config import settings
+from app.routes.ai import router as ai_router
 from app.routes.backtests import router as backtests_router
 from app.routes.candles import router as candles_router
 from app.routes.indicators import router as indicators_router
@@ -59,6 +60,7 @@ app.include_router(indicators_router)
 app.include_router(upstox_router)
 app.include_router(live_router)
 app.include_router(pine_router)
+app.include_router(ai_router)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[settings.frontend_origin, "http://127.0.0.1:5173"],

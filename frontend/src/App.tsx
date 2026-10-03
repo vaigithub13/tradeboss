@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 
 import { ChartView } from "./chart/ChartView";
 import { TimeframeBar } from "./chart/TimeframeBar";
+import { AnalysisPanel } from "./panels/AnalysisPanel";
 import { BacktestPanel } from "./panels/BacktestPanel";
 import { PinePanel } from "./panels/PinePanel";
 import { BacktestResults, TradeCard } from "./panels/BacktestResults";
@@ -18,6 +19,7 @@ import { useChartStore } from "./store/chartStore";
 import { scopeKey } from "./indicators/cache";
 import { useIndicatorStore } from "./store/indicatorStore";
 import { liveView, useLiveStore } from "./store/liveStore";
+import type { LevelLine } from "./ai/present";
 
 const POLL_INTERVAL_MS = 3000;
 /** wait for typing in a parameter box to settle before asking the backend */
@@ -35,6 +37,7 @@ export default function App() {
 
   const symbols = useChartStore((s) => s.symbols);
   const symbol = useChartStore((s) => s.symbol);
+  const sessions = useChartStore((s) => s.sessions);
   const timeframe = useChartStore((s) => s.timeframe);
   const candles = useChartStore((s) => s.candles);
   const loaded = useChartStore((s) => s.loaded);
@@ -117,6 +120,13 @@ export default function App() {
   const panelOpen = useBacktestStore((s) => s.panelOpen);
   const setPanelOpen = useBacktestStore((s) => s.setPanelOpen);
   const [pineOpen, setPineOpen] = useState(false);
+  const [analysisOpen, setAnalysisOpen] = useState(false);
+  const [requestToken, setRequestToken] = useState(0);
+  const [analysisLevels, setAnalysisLevels] = useState<LevelLine[]>([]);
+  const onAnalysisLevels = useCallback((lines: LevelLine[]) => setAnalysisLevels(lines), []);
+  useEffect(() => {
+    setAnalysisLevels([]);
+  }, [symbol]);
   const activeRun = useBacktestStore((s) => s.active);
   const focus = useBacktestStore((s) => s.focus);
   const selectTrade = useBacktestStore((s) => s.selectTrade);
@@ -167,6 +177,16 @@ export default function App() {
         >
           Pine
         </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 px-2 py-1 text-xs text-white/80"
+          onClick={() => {
+            setAnalysisOpen(true);
+            setRequestToken((token) => token + 1);
+          }}
+        >
+          Analyse
+        </button>
         {status === "loading" && <span className="text-xs text-white/40">loading…</span>}
         <div className="ml-auto flex items-center gap-2">
           <LiveBadge />
@@ -201,6 +221,7 @@ export default function App() {
             focus={focus}
             onPickTime={pickTime}
             tradeCard={<TradeCard />}
+            levels={analysisLevels}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-white/40">
@@ -218,6 +239,14 @@ export default function App() {
       </main>
       <BacktestResults />
       </div>
+      {analysisOpen && (
+        <AnalysisPanel
+          symbol={symbol}
+          sessions={sessions}
+          requestToken={requestToken}
+          onLevels={onAnalysisLevels}
+        />
+      )}
       </div>
     </div>
   );

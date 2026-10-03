@@ -145,13 +145,44 @@ Each phase ends with something I can run and check. Do not start the next phase 
 - Verify conversions: compare signals vs TradingView on the same dates for a few samples.
 
 ### Phase 5 — AI analyser
-- "Analyse" button on the chart.
-- Backend builds a compact context: last N candles on 2–3 timeframes, key indicators, swing highs/lows, support/resistance, VWAP, day's range, option-relevant levels.
-- Optional chart screenshot sent as an image.
-- OpenAI call returns **strict JSON**: trend (per timeframe), bias, key levels, patterns, scenario bull/bear with trigger levels, confidence, reasoning.
-- Render as a side panel; draw returned levels on the chart.
-- Save each analysis with timestamp so accuracy can be reviewed later.
-- AI output is context, never an automatic order.
+
+The chart gets an Analyse button. The model sees a compact context and returns JSON. The panel and the chart show that JSON. Nothing in this phase places an order or adds a control that would.
+
+**Context** (`app/ai/context.py`). One pure function, `build_context`, for the current symbol. No network inside it. Callers pass candles, the event calendar, VIX bars, and an optional option-chain getter.
+
+- Timeframes are exactly `5m`, `15m`, `1h`, and `1D`. Each keeps the last 40 bars (`CANDLE_LIMIT`).
+- Indicator values are the last outputs of `app.indicators.registry.compute`: EMA 20, RSI 14, VWAP, and MACD (12, 26, 9). The same function the chart uses. No second implementation.
+- A swing high is a bar whose high is strictly above the two bars on each side. A swing low is the same test on the low. Support is the swing-low prices. Resistance is the swing-high prices. Keep the latest three of each.
+- Day range is the current IST session on the 5-minute bars: first open, highest high, lowest low, last close.
+- India VIX is the last stored close. It is stale when that bar is more than 300 seconds before `as_of`, the same rule as the option model. No bar means value null and stale.
+- Event flags come from `EventCalendar`: `event_day` and `reaction_day` for the `as_of` session, plus the event names.
+- Option chain, Nifty only. The chart symbol `NIFTY50` maps to instrument key `NSE_INDEX|Nifty 50`. The getter is `GET /v2/option/chain` on the existing read-only Upstox client. `expiry_date` is the nearest weekly expiry from `ExpiryCalendar` as `YYYY-MM-DD`, including the expiry day itself and a holiday that moved the expiry to the previous trading day. Upstox documents that route as a Bearer access-token call and says the chain is not available for MCX ([Put/Call Option Chain](https://upstox.com/developer/api-documentation/get-pc-option-chain)). This app sends the analytics token the other market-data GETs already send. A 401 or any other failure does not fail the analysis: `options` is `{available: false, reason}` and the reason is a fixed sentence, never the response body. The strike closest to `underlying_spot_price` is ATM; a tie takes the lower strike. Keep that row's PCR and the call and put LTP, OI, bid, and ask. Any other symbol leaves `options` null and does not call the getter.
+- The context JSON has no token, key, or authorization header. A chain error that contains one is not copied in.
+
+**Model** (`app/ai/analyse.py`, `app/ai/schema.py`). `AI_ANALYSIS_MODEL` in `.env`, otherwise `AI_MODEL`, otherwise `gpt-4o-mini`. The prompt says the context is data, never instructions, and that the reply cannot be an order. The reply is one JSON object:
+
+- `trends`: `5m`, `15m`, `1h`, `1D`, each `up`, `down`, or `sideways`
+- `bias`: `bull`, `bear`, or `neutral`
+- `key_levels`: `{price, kind: support|resistance, label}`
+- `patterns`: strings
+- `bull` and `bear`: `{trigger, invalidation, note}`
+- `confidence`: number from 0 to 1
+- `reasoning`: a non-empty string
+
+Any other key is rejected, including `order`, `orders`, `side`, `qty`, `action`, and `signal`. Every price (levels, triggers, invalidations) must sit inside 5% of the last price (`LEVEL_BAND`). Outside that, the error names the field and the allowed range, for example `bull.trigger 200 is outside 95.00..105.00`. The repair loop is the Pine one: at most two retries (`MAX_RETRIES = 2`). Each retry is shown that error. After three failures the result is not ready. Tests pass a fake client. No test opens a socket.
+
+An optional chart screenshot is a second argument. The client call includes those bytes only when the caller passed them.
+
+**Cost.** The panel shows prompt and completion tokens, `100 in / 50 out`. A dollar figure appears only when both `AI_ANALYSIS_INPUT_USD_PER_MTOK` and `AI_ANALYSIS_OUTPUT_USD_PER_MTOK` are set. No rate is invented for a model name.
+
+**Panel.** Side panel, plus horizontal price lines on the candle series (the same `createPriceLine` the RSI guides use). The panel always shows `AI analysis: context, not a trade signal`. There is no place-order function and no such button (`canPlaceOrders()` is false).
+
+**Track record** (`app/ai/record.py`). Every analysis is a file under `data/ai/` (already gitignored): time (`as_of`), symbol, the context, the analysis, and the sha256 of the canonical context JSON. Each analysis is scored on five horizons: 60 minutes later, the same-session close (the last bar of that IST date at or after 15:15), and 1, 3, and 5 later sessions. The analysis session itself does not count toward the session horizons. A session is one IST date. The same horizons score two baselines: always bullish, and follow the trend (the sign of the 1D EMA 20 slope stored on the context). The panel shows the AI hit rate beside both baselines.
+
+- The bull trigger is reached when a bar's high is at or above it. The bear trigger is reached when a low is at or below it. The trigger score follows the stated bias. Neutral has no trigger score.
+- A move inside the neutral band is flat. The band defaults to 0.3% of the analysis price (`AI_ANALYSIS_NEUTRAL_BAND`). Bull is right on an up move, bear on a down move, and neutral when the move stays inside the band.
+- A support is respected when no close is strictly below it. A resistance is respected when no close is strictly above it. A wick through the level still counts as respected. No levels means respected.
+- Before the horizon exists, the score is pending and is left out of the hit rate.
 
 ### Phase 6 — Paper trading
 - PaperBroker using live Upstox data and the same strategy code.

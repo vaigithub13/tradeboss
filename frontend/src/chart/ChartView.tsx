@@ -4,11 +4,13 @@ import {
   CrosshairMode,
   HistogramSeries,
   TickMarkType,
+  LineStyle,
   createChart,
   createSeriesMarkers,
   type CandlestickData,
   type HistogramData,
   type IChartApi,
+  type IPriceLine,
   type ISeriesApi,
   type ISeriesMarkersPluginApi,
   type SeriesMarker,
@@ -77,11 +79,12 @@ interface Props {
   focus?: { token: number; time: number } | null;
   onPickTime?: (time: number) => void;
   tradeCard?: ReactNode;
+  levels?: { price: number; title: string; color: string }[];
 }
 
 export function ChartView({
   displayName, timeframe, scope, candles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
-  markers = [], focus = null, onPickTime, tradeCard,
+  markers = [], focus = null, onPickTime, tradeCard, levels = [],
 }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -96,6 +99,7 @@ export function ChartView({
   onNeedNewerRef.current = onNeedNewer;
   const layerRef = useRef<IndicatorLayer | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
+  const priceLinesRef = useRef<IPriceLine[]>([]);
   const onPickTimeRef = useRef(onPickTime);
   onPickTimeRef.current = onPickTime;
   /** start time of the candle under the crosshair (null = latest candle) */
@@ -192,6 +196,22 @@ export function ChartView({
     if (!markersRef.current) markersRef.current = createSeriesMarkers(series);
     markersRef.current.setMarkers(markers);
   }, [markers, candles]);
+
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    for (const line of priceLinesRef.current) series.removePriceLine(line);
+    priceLinesRef.current = levels.map((level) =>
+      series.createPriceLine({
+        price: level.price,
+        color: level.color,
+        lineWidth: 1,
+        lineStyle: LineStyle.Dashed,
+        axisLabelVisible: true,
+        title: level.title,
+      }),
+    );
+  }, [levels, candles]);
 
   // ---- push data whenever candles change
   useEffect(() => {
