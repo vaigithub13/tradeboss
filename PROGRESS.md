@@ -359,4 +359,20 @@ Price Channel's last four closed trades and the open long match TradingView's #1
 
 Overnight versus same-day, this run, closed trades only: Pivot +940.95 overnight (71) and −897.35 same-day (447). Log XZ +1,215.55 (68) and −2,271.35 (211). Price Channel +2,045.25 (67) and −1,429.55 (106).
 
-**Not run in this note.** Options at slippage 1.0 and walk-forward are the next step. The final holdout was not run.
+**Realistic options (2026-10-03).** NIFTY50, 5m, script defaults, 15:15 square-off, real premiums, ATM, slippage 1.0 per leg. Research window 2024-10-03 through 2026-06-30. Index costs are zero, so index ₹ is points times the dated lot. Not saved: other files in the tree were still uncommitted. Holdout peek count stayed 0.
+
+| strategy | index ₹ | option ₹ | trades | index win | option win | index max DD | option max DD | real fills | modelled fills |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Pivot Extension (faithful, 4/2) | 465,988.75 | 145,391.26 | 3,385 | 36.69% | 32.05% | 80,089.75 | 72,026.09 | 6,728 | 42 |
+| Log XZ (RMA 14) | 285,241.25 | −305,678.93 | 1,735 | 38.27% | 26.46% | 74,250.00 | 315,367.69 | 3,422 | 48 |
+| Price Channel (20) | 630,280.25 | 481,810.37 | 1,098 | 45.36% | 40.89% | 49,327.50 | 34,407.39 | 2,174 | 22 |
+
+**Walk-forward, same settings, no holdout.** Train 6 months, test 2, step 2, minimum 30 train trades. Seven windows. Grids: pivot faithful/carried_pivots × 5m/15m; Log XZ length 10/14 × 5m/15m; channel length 20/40 × 5m/15m. 28 combinations each. Peek count stayed 0.
+
+| strategy | OOS option ₹ | OOS max DD | OOS trades | combinations | param changes | windows with a choice |
+|---|---:|---:|---:|---:|---:|---|
+| Pivot Extension | 279,792.51 | 58,534.27 | 861 | 28 | 1 | 7 of 7. carried_pivots, 5m for the first four tests, then 15m. Test nets +132,159.21, +62,565.05, +30,062.38, +33,096.11, −2,111.31, +51,829.71, −27,808.64. |
+| Log XZ | 5,332.14 | 26,478.05 | 96 | 28 | 0 | 2 of 7. The first five stayed flat (best train net not positive). The last two chose RMA 14 on 15m. Test nets +23,733.48 and −18,401.34. |
+| Price Channel | 352,152.29 | 34,407.39 | 731 | 28 | 0 | 7 of 7. Length 20 on 5m every window. Test nets +102,174.87, +62,505.99, +11,101.70, +26,453.05, +41,696.76, +50,464.50, +57,755.42. |
+
+The final holdout was not run.
