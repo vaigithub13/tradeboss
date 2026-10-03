@@ -36,6 +36,15 @@ CREATE TABLE IF NOT EXISTS runs (
 )
 """
 
+_PEEKS = """
+CREATE TABLE IF NOT EXISTS holdout_peeks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    holdout_start TEXT NOT NULL,
+    holdout_end TEXT NOT NULL,
+    created_at TEXT NOT NULL
+)
+"""
+
 
 def _dumps(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
@@ -65,6 +74,7 @@ class RunStore:
         self._db = sqlite3.connect(str(path), check_same_thread=False)
         self._db.row_factory = sqlite3.Row
         self._db.execute(_SCHEMA)
+        self._db.execute(_PEEKS)
         self._db.commit()
 
     def create(self, config: dict[str, Any], git: GitState, parent_id: str | None = None) -> str:
@@ -133,6 +143,29 @@ class RunStore:
         with self._lock:
             rows = self._db.execute("SELECT * FROM runs ORDER BY created_at DESC, id DESC").fetchall()
         return [_row_dict(row) for row in rows]
+
+    def holdout_peeks(self, start: str, end: str) -> int:
+        with self._lock:
+            row = self._db.execute(
+                "SELECT COUNT(*) FROM holdout_peeks WHERE holdout_start = ? AND holdout_end = ?",
+                (start, end),
+            ).fetchone()
+        return int(row[0])
+
+    def accept_holdout(self, start: str, end: str) -> int:
+        """Record one peek and return the count for this frozen holdout. Call before the run."""
+        now = datetime.now(IST).isoformat(timespec="seconds")
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO holdout_peeks (holdout_start, holdout_end, created_at) VALUES (?, ?, ?)",
+                (start, end, now),
+            )
+            self._db.commit()
+            row = self._db.execute(
+                "SELECT COUNT(*) FROM holdout_peeks WHERE holdout_start = ? AND holdout_end = ?",
+                (start, end),
+            ).fetchone()
+        return int(row[0])
 
     def _status(self, run_id: str, status: str) -> None:
         with self._lock:

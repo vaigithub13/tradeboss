@@ -30,6 +30,8 @@ class Trade:
     gap: bool
     ambiguous: bool
     optimistic: bool
+    entry_at_open: bool = True  # market or a stop gapped through: the fill is the minute's open
+    exit_at_open: bool = True
 
 
 def canonical(obj: Any) -> str:

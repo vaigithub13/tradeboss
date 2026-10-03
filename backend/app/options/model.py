@@ -35,6 +35,7 @@ HISTORY_START = date(2024, 10, 3)
 MODEL_ONLY_WARNING = "model only: rough check, not proof"
 MODELLED_FILL_WARNING = "more than 20% of fills are modelled"
 DTE_BUCKETS = ("0", "1", "2", "3-4", "5+")
+OPTION_FILLS = ("minute_open", "adverse", "worst")
 DEFAULT_MODEL_FILE = Path(__file__).resolve().parent / "data" / "option_model_v1.json"
 
 
@@ -73,6 +74,7 @@ class OptionModelConfig:
     carry_basis: str = "trading"
     real_premiums: bool = False
     vix_scales: tuple[tuple[str, float], ...] = ()
+    option_fill: str = "minute_open"  # minute_open | adverse | worst
 
     def __post_init__(self) -> None:
         if self.strike_offset not in (-1, 0, 1):
@@ -83,6 +85,8 @@ class OptionModelConfig:
             raise ValueError("carry_basis must be 'trading' or 'calendar'")
         if self.slippage_points < 0 or self.vix_scale <= 0:
             raise ValueError("slippage_points must be >= 0 and vix_scale must be > 0")
+        if self.option_fill not in OPTION_FILLS:
+            raise ValueError(f"option_fill must be one of {OPTION_FILLS}")
         names = [name for name, _ in self.vix_scales]
         if names and set(names) != set(DTE_BUCKETS):
             raise ValueError(f"vix_scales must cover {DTE_BUCKETS}")
@@ -214,14 +218,42 @@ def _model_premium(
     return prem, iv, t_vol, t_carry, dte
 
 
+def _quote_price(ohlc: tuple[float, float, float, float], side: str, mode: str, *, at_open: bool) -> float:
+    """Price a real option fill.
+
+    A fill at the minute's open (a market order, or a stop gapped through) stays at the
+    open in every mode. A stop that triggers inside the minute is priced from that
+    minute's bar: the open, the worse of open and close, or the high (buy) / low (sell).
+    """
+    open_, high, low, close = ohlc
+    if at_open or mode == "minute_open":
+        return float(open_)
+    if mode == "adverse":
+        return float(max(open_, close) if side == "BUY" else min(open_, close))
+    return float(high if side == "BUY" else low)
+
+
 def _taken_premium(
-    model: float, *, cfg: OptionModelConfig, tape: PremiumTape | None, expiry: date, strike: float, kind: str, when: int
+    model: float, *, cfg: OptionModelConfig, tape: PremiumTape | None, expiry: date, strike: float, kind: str,
+    when: int, side: str, at_open: bool,
 ) -> tuple[float, str]:
-    """Real 1m open when the tape has this contract at this minute; otherwise the model."""
+    """Real premium for this minute when the tape has it; otherwise the model.
+
+    `minute_open` uses the 1m open. A stop that fires inside the minute therefore
+    buys the option at the price from before the breakout. `adverse` and `worst`
+    move that fill through the minute. Market fills stay at the open.
+    """
     if cfg.real_premiums and tape is not None:
-        real = tape.premium_at(expiry, strike, kind, when)
-        if real is not None:
-            return float(real), "real"
+        ohlc = None
+        bar_at = getattr(tape, "bar_at", None)
+        if bar_at is not None:
+            ohlc = bar_at(expiry, strike, kind, when)
+        if ohlc is None:
+            real = tape.premium_at(expiry, strike, kind, when)
+            if real is not None:
+                ohlc = (float(real), float(real), float(real), float(real))
+        if ohlc is not None:
+            return _quote_price(ohlc, side, cfg.option_fill, at_open=at_open), "real"
         return model, "modelled"
     return model, "model"
 
@@ -450,7 +482,7 @@ def _one_trade(
         )
         entry_prem, entry_source = _taken_premium(
             entry_model, cfg=cfg, tape=tape, expiry=contract.expiry, strike=contract.strike,
-            kind=contract.kind, when=trade.entry_time,
+            kind=contract.kind, when=trade.entry_time, side="BUY", at_open=trade.entry_at_open,
         )
         if held_past:
             intrinsic = max(exit_spot - contract.strike, 0.0) if contract.kind == "CE" else max(contract.strike - exit_spot, 0.0)
@@ -465,7 +497,7 @@ def _one_trade(
             )
             exit_prem, exit_source = _taken_premium(
                 exit_model, cfg=cfg, tape=tape, expiry=contract.expiry, strike=contract.strike,
-                kind=contract.kind, when=exit_time,
+                kind=contract.kind, when=exit_time, side="SELL", at_open=trade.exit_at_open,
             )
     except PricingError as exc:
         return {

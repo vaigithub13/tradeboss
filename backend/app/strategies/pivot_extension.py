@@ -69,6 +69,16 @@ class PivotExtension(PinePort):
         flat = ctx.position.is_flat
         if not ((flat and pl is not None) or (not flat and ph is not None)):
             return []
+        # TradingView does not turn stop=na into a market order. The entry is
+        # skipped and the previous order with that id stays working. realistic
+        # keeps the script's reading: a missing stop is a market order.
+        if self.execution == "tv_parity":
+            signals = []
+            if ph is not None:
+                signals.append(self.entry("BUY", ph + self.tick, "LE"))
+            if pl is not None:
+                signals.append(self.entry("SELL", pl - self.tick, "SE"))
+            return self.arm(ctx, signals) if signals else []
         return self.arm(ctx, [
             self.entry("BUY", None if ph is None else ph + self.tick, "LE"),
             self.entry("SELL", None if pl is None else pl - self.tick, "SE"),

@@ -77,7 +77,7 @@ class OptionHistoryStore:
 
     def __init__(self, base_dir: Path) -> None:
         self.base_dir = base_dir
-        self._opens: dict[tuple[date, float, str], dict[int, float]] = {}
+        self._bars: dict[tuple[date, float, str], dict[int, tuple[float, float, float, float]]] = {}
 
     def _pq(self, expiry: date) -> Path:
         return self.base_dir / f"NIFTY_{expiry.isoformat()}.parquet"
@@ -171,14 +171,19 @@ class OptionHistoryStore:
 
     def premium_at(self, expiry: date, strike: float, kind: str, time: int) -> float | None:
         """1m open of this contract at `time` (bar start), or None when that minute is not stored."""
+        bar = self.bar_at(expiry, strike, kind, time)
+        return None if bar is None else bar[0]
+
+    def bar_at(self, expiry: date, strike: float, kind: str, time: int) -> tuple[float, float, float, float] | None:
+        """1m open, high, low, close at `time`, or None when that minute is not stored."""
         key = (expiry, float(strike), kind)
-        cached = self._opens.get(key)
+        cached = self._bars.get(key)
         if cached is None:
-            cached = self._load_opens(expiry, float(strike), kind)
-            self._opens[key] = cached
+            cached = self._load_bars(expiry, float(strike), kind)
+            self._bars[key] = cached
         return cached.get(int(time))
 
-    def _load_opens(self, expiry: date, strike: float, kind: str) -> dict[int, float]:
+    def _load_bars(self, expiry: date, strike: float, kind: str) -> dict[int, tuple[float, float, float, float]]:
         path = self._pq(expiry)
         if not path.exists():
             return {}
@@ -186,12 +191,13 @@ class OptionHistoryStore:
         con = duckdb.connect()
         try:
             rows = con.execute(
-                f"SELECT time, open FROM read_parquet('{q}') WHERE kind = ? AND abs(strike - ?) < 1e-6",
+                f"SELECT time, open, high, low, close FROM read_parquet('{q}') "
+                "WHERE kind = ? AND abs(strike - ?) < 1e-6",
                 [kind, strike],
             ).fetchall()
         finally:
             con.close()
-        return {int(t): float(o) for t, o in rows}
+        return {int(t): (float(o), float(h), float(lo), float(c)) for t, o, h, lo, c in rows}
 
     def expiries(self) -> list[date]:
         if not self.base_dir.is_dir():

@@ -99,6 +99,15 @@ def test_faithful_flat_pivot_low_is_a_market_long_and_a_stop_short() -> None:
     assert "09:25" not in [t for t, *_ in _placed(res)]
 
 
+def test_tv_parity_leaves_a_missing_stop_working_instead_of_sending_a_market_order() -> None:
+    res = _go(
+        PivotExtension(left_bars=1, right_bars=1, execution="tv_parity"),
+        _pivot_rows(), step=5, timeframe="5m",
+    )
+    assert _placed(res) == [("09:30", "SELL", "SL", 7.95)]
+    assert fills(res) == []
+
+
 def test_faithful_ignores_a_pivot_high_while_flat() -> None:
     rows = [(4, 5, 4, 4), (4, 9, 4, 4), (4, 6, 4, 4)]
     res = _go(PivotExtension(left_bars=1, right_bars=1), rows, step=5, timeframe="5m")

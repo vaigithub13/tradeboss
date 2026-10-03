@@ -12,6 +12,7 @@ from app.options.model import (
     HISTORY_START,
     MODEL_ONLY_WARNING,
     MODELLED_FILL_WARNING,
+    OptionModelConfig,
     load_option_model,
 )
 from app.options.time import years_to_expiry
@@ -87,6 +88,45 @@ def test_default_overlay_records_v1_and_prices_with_the_dte_scale() -> None:
     assert out.option.counters["modelled_fills"] == 2 and out.option.counters["real_fills"] == 0
     assert out.option.premium_source["modelled"]["trades"] == 1
     assert out.option.premium_source["real"]["trades"] == 0
+
+
+class BarTape:
+    """One option minute: open 80, high 100, low 70, close 90."""
+
+    def __init__(self, expiry: date, strike: float, kind: str, times: list[int]) -> None:
+        self.expiry, self.strike, self.kind, self.times = expiry, float(strike), kind, set(times)
+
+    def premium_at(self, expiry: date, strike: float, kind: str, time: int) -> float | None:
+        bar = self.bar_at(expiry, strike, kind, time)
+        return None if bar is None else bar[0]
+
+    def bar_at(self, expiry: date, strike: float, kind: str, time: int):
+        if (expiry, float(strike), kind, int(time)) in {(self.expiry, self.strike, self.kind, t) for t in self.times}:
+            return (80.0, 100.0, 70.0, 90.0)
+        return None
+
+
+def test_a_stop_inside_the_minute_is_not_filled_at_the_option_open() -> None:
+    """minute_open buys the pre-breakout open. adverse and worst pay through the minute.
+    A market fill at the open stays at 80 in every mode."""
+    fill, ex, index, vix = _oct5()
+    contract = choose_contract(
+        "LONG", 25010, date(2026, 10, 5), calendar=CAL, lots=LOTS, steps=STEPS,
+    )
+    tape = BarTape(contract.expiry, contract.strike, contract.kind, [fill, ex])
+    inside = trade(entry=(fill, 25010), exit=(ex, 25060), entry_at_open=False, exit_at_open=False)
+    at_open = trade(entry=(fill, 25010), exit=(ex, 25060))
+    shipped = load_option_model()
+    for mode, entry, exit_ in (
+        ("minute_open", 80.0, 80.0),
+        ("adverse", 90.0, 80.0),
+        ("worst", 100.0, 70.0),
+    ):
+        cfg = OptionModelConfig(**{**shipped.to_dict(), "vix_scales": shipped.vix_scales, "option_fill": mode})
+        row = estimate([inside], index, vix, config=cfg, tape=tape).option.trades[0]
+        assert (row["entry_premium"], row["exit_premium"]) == (entry, exit_), mode
+        opened = estimate([at_open], index, vix, config=cfg, tape=tape).option.trades[0]
+        assert (opened["entry_premium"], opened["exit_premium"]) == (80.0, 80.0), mode
 
 
 def test_real_bar_is_the_fill_and_a_missing_bar_is_flagged_modelled() -> None:
@@ -184,6 +224,7 @@ def test_store_premium_at_is_the_open_of_that_minute(tmp_path) -> None:
         "t": t * 1000, "open": 80.0, "high": 81.0, "low": 79.0, "close": 80.5, "volume": 10, "oi": None,
     }], "test")
     assert store.premium_at(exp, 25000, "CE", t) == 80.0
+    assert store.bar_at(exp, 25000, "CE", t) == (80.0, 81.0, 79.0, 80.5)
     assert store.premium_at(exp, 25000, "CE", t + 60) is None
     assert store.premium_at(exp, 25050, "CE", t) is None
     assert store.premium_at(exp, 25000, "PE", t) is None

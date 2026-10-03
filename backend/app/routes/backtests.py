@@ -11,6 +11,7 @@ from app.backtest.execute import execute_run
 from app.backtest.gitstate import read_git_state
 from app.backtest.jobs import JobBusy, JobService
 from app.backtest.runs import RunNotFound, RunStore
+from app.backtest.walkforward import last_chosen_params
 from app.config import settings
 
 router = APIRouter(prefix="/api")
@@ -60,6 +61,37 @@ def _public(row: dict[str, Any], *, full: bool) -> dict[str, Any]:
 @router.get("/backtests/strategies")
 def list_strategies() -> dict[str, Any]:
     return {"strategies": strategy_catalog()}
+
+
+@router.post("/backtests/holdout", status_code=202)
+def start_holdout(body: dict[str, Any], jobs: JobService = Depends(get_jobs)) -> dict[str, str]:
+    """One frozen config on the fixed holdout. The peek is counted before the engine starts."""
+    try:
+        if body.get("from_run"):
+            row = jobs.store.get(str(body["from_run"]))
+            params = last_chosen_params(row.get("result"))
+            if params is None:
+                raise RunRequestError("that walk-forward has no chosen params")
+            cfg = row["config"]
+            body = {
+                "kind": "holdout",
+                "strategy": cfg["strategy"],
+                "params": params,
+                "symbol": cfg.get("symbol", "NIFTY50"),
+                "timeframe": cfg.get("timeframe", "5m"),
+                "sessions": cfg.get("sessions", ["normal", "weekend_full"]),
+                "mode": "options",
+                "strike_offset": cfg.get("strike_offset", 0),
+                "slippage_points": cfg.get("slippage_points", 1.0),
+            }
+        job_id = jobs.start(body)
+    except RunRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except RunNotFound as exc:
+        raise HTTPException(status_code=404, detail="run not found") from exc
+    except JobBusy as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return {"id": job_id}
 
 
 @router.post("/backtests", status_code=202)

@@ -70,6 +70,8 @@ class _Open:
     gap: bool = False
     ambiguous: bool = False
     optimistic: bool = False
+    entry_at_open: bool = True
+    exit_at_open: bool = True
 
 
 class BacktestBroker:
@@ -315,7 +317,10 @@ class BacktestBroker:
         self._working[order.id] = order
         if reason == "end_of_data":
             self.counters["end_of_data_exits"] += 1
-        self._execute(order, price, t, gap=False, ambiguous=False, at_open=True, base_s=60, reason=reason)
+        # Square-off fills at the 15:15 open. Session-end and end-of-data fill at a close.
+        self._execute(
+            order, price, t, gap=False, ambiguous=False, at_open=(reason == "square_off"), base_s=60, reason=reason,
+        )
 
     # ------------------------------------------------------------------ executing a fill
     def _execute(self, order: Order, raw: float, t: int, *, gap: bool, ambiguous: bool, at_open: bool, base_s: int,
@@ -377,12 +382,13 @@ class BacktestBroker:
             charge(tr, units)
             flag(tr)
             self.lots += sign * closing
+            tr.exit_at_open = tr.exit_at_open and at_open
             if self.lots == 0:
                 self._finish(tr, t, exit_reason, exit_tag)
         if opening:
             if self.lots == 0:
                 self.lot_size = self.lot_resolver(day)
-                self._open = _Open(sign, t, order.tag, self.lot_size)
+                self._open = _Open(sign, t, order.tag, self.lot_size, entry_at_open=at_open)
                 self._avg = Decimal("0")
             tr = self._open
             assert tr is not None
@@ -468,6 +474,8 @@ class BacktestBroker:
             gap=tr.gap,
             ambiguous=tr.ambiguous,
             optimistic=tr.optimistic,
+            entry_at_open=tr.entry_at_open,
+            exit_at_open=tr.exit_at_open,
         ))
         self._open = None
         self._avg = Decimal("0")

@@ -255,7 +255,7 @@ def last_chosen_params(result: dict[str, Any] | None) -> dict[str, Any] | None:
 def parse_walk_forward(body: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "kind", "strategy", "symbol", "timeframe", "start", "end", "sessions",
-        "mode", "strike_offset", "slippage_points", "train_months", "test_months",
+        "mode", "strike_offset", "slippage_points", "option_fill", "train_months", "test_months",
         "step_months", "min_trades", "max_combinations", "include_forward", "grid",
     }
     extra = sorted(set(body) - allowed)
@@ -303,6 +303,9 @@ def parse_walk_forward(body: dict[str, Any]) -> dict[str, Any]:
     slip = body.get("slippage_points", 1.0)
     if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
         raise RunRequestError("slippage_points must be a number >= 0")
+    option_fill = body.get("option_fill", "minute_open")
+    if option_fill not in ("minute_open", "adverse", "worst"):
+        raise RunRequestError("option_fill must be minute_open, adverse or worst")
     sessions = _sessions(body.get("sessions", ["normal", "weekend_full"]))
     grid = _expand_grid(strategy, body.get("grid"), timeframe, max_combinations)
     windows = build_windows(start, research_end, train_months, test_months, step_months)
@@ -323,6 +326,7 @@ def parse_walk_forward(body: dict[str, Any]) -> dict[str, Any]:
         "mode": "options",
         "strike_offset": offset,
         "slippage_points": float(slip),
+        "option_fill": option_fill,
         "train_months": train_months,
         "test_months": test_months,
         "step_months": step_months,
@@ -416,6 +420,7 @@ def child_backtest_config(config: dict[str, Any], params: dict[str, Any], start:
         "mode": "options",
         "strike_offset": config["strike_offset"],
         "slippage_points": config["slippage_points"],
+        "option_fill": config.get("option_fill", "minute_open"),
     }
 
 

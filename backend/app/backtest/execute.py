@@ -16,10 +16,13 @@ from app.backtest.costs import get_cost_model, load_default_cost_table
 from app.backtest.curve import equity_and_drawdown
 from app.backtest.engine import BacktestConfig, run_backtest
 from app.backtest.expiry import load_default_calendar
+from app.backtest.holdout import holdout_record, load_holdout, resolve_period
 from app.backtest.lots import load_default_lot_table
 from app.backtest.metrics import TradeRecord
-from app.backtest.result import BacktestResult, Trade
+from app.backtest.result import BacktestResult, Trade, digest
+from app.backtest.runs import RunStore
 from app.backtest.sources import StoreSource
+from app.backtest.walkforward import child_backtest_config, run_walk_forward
 from app.config import settings
 from app.data.store import CandleStore
 from app.options.history import default_history_store
@@ -30,7 +33,11 @@ VIX_SYMBOL = "NSE_INDEX_India_VIX"
 Report = Callable[[dict[str, Any]], None]
 
 
-def execute_run(config: dict[str, Any], report: Report) -> dict[str, Any]:
+def execute_run(config: dict[str, Any], report: Report, *, hash_data: bool = True) -> dict[str, Any]:
+    if config.get("kind") == "walk_forward":
+        return execute_walk_forward(config, report)
+    if config.get("kind") == "holdout":
+        return execute_holdout(config, report)
     strategy = build_strategy(config)
     source = StoreSource(CandleStore(settings.candles_dir), config["symbol"])
     engine_cfg = _engine_config(config)
@@ -54,16 +61,73 @@ def execute_run(config: dict[str, Any], report: Report) -> dict[str, Any]:
         report({"phase": "overlay", "done": len(result.trades), "total": len(result.trades)})
 
     view = _view(result, option, config)
+    view["holdout"] = holdout_record(_peek_count())
     warnings = _warnings(result, option)
     return {
         "run_id": result.run_id,
         "overlay_run_id": None if option is None else option.run_id,
         "model_version": None if option is None else option.option.settings.get("model_version"),
         "cost_rows": [] if option is None else _cost_rows(option.option.trades),
-        "data_hash": _data_hash(result, vix_bars, config),
+        "data_hash": _data_hash(result, vix_bars, config) if hash_data else None,
         "warnings": warnings,
         "result": view,
     }
+
+
+def execute_walk_forward(config: dict[str, Any], report: Report) -> dict[str, Any]:
+    """One saved walk-forward. Inner runs skip the per-combo file hash; the research hash is once."""
+    spec = dict(config)
+    spec["start"] = date.fromisoformat(config["start"])
+    spec["research_end"] = date.fromisoformat(config["research_end"])
+    if config.get("include_forward"):
+        _first, last = CandleStore(settings.candles_dir).time_range(config["symbol"])
+        last_session = datetime.fromtimestamp(last, IST).date()
+        period = resolve_period(last_session, include_forward=True)
+        spec["forward_end"] = period.forward_end
+    peeks = _peek_count()
+
+    def evaluate(params: dict[str, Any], start: date, end: date) -> dict[str, Any]:
+        child = child_backtest_config(config, params, start, end)
+        payload = execute_run(child, report, hash_data=False)
+        view = payload["result"]
+        option = view["summary"]["option"]
+        ordered = sorted(view["trades"], key=lambda row: (row["exit_time"], row["entry_time"]))
+        pnls = [float(row["option"]["net_pnl"]) for row in ordered if row.get("option")]
+        return {
+            "net_pnl": float(option["net_pnl"]),
+            "max_drawdown": float(option["max_drawdown"]),
+            "trades": int(option["trades"]),
+            "pnls": pnls,
+        }
+
+    result = run_walk_forward(spec, evaluate, peeks=peeks, report=report)
+    research_end = date.fromisoformat(config["research_end"])
+    return {
+        "run_id": digest({
+            "kind": "walk_forward",
+            "config": {key: config[key] for key in ("strategy", "grid", "start", "research_end", "slippage_points")},
+            "windows": result["windows"],
+            "summary": result["summary"]["option"],
+        }),
+        "overlay_run_id": None,
+        "model_version": _shipped_model_version(),
+        "cost_rows": _range_cost_rows(date.fromisoformat(config["start"]), research_end),
+        "data_hash": research_data_hash(config),
+        "warnings": list(result["warnings"]),
+        "result": result,
+    }
+
+
+def execute_holdout(config: dict[str, Any], report: Report) -> dict[str, Any]:
+    """Peek first, then one frozen run. A failure still leaves the peek recorded."""
+    start, end = load_holdout()
+    RunStore(settings.data_dir / "backtests.sqlite").accept_holdout(start.isoformat(), end.isoformat())
+    child = {key: value for key, value in config.items() if key != "kind"}
+    child["start"] = start.isoformat()
+    child["end"] = end.isoformat()
+    payload = execute_run(child, report)
+    payload["result"]["kind"] = "holdout"
+    return payload
 
 
 def _engine_config(config: dict[str, Any]) -> BacktestConfig:
@@ -94,6 +158,7 @@ def _model(config: dict[str, Any]) -> OptionModelConfig:
         vix_scale=shipped.vix_scale,
         time_basis=shipped.time_basis,
         slippage_points=float(config["slippage_points"]),
+        option_fill=str(config.get("option_fill", "minute_open")),
         tick=shipped.tick,
         min_premium=shipped.min_premium,
         snap_tick=shipped.snap_tick,
@@ -264,6 +329,70 @@ def _data_hash(result: BacktestResult, vix_bars: list[dict[str, Any]], config: d
             else:
                 digest.update(b"missing")
     return digest.hexdigest()
+
+
+def research_data_hash(config: dict[str, Any]) -> str:
+    """Hash candles and option files inside the research span. Holdout files are not opened."""
+    start = date.fromisoformat(config["start"])
+    end = date.fromisoformat(config["research_end"])
+    digest_ = hashlib.sha256()
+    store = CandleStore(settings.candles_dir)
+    from_time = int(datetime(start.year, start.month, start.day, tzinfo=IST).timestamp()) - 2 * 86400
+    to_time = int(datetime(end.year, end.month, end.day, tzinfo=IST).timestamp()) + 86400
+    for symbol in (NIFTY_SYMBOL, VIX_SYMBOL):
+        bars, _minutes = store.load(symbol, from_time=from_time, to_time=to_time, session_types=config["sessions"])
+        if bars:
+            arr = np.array([[b["time"], b["close"]] for b in bars], dtype=np.float64)
+            digest_.update(symbol.encode())
+            digest_.update(arr.tobytes())
+    for path in research_option_files(start, end):
+        digest_.update(path.name.encode())
+        if path.exists():
+            digest_.update(path.read_bytes())
+        else:
+            digest_.update(b"missing")
+    return digest_.hexdigest()
+
+
+def research_option_files(start: date, end: date, root: Path | None = None) -> list[Path]:
+    """Option files whose expiry falls in the research span. Nothing after `end`."""
+    base = default_history_store().base_dir if root is None else root
+    out: list[Path] = []
+    if base.is_dir():
+        for path in sorted(base.glob("NIFTY_*.parquet")):
+            try:
+                expiry = date.fromisoformat(path.stem[6:])
+            except ValueError:
+                continue
+            if start - timedelta(days=7) <= expiry <= end:
+                out.append(path)
+    if root is None:
+        missing = base / "NIFTY_2024-12-26.parquet"
+        if start <= date(2024, 12, 26) <= end and missing not in out:
+            out.append(missing)
+    return out
+
+
+def _peek_count() -> int:
+    start, end = load_holdout()
+    return RunStore(settings.data_dir / "backtests.sqlite").holdout_peeks(start.isoformat(), end.isoformat())
+
+
+def _shipped_model_version() -> str | None:
+    from app.options.model import load_option_model
+
+    return load_option_model().model_version
+
+
+def _range_cost_rows(start: date, end: date) -> list[dict[str, Any]]:
+    rows = load_default_cost_table().to_dict()["rows"]
+    out: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        effective = date.fromisoformat(row["effective_from"])
+        nxt = date.fromisoformat(rows[index + 1]["effective_from"]) if index + 1 < len(rows) else date.max
+        if effective <= end and start < nxt:
+            out.append(row)
+    return out
 
 
 def _option_files(config: dict[str, Any]) -> list[Path]:

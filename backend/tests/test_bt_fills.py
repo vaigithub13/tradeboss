@@ -159,11 +159,19 @@ def test_4c_short_stop_gapped_up_fills_at_the_open() -> None:
     assert t.direction == "SHORT" and t.exit_price == 105.0 and t.net_pnl == -5.0 and t.gap is True
 
 
+def test_a_stop_touched_inside_the_bar_is_not_priced_as_the_open() -> None:
+    rows = [(100, 100, 100, 100), (100, 103, 99, 101), (101, 101, 101, 101)]
+    res = run(Scripted({0: [buy(type="SL", price=102.0)]}), day_bars(MON, rows))
+    (t,) = res.trades
+    assert t.entry_price == 102.0 and t.entry_at_open is False and t.gap is False
+
+
 def test_4d_stop_entry_gapped_through_fills_at_the_open() -> None:
     rows = [(100, 100, 100, 100), (108, 109, 107, 108.5), (108.5, 109, 108, 108.5)]
     res = run(Scripted({0: [buy(type="SL", price=105.0)]}), day_bars(MON, rows))
     assert fills(res)[0] == ("09:16", "BUY", 108.0)
     assert kinds(res, "fill")[0]["gap"] is True
+    assert res.trades[0].entry_at_open is True
 
 
 def test_4e_limit_target_gapped_up_fills_at_the_better_open() -> None:

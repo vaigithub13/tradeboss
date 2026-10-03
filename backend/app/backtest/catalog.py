@@ -87,7 +87,7 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
 
 _TOP = {
     "strategy", "params", "symbol", "timeframe", "start", "end", "sessions",
-    "mode", "strike_offset", "slippage_points",
+    "mode", "strike_offset", "slippage_points", "option_fill",
 }
 
 
@@ -155,6 +155,9 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     slip = body.get("slippage_points", 0.5)
     if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
         raise RunRequestError("slippage_points must be a number >= 0")
+    option_fill = body.get("option_fill", "minute_open")
+    if option_fill not in ("minute_open", "adverse", "worst"):
+        raise RunRequestError("option_fill must be minute_open, adverse or worst")
     return {
         "strategy": strategy,
         "params": params,
@@ -166,6 +169,7 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
         "mode": mode,
         "strike_offset": offset,
         "slippage_points": float(slip),
+        "option_fill": option_fill,
     }
 
 

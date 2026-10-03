@@ -7,6 +7,7 @@ from collections.abc import Callable
 from typing import Any
 
 from app.backtest.catalog import parse_config
+from app.backtest.walkforward import parse_holdout, parse_walk_forward
 from app.backtest.result import canonical
 from app.backtest.runs import DIRTY_WARNING, GitState, RunStore
 
@@ -30,7 +31,12 @@ class JobService:
         with self._lock:
             if self._active is not None:
                 raise JobBusy("a backtest is already running")
-            config = parse_config(body)
+            if body.get("kind") == "walk_forward":
+                config = parse_walk_forward(body)
+            elif body.get("kind") == "holdout":
+                config = parse_holdout(body)
+            else:
+                config = parse_config(body)
             run_id = self.store.create(config, self.git_reader())
             self._active = run_id
         threading.Thread(target=self._run, args=(run_id,), daemon=True).start()

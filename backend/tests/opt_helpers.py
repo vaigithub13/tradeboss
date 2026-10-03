@@ -37,6 +37,8 @@ def trade(
     lot_size: int = 65,
     gap: bool = False,
     optimistic: bool = False,
+    entry_at_open: bool = True,
+    exit_at_open: bool = True,
 ) -> Trade:
     units = lots * lot_size
     return Trade(
@@ -47,6 +49,7 @@ def trade(
         gross_pnl=0.0, charges={}, charges_total=0.0, slippage_cost=0.0, net_pnl=0.0,
         exit_reason="market", entry_tag="", exit_tag="",
         gap=gap, ambiguous=False, optimistic=optimistic,
+        entry_at_open=entry_at_open, exit_at_open=exit_at_open,
     )
 
 
