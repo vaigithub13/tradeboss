@@ -307,4 +307,44 @@ Left drawer stays open while the chart stays mounted. Form: strategy catalog (th
 | 1.0 | 6,888.04 | 81,702.75 |
 | 1.5 | −24,754.99 | 1,04,512.76 |
 
-The 0.5 row matches the 3b sample. Walk-forward (3c-b) is not started.
+The 0.5 row matches the 3b sample. Walk-forward is phase 3c-b, below.
+
+## Phase 3c-a follow-up — Spread recorder (built, left off)
+
+Addition to the phase 2b feed. `SPREAD_RECORDER_ENABLED` defaults to **off**, so the live subscription list is unchanged until it is turned on. With it on, the same connection also takes the nearest weekly Nifty expiry, ATM ± 2 strikes, call and put (10 contracts, full mode). A new ATM has to hold for 2 seconds. The previous set stays until each new contract has printed a book, or 30 seconds pass. Option keys stay at or under 20; a further move drops the oldest set. Chart keys keep their own cap of 12 and are listed first.
+
+Every depth update is written to `data/spreads/YYYY-MM-DD.parquet` (a same-day restart continues in `YYYY-MM-DD.part-N.parquet`), inside the existing 09:00–16:05 gate and only while the feed says a segment is open. The row is the feed clock, best bid and ask and their quantities, the spread, the Nifty last price, and the lot size from the lot table. From the five levels it also stores the average fill for buying and for selling 1 lot and 2 lots, as points away from the mid, and whether level 1 alone covers 1 lot. A quantity the five levels cannot fill is null.
+
+The daily report (`uv run python -m scripts.spread_report --date YYYY-MM-DD`, and once when the feed stops) takes percentiles from **one snapshot per contract per second** — the last update in that second — so a busy second is not over-weighted. Median, 90th percentile, count, and the uncovered count, by 15-minute bin, DTE (0, 1, 2, 3–4, 5+), and moneyness (ATM, ITM1, ITM2, OTM1, OTM2, outside), plus the fast-minute slice (Nifty 1m range in the top 10% that day, ties included) and the 5 minutes after the first 1m bar that breaks the 09:15–09:30 range. A cell with fewer than 30 snapshots is marked thin.
+
+**Not built yet.** After 10 sessions the backtest form can offer the measured 1-lot fill cost (buy: ask side, sell: bid side) for that fill's DTE, 15-minute bin, and fast-minute flag, in place of the fixed slippage number. A missing cell keeps the fixed number and warns.
+
+**Tests:** `backend/tests/test_spread_recorder.py`. Written first (collection failed: `app.live.spreads` did not exist), then implemented. Fixture depth frames only. Live service tests still pass with the flag off.
+
+## Phase 3c-b — Walk-forward ✅
+
+Options only, NIFTY50, real premiums, option model v1. Default slippage for a walk-forward is **1.0** points per leg (a normal Run stays at 0.5). Train 6 months, test 2, step 2. Minimum 30 closed train trades. Lots stay 1, mode stays long/short. Slippage is not searched. Grids: EMA fast 5/9/12 × slow 15/21/34 (9), Supertrend ATR 7/10/14 × multiplier 2/3/4 (9), ORB range 5/15/30 (3). A grid over 50 combinations is rejected.
+
+The holdout is frozen in `backend/app/backtest/data/holdout.json` as **2026-07-01 through 2026-10-01**. It does not move when new sessions arrive. Research ends **2026-06-30**. Sessions after 2026-10-01 are the forward period; walk-forward does not read them unless `include_forward` is set, and it never reads the holdout itself. The peek count belongs to that fixed range. Every result records it. The sentence is `final holdout has been run N times`. The final-holdout action confirms, then increments the count before the engine starts. **It was not run.** The count is 0.
+
+A window whose best eligible train net is not positive records `no choice: best train net not positive` and stays flat in its test window (counted, shown). Degradation (test net-per-trade / train net-per-trade) is only for windows with a positive train net-per-trade. Stitched out-of-sample equity appends the chosen test trades and recomputes drawdown on that curve. Compare uses that curve.
+
+**Tests** (`backend/tests/test_walk_forward.py`, `frontend/src/backtest/present.test.ts`): written first. Collection failed with `No module named 'app.backtest.holdout'`; the vitest helpers were missing. Then implemented. Hand example (equity 30, 20, 25, net 25, max drawdown 10, both ratios 1/3, one param change, `walk-forward tried 4 combinations`), minimum trades and ties, a non-positive train staying flat, test-window data not changing the choice, the frozen holdout and a holdout-only file left out of the research hash, peek count surviving a failed second accept, determinism, and the request rejections including a second start (409).
+
+**Walk-forward runs (2026-10-03), defaults, slippage 1.0, research 2024-10-03 through 2026-06-30, 7 windows.** The tree was dirty (`code not committed: may not reproduce`). Holdout peek count stayed 0.
+
+| strategy | OOS option net | OOS max drawdown | OOS trades | combinations | param changes | windows with a choice |
+|---|---:|---:|---:|---:|---:|---|
+| EMA | −3,593.42 | 22,868.03 | 56 | 63 | 0 | 1 of 7 (12/34 on 2026-04-03..2026-06-02; test −3,593.42, degradation −2.74). The other six stayed flat. |
+| Supertrend | −9,112.85 | 46,802.41 | 147 | 63 | 1 | 3 of 7. ATR 14 × 4 then ATR 7 × 4. Test nets −33,149.41, +22,088.96, +1,947.60. Degradations −1.87, 8.62, 0.30. |
+| ORB | 9,739.55 | 42,020.24 | 205 | 21 | 2 | 5 of 7. Range 5, then 15, then 5. Test nets +23,232.90, −2,736.14, +10,447.67, −17,090.13, −4,114.75. The last two windows stayed flat. |
+
+## Phase 4a — Pine ports (code only)
+
+Three SpringPad scripts, from the Pine sources: Pivot Extension, Log XZ, Price Channel. Each has two execution modes. `realistic` is the default: the engine's 15:15 square-off, 1-minute ordering inside a bar, no overnight position. `tv_parity` is only for the TradingView check. The close decided on the 15:15–15:20 bar fills at the next bar's open, including the next session's 09:15 on a 15-minute chart, and a stop and a target inside one bar follow Pine's open→high→low→close or open→low→high→close path.
+
+Pivot Extension `faithful` uses a pivot only on the bar that confirms it. A missing stop is a market order, and the long side updates on a confirmed pivot low while flat, the short side on a confirmed pivot high while in a position. `carried_pivots` is Vaibhav's research variant: stops rest on the most recent confirmed pivot high and pivot low, carried forward. It is named as that variant. Walk-forward's default grid is both variants × 5m and 15m, so the research variant is inside the tried total. Log XZ defaults to RMA(close, 14); a buy is the previous XZ ≤ 0 and the current XZ > 0, and XZ is log(average) one bar ago minus log(average) four bars ago. Price Channel is stop-and-reverse, with the channel including the bar that just closed. 5m and 15m are a walk-forward axis for all three (Log XZ lengths 10 and 14; channel lengths 20 and 40).
+
+**Tests** (`backend/tests/test_pine_ports.py`, and the phase 3a no-look-ahead test on every port in both modes): written first. Collection failed (`app.strategies.log_xz` did not exist). Then implemented. Backend suite: 956 passed, 1 skipped.
+
+**Not run.** TradingView parity (waiting on the trade lists), options at slippage 1.0, walk-forward, and the final holdout.

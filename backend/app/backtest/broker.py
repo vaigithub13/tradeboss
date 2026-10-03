@@ -53,6 +53,8 @@ class Order:
     stop: float | None = None
     target: float | None = None
     ambiguous_in: int | None = None
+    stop_points: float | None = None
+    target_points: float | None = None
 
 
 @dataclass
@@ -85,6 +87,7 @@ class BacktestBroker:
         self._open: _Open | None = None
         self.trades: list[Trade] = []
         self._realized = Decimal("0")
+        self.pyramiding: int | None = None  # 0: an opposite entry reverses, a same-side entry does not add
 
     # ------------------------------------------------------------------ views (for ctx)
     def positions(self) -> PositionView:
@@ -123,7 +126,12 @@ class BacktestBroker:
             side = "SELL" if pos > 0 else "BUY"
             lots = min(signal.qty, abs(pos))
             reduce_only = True
-        elif signal.type in ("LIMIT", "SL") and pos != 0 and (side == "SELL") == (pos > 0):
+        elif (
+            self.pyramiding != 0
+            and signal.type in ("LIMIT", "SL")
+            and pos != 0
+            and (side == "SELL") == (pos > 0)
+        ):
             reduce_only = True  # a resting order against the position only ever reduces it
         if signal.stop is not None or signal.target is not None:
             ref = signal.price if signal.type != "MARKET" and signal.price is not None else ref_price
@@ -135,7 +143,8 @@ class BacktestBroker:
                 self._reject(t, signal, "bad_bracket")
                 return None
         order = Order(self._next_id, side, signal.type, signal.price, lots, signal.tag, signal.oco, reduce_only,
-                      "exit" if reduce_only else "entry", min_t, signal.stop, signal.target)
+                      "exit" if reduce_only else "entry", min_t, signal.stop, signal.target,
+                      stop_points=signal.stop_points, target_points=signal.target_points)
         self._next_id += 1
         self.counters["orders"] += 1
         self._event("order_placed", t, id=order.id, side=side, type=signal.type, price=signal.price, lots=lots,
@@ -210,10 +219,8 @@ class BacktestBroker:
                 return p
         return None
 
-    def on_sub_bar(self, ts: int, op: float, hi: float, lo: float, base_s: int) -> None:
-        if not self._working:
-            return
-        # 1. everything that fills at the open (market orders, gaps)
+    def _fill_opens(self, ts: int, op: float, base_s: int) -> None:
+        """Market orders and gaps, in id order. Each fill can arm a bracket that itself gaps."""
         while True:
             for order in sorted(self._working.values(), key=lambda x: x.id):
                 if order.min_t > ts:
@@ -225,7 +232,12 @@ class BacktestBroker:
                 break
             else:
                 break
-        # 2. orders triggered inside the bar
+
+    def on_sub_bar(self, ts: int, op: float, hi: float, lo: float, base_s: int) -> None:
+        if not self._working:
+            return
+        self._fill_opens(ts, op, base_s)
+        # orders triggered inside the bar
         while self._working:
             cands: list[tuple[tuple[int, float, int], Order, float]] = []
             for order in self._working.values():
@@ -241,6 +253,49 @@ class BacktestBroker:
             _, order, price = cands[0]
             amb = len(cands) > 1 or order.ambiguous_in == ts
             self._execute(order, price, ts, gap=False, ambiguous=amb, at_open=False, base_s=base_s)
+
+    def on_pine_path(self, ts: int, op: float, hi: float, lo: float, cl: float) -> None:
+        """Pine's bar path: green (close >= open) is open→high→low→close, red is open→low→high→close.
+
+        The first resting level on that path fills. Nothing here is flagged ambiguous.
+        """
+        self._fill_opens(ts, op, 60)
+        legs = [(op, hi), (hi, lo), (lo, cl)] if cl >= op else [(op, lo), (lo, hi), (hi, cl)]
+        for start, end in legs:
+            cursor = start
+            for _ in range(32):
+                hit = self._nearest_on_leg(ts, cursor, end)
+                if hit is None:
+                    break
+                order, price = hit
+                self._execute(order, price, ts, gap=False, ambiguous=False, at_open=False, base_s=60, same_bar=True)
+                if price == cursor or price == end:
+                    break
+                cursor = price
+
+    def _nearest_on_leg(self, ts: int, cursor: float, end: float) -> tuple[Order, float] | None:
+        if end == cursor:
+            return None
+        rising = end > cursor
+        best: tuple[tuple[float, int], Order, float] | None = None
+        for order in self._working.values():
+            if order.min_t > ts or order.price is None or order.type == "MARKET":
+                continue
+            level = order.price
+            if order.type == "SL":
+                reached = (rising and cursor < level <= end) or (not rising and end <= level < cursor)
+            elif order.side == "BUY":
+                reached = (not rising) and end < level < cursor
+            else:
+                reached = rising and cursor < level < end
+            if not reached:
+                continue
+            key = (abs(level - cursor), order.id)
+            if best is None or key < best[0]:
+                best = (key, order, level)
+        if best is None:
+            return None
+        return best[1], best[2]
 
     def fill_now(self, order_id: int, price: float, t: int, children_from: int) -> None:
         """`same_bar_close` mode: fill a MARKET order at the signal bar's close (optimistic)."""
@@ -264,7 +319,8 @@ class BacktestBroker:
 
     # ------------------------------------------------------------------ executing a fill
     def _execute(self, order: Order, raw: float, t: int, *, gap: bool, ambiguous: bool, at_open: bool, base_s: int,
-                 reason: str | None = None, optimistic: bool = False, children_from: int | None = None) -> None:
+                 reason: str | None = None, optimistic: bool = False, children_from: int | None = None,
+                 same_bar: bool = False) -> None:
         self._working.pop(order.id, None)
         pos = self.lots
         lots = order.lots
@@ -274,10 +330,20 @@ class BacktestBroker:
                 self._event("order_cancelled", t, id=order.id, side=order.side, tag=order.tag, reason="position_closed")
                 return
             lots = min(lots, abs(pos))
-        price = raw if order.type == "LIMIT" else self.slippage.apply(order.side, raw)
         sign = 1 if order.side == "BUY" else -1
-        closing = min(lots, abs(pos)) if pos != 0 and (sign > 0) != (pos > 0) else 0
-        opening = lots - closing
+        opposite = pos != 0 and (sign > 0) != (pos > 0)
+        if self.pyramiding == 0 and not order.reduce_only and pos != 0 and not opposite:
+            self.counters["cancelled"] += 1
+            self._event("order_cancelled", t, id=order.id, side=order.side, tag=order.tag, reason="pyramiding")
+            return
+        price = raw if order.type == "LIMIT" else self.slippage.apply(order.side, raw)
+        if self.pyramiding == 0 and not order.reduce_only and opposite:
+            closing = abs(pos)
+            opening = order.lots
+            lots = closing + opening
+        else:
+            closing = min(lots, abs(pos)) if opposite else 0
+            opening = lots - closing
         day = ist_date(t)
         exit_reason = reason or _REASON[order.type]
         exit_tag = reason if reason else order.tag
@@ -331,21 +397,32 @@ class BacktestBroker:
         if order.oco:
             for other in [o for o in self._working.values() if o.oco == order.oco]:
                 self._drop(other, t, "oco")
-        if opening and (order.stop is not None or order.target is not None):
-            self._bracket(order, opening, t, at_open, base_s, children_from)
+        if opening and (
+            order.stop is not None or order.target is not None
+            or order.stop_points is not None or order.target_points is not None
+        ):
+            self._bracket(order, opening, t, at_open, base_s, children_from, raw, same_bar)
         if self.lots == 0:
             for other in [o for o in sorted(self._working.values(), key=lambda x: x.id) if o.reduce_only]:
                 self._drop(other, t, "position_closed")
 
-    def _bracket(self, order: Order, lots: int, t: int, at_open: bool, base_s: int, children_from: int | None) -> None:
+    def _bracket(self, order: Order, lots: int, t: int, at_open: bool, base_s: int, children_from: int | None,
+                 fill_price: float, same_bar: bool = False) -> None:
         side = "SELL" if order.side == "BUY" else "BUY"
         label = f"bracket:{order.id}"
-        for kind, level in (("stop", order.stop), ("target", order.target)):
+        long = order.side == "BUY"
+        stop = order.stop
+        target = order.target
+        if order.stop_points is not None:
+            stop = round(fill_price - order.stop_points, 2) if long else round(fill_price + order.stop_points, 2)
+        if order.target_points is not None:
+            target = round(fill_price + order.target_points, 2) if long else round(fill_price - order.target_points, 2)
+        for kind, level in (("stop", stop), ("target", target)):
             if level is None:
                 continue
             if children_from is not None:
                 min_t, amb_in = children_from, None
-            elif at_open:
+            elif same_bar or at_open:
                 min_t, amb_in = t, None
             elif kind == "stop":
                 min_t, amb_in = t, t  # works in the entry bar, but the order of events inside it is unknown

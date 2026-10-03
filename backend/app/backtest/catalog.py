@@ -9,7 +9,10 @@ from app.backtest.contracts import Strategy
 from app.backtest.engine import INTRADAY_MIN
 from app.data.sessions import SESSION_TYPES
 from app.strategies.ema_cross import EmaCrossover
+from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
+from app.strategies.pivot_extension import PivotExtension
+from app.strategies.price_channel import PriceChannel
 from app.strategies.supertrend_flip import SupertrendFlip
 
 NIFTY_SYMBOL = "NIFTY50"
@@ -50,6 +53,33 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
         OpeningRangeBreakout,
         {
             "range_minutes": _Field("int", 15, min_value=1),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "pivot_extension": (
+        PivotExtension,
+        {
+            "left_bars": _Field("int", 4, min_value=1),
+            "right_bars": _Field("int", 2, min_value=1),
+            "variant": _Field("str", "faithful", choices=("faithful", "carried_pivots")),
+            "execution": _Field("str", "realistic", choices=("realistic", "tv_parity")),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "log_xz": (
+        LogXZ,
+        {
+            "z_length": _Field("int", 14, min_value=1),
+            "ma": _Field("str", "rma", choices=("rma", "ema")),
+            "execution": _Field("str", "realistic", choices=("realistic", "tv_parity")),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "price_channel": (
+        PriceChannel,
+        {
+            "length": _Field("int", 20, min_value=1),
+            "execution": _Field("str", "realistic", choices=("realistic", "tv_parity")),
             "lots": _Field("int", 1, min_value=1),
         },
     ),

@@ -31,6 +31,8 @@ class Signal:
     stop: float | None = None
     target: float | None = None
     oco: str | None = None
+    stop_points: float | None = None  # protective distance from the fill; Pine's loss=
+    target_points: float | None = None  # profit distance from the fill; Pine's profit=
 
     def __post_init__(self) -> None:
         if self.side not in SIDES:
@@ -43,8 +45,14 @@ class Signal:
             raise ValueError(f"{self.type} orders need a positive price")
         if self.type == "MARKET" and self.price is not None:
             raise ValueError("MARKET orders take no price")
-        if (self.stop is not None or self.target is not None) and self.side == "EXIT":
+        if self.side == "EXIT" and (
+            self.stop is not None or self.target is not None
+            or self.stop_points is not None or self.target_points is not None
+        ):
             raise ValueError("stop / target are for entries, not EXIT")
+        for name, value in (("stop_points", self.stop_points), ("target_points", self.target_points)):
+            if value is not None and (isinstance(value, bool) or not isinstance(value, (int, float)) or not value > 0):
+                raise ValueError(f"{name} must be a positive number")
 
 
 class Strategy:

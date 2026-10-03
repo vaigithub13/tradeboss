@@ -238,6 +238,7 @@ def run_backtest(
     tf = cfg.timeframe
     intraday = tf in INTRADAY_MIN
     overnight = bool(getattr(strategy, "allow_overnight", False))
+    pine_path = getattr(strategy, "bar_path", None) == "pine_ohlc"
     if not intraday and not overnight:
         raise ConfigError(f"{tf} bars hold positions across sessions: the strategy must set allow_overnight = True")
     if cfg.lot_size is None and (cfg.lot_table is None or not cfg.underlying):
@@ -250,7 +251,7 @@ def run_backtest(
     if sq is not None and overnight:
         sq_active = False
         warnings.append("square_off ignored: this strategy is allowed to carry positions overnight")
-    if base > 1:
+    if base > 1 and not pine_path:
         warnings.append(
             f"source bars are {base}m: orders inside a bar are resolved at {base}m resolution; "
             f"when a stop and a target both fall in one {base}m bar the stop is assumed first (ambiguous)"
@@ -276,6 +277,7 @@ def run_backtest(
 
     broker = BacktestBroker(cost_model=cfg.cost_model, slippage=cfg.slippage, lot_resolver=lot_on, events=events,
                             counters=counters)
+    broker.pyramiding = getattr(strategy, "pyramiding", None)
     history = History()
     frame = candles_to_frame(series.bars)
     hub = IndicatorHub(frame, history)
@@ -308,14 +310,18 @@ def run_backtest(
             on_progress(counters["bars"], max(n - first, 1))
 
         # 1. execution of the orders waiting from earlier decisions
-        for ts, o, h, lo_, c in subs[k]:
-            d = dates[k]
-            if sq_active and d not in anchored and d not in sq_done and _tod(ts) >= sq:  # type: ignore[operator]
-                sq_done.add(d)
-                broker.force_exit(ts, o, "square_off", "square_off")
-            if d in sq_done:
-                continue
-            broker.on_sub_bar(ts, o, h, lo_, base_s)
+        if pine_path:
+            broker.on_pine_path(int(bar["time"]), float(bar["open"]), float(bar["high"]), float(bar["low"]),
+                                float(bar["close"]))
+        else:
+            for ts, o, h, lo_, c in subs[k]:
+                d = dates[k]
+                if sq_active and d not in anchored and d not in sq_done and _tod(ts) >= sq:  # type: ignore[operator]
+                    sq_done.add(d)
+                    broker.force_exit(ts, o, "square_off", "square_off")
+                if d in sq_done:
+                    continue
+                broker.on_sub_bar(ts, o, h, lo_, base_s)
         final = k == n - 1
         if k == n - 1 or dates[k + 1] != dates[k]:
             last_ts, last_c = lasts[k], subs[k][-1][4]

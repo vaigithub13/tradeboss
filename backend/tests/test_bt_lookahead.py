@@ -15,7 +15,10 @@ from app.data.candle import Candle
 from app.indicators import registry
 from app.indicators.frame import candles_to_frame
 from app.strategies.ema_cross import EmaCrossover
+from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
+from app.strategies.pivot_extension import PivotExtension
+from app.strategies.price_channel import PriceChannel
 from app.strategies.supertrend_flip import SupertrendFlip
 from tests.bt_helpers import FRI, MON, THU, TUE, WED, Scripted, cfg, day_bars, flat, ist, random_days, run
 
@@ -48,6 +51,14 @@ STRATEGIES: dict[str, Callable[[], Strategy]] = {
     "supertrend": lambda: SupertrendFlip(atr_length=7, multiplier=2.0),
     "orb": lambda: OpeningRangeBreakout(range_minutes=15),
     "bracket": BracketTrader,
+    "pivot_faithful": lambda: PivotExtension(left_bars=2, right_bars=1),
+    "pivot_carried": lambda: PivotExtension(variant="carried_pivots", left_bars=2, right_bars=1),
+    "log_xz": lambda: LogXZ(z_length=5),
+    "price_channel": lambda: PriceChannel(length=5),
+    "pivot_faithful_tv": lambda: PivotExtension(left_bars=2, right_bars=1, execution="tv_parity"),
+    "pivot_carried_tv": lambda: PivotExtension(variant="carried_pivots", left_bars=2, right_bars=1, execution="tv_parity"),
+    "log_xz_tv": lambda: LogXZ(z_length=5, execution="tv_parity"),
+    "price_channel_tv": lambda: PriceChannel(length=5, execution="tv_parity"),
 }
 
 

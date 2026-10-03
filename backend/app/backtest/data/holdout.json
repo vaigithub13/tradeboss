@@ -1,0 +1,6 @@
+{
+  "start": "2026-07-01",
+  "end": "2026-10-01",
+  "include_forward_period": false,
+  "note": "Fixed final holdout. These dates do not move when new sessions arrive. The peek count belongs to this range. Sessions after the end are the forward period and are off unless a run sets include_forward."
+}
