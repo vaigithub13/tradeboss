@@ -67,6 +67,7 @@ function PineEditor() {
   const [card, setCard] = useState<PineCard | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
+  const [draftErrors, setDraftErrors] = useState<string[]>([]);
   const [plotNote, setPlotNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -79,6 +80,7 @@ function PineEditor() {
     setModelError(null);
     setAccepted(false);
     setDraft(null);
+    setDraftErrors([]);
     setCard(null);
     try {
       const local = await scanPine(source);
@@ -104,6 +106,7 @@ function PineEditor() {
     try {
       const result = await convertPine(source);
       setDraft(result.python);
+      setDraftErrors(result.ready ? [] : result.errors ?? ["draft failed the checks"]);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "conversion failed");
     } finally {
@@ -138,6 +141,7 @@ function PineEditor() {
       {scan && (
         <section className="flex flex-col gap-2">
           <p>Kind: {scan.kind}</p>
+          <p>session {scan.traps.session.status}</p>
           <ul className="grid grid-cols-3 gap-1">
             {TIMEFRAMES.map((tf) => (
               <li key={tf}>
@@ -192,6 +196,9 @@ function PineEditor() {
       {draft && (
         <section>
           <h3 className="mb-1 font-semibold text-white">Diff — new strategy</h3>
+          {draftErrors.map((line) => (
+            <p key={line} className="text-amber-200">{line}</p>
+          ))}
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 p-2">{draft}</pre>
         </section>
       )}

@@ -12,11 +12,16 @@ from app.backtest.engine import BacktestConfig, run_backtest
 from app.backtest.sources import ListSource
 from app.options.model import OPTIMISTIC_FILL_WARNING
 from app.pine.checks import planned_checks, realistic_options_config, run_smoke, summary_card
+from app.pine.convert import conversion_prompt, convert_draft
 from app.pine.isolated import IsolatedStrategy
-from app.pine.report import DISAGREEMENT_WARNING, MissingKeyError, ReportError, TV_PARITY_UNVERIFIED, build_report, frame_prompt
+from app.pine.openai_client import conversion_max_tokens, conversion_model, max_output_tokens, openai_model
+from app.pine.report import (
+    DISAGREEMENT_QUIET, DISAGREEMENT_WARNING, MissingKeyError, ReportError, TV_PARITY_UNVERIFIED,
+    build_report, frame_prompt,
+)
 from app.pine.sandbox import SandboxError, check_source
 from app.pine.save import save_user_strategy
-from app.pine.scanner import scan, session_timeframes
+from app.pine.scanner import UNRESOLVED, scan, session_timeframes
 from tests.bt_helpers import MON, day_bars
 
 SESSION_CLOSE = '''
@@ -274,3 +279,106 @@ def test_the_summary_card_uses_realistic_fills_and_does_not_touch_the_holdout(mo
     )
     assert OPTIMISTIC_FILL_WARNING in optimistic["warnings"]
     assert _peek_count() == before
+
+
+PRICE_CHANNEL = Path("/Users/vai/INVEST/My Trading Desk/docs/pine/price-channel.pine")
+
+
+def test_price_channel_session_inputs_hit_on_5m_and_15m() -> None:
+    found = scan(PRICE_CHANNEL.read_text())
+    assert "1515-1520" in found["windows"]
+    assert found["traps"]["session"]["timeframes"]["5m"] == "hit"
+    assert found["traps"]["session"]["timeframes"]["15m"] == "hit"
+    assert found["traps"]["overnight"]["status"] == "hit"
+
+    chained = '''
+strategy("x")
+raw = input(title="END", type=input.session, defval="1515-1520")
+window = raw
+et = time(timeframe.period, window)
+strategy.close(id="LE", when=et)
+'''
+    assert scan(chained)["traps"]["session"]["timeframes"]["5m"] == "hit"
+
+
+def test_an_unresolvable_session_is_not_clear() -> None:
+    source = '''
+strategy("x")
+sess = input(title="END SESSION", type=input.session)
+et = time(timeframe.period, sess)
+strategy.close(id="LE", when=et)
+'''
+    found = scan(source)
+    assert found["traps"]["session"]["status"] == UNRESOLVED
+    assert "unresolved" in found["traps"]["session"]["status"]
+    assert "clear" not in found["traps"]["session"]["timeframes"].values()
+    assert found["traps"]["overnight"]["status"] == UNRESOLVED
+
+
+def test_disagreement_is_warned_in_both_directions() -> None:
+    quiet = _Fake(json.dumps({"claims": {"session_close_fires": False}}))
+    wide = build_report(WIDE + '\nstrategy.close(id="LE", when=et)\n', client=quiet, api_key="sk-test")
+    assert wide["scan"]["traps"]["session"]["status"] == "clear"
+    assert DISAGREEMENT_QUIET in wide["warnings"]
+
+    unknown = '''
+strategy("x")
+sess = input(title="END SESSION", type=input.session)
+et = time(timeframe.period, sess)
+strategy.close(id="LE", when=et)
+'''
+    unresolved = build_report(unknown, client=_Fake(json.dumps({"claims": {"session_close_fires": False}})), api_key="sk-test")
+    assert DISAGREEMENT_QUIET in unresolved["warnings"]
+
+    agrees = build_report(SESSION_CLOSE, client=_Fake(json.dumps({"claims": {"session_close_fires": False}})), api_key="sk-test")
+    assert agrees["warnings"] == []
+
+
+STUB = json.dumps({
+    "python": "class Strategy:\n    def __init__(self):\n        self.entries = []\n",
+    "tests": "def test_strategy_entries():\n    assert len(strategy.entries) == expected_length\n",
+})
+
+
+def test_a_draft_without_a_strategy_subclass_is_not_ready() -> None:
+    with pytest.raises(SandboxError):
+        check_source("class Strategy:\n    pass\n")
+    fake = _Fake(STUB)
+    result = convert_draft("strategy('x')\n", client=fake, report={"scan": {}})
+    assert result["ready"] is False
+    assert result["attempts"] == 3
+    assert any("Strategy subclass" in error for error in result["errors"])
+    assert any("Strategy subclass" in prompt for prompt in fake.prompts[1:])
+
+
+def test_unrunnable_tests_are_dropped_and_a_real_strategy_is_ready() -> None:
+    payload = json.dumps({
+        "python": GOOD,
+        "tests": "def test_bad():\n    assert missing_name\n",
+    })
+    result = convert_draft(SESSION_CLOSE, client=_Fake(payload), report={"scan": scan(SESSION_CLOSE)})
+    assert result["ready"] is True
+    assert result["tests"] == ""
+    assert result["attempts"] == 1
+
+
+def test_the_conversion_prompt_includes_the_contract_and_frames_pine_as_data() -> None:
+    report = {"scan": scan(SESSION_CLOSE), "claims": {"session_close_fires": False}}
+    prompt = conversion_prompt(SESSION_CLOSE, report)
+    assert "data to analyse" in prompt and "never" in prompt and "instructions" in prompt
+    assert prompt.index("data to analyse") < prompt.index("--- PINE DATA ---")
+    assert "class Signal" in prompt and "class Strategy" in prompt
+    assert "def entry_window" in prompt and "class PinePort" in prompt
+    assert "class EmaCrossover" in prompt
+    assert "1515-1520" in prompt
+
+
+def test_conversion_uses_its_own_model_and_at_least_8000_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AI_MODEL", "gpt-4o-mini")
+    monkeypatch.setenv("MAX_AI_OUTPUT_TOKENS", "800")
+    monkeypatch.setenv("AI_CONVERSION_MODEL", "gpt-5.4")
+    monkeypatch.setenv("AI_CONVERSION_MAX_TOKENS", "800")
+    assert openai_model() == "gpt-4o-mini"
+    assert max_output_tokens() == 800
+    assert conversion_model() == "gpt-5.4"
+    assert conversion_max_tokens() >= 8000

@@ -5,9 +5,10 @@ from __future__ import annotations
 import json
 from typing import Protocol
 
-from app.pine.scanner import scan
+from app.pine.scanner import UNRESOLVED, scan
 
 DISAGREEMENT_WARNING = "scanner and model disagree: the session close does not fire"
+DISAGREEMENT_QUIET = "scanner and model disagree: the model says the session close does not fire"
 TV_PARITY_UNVERIFIED = "unverified: stop=na behaviour on TradingView not reproduced"
 
 
@@ -51,9 +52,12 @@ def build_report(source: str, *, client: PineClient | None, api_key: str | None)
     scanned = scan(source)
     warnings: list[str] = []
     claims = model.get("claims") if isinstance(model.get("claims"), dict) else {}
-    session_hit = any(status == "hit" for status in scanned["traps"]["session"]["timeframes"].values())
-    if claims.get("session_close_fires") and session_hit:
+    session_status = scanned["traps"]["session"]["status"]
+    fires = claims.get("session_close_fires")
+    if fires is True and session_status == "hit":
         warnings.append(DISAGREEMENT_WARNING)
+    if fires is False and session_status in ("clear", UNRESOLVED):
+        warnings.append(DISAGREEMENT_QUIET)
     if scanned["traps"]["stop_na"]["status"] == "hit":
         warnings.append(TV_PARITY_UNVERIFIED)
     return {"scan": scanned, "model": model, "warnings": warnings}

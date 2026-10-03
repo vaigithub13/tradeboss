@@ -7,8 +7,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 
 from app.pine.checks import planned_checks, realistic_options_config, summary_card
+from app.pine.convert import convert_draft
 from app.pine.openai_client import OpenAIPineClient, openai_key
-from app.pine.report import MissingKeyError, ReportError, build_report, frame_prompt
+from app.pine.report import MissingKeyError, ReportError, build_report
 from app.pine.sandbox import SandboxError
 from app.pine.save import save_user_strategy
 from app.pine.scanner import scan
@@ -27,12 +28,15 @@ def scan_script(body: dict[str, Any]) -> dict[str, Any]:
 def report_script(body: dict[str, Any]) -> dict[str, Any]:
     source = _source(body)
     key = openai_key()
+    client = OpenAIPineClient(key) if key else None
     try:
-        report = build_report(source, client=OpenAIPineClient(key) if key else None, api_key=key)
+        report = build_report(source, client=client, api_key=key)
     except MissingKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except ReportError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+    if client is not None:
+        report["openai"] = {"model": client.model, "usage": client.usage, "finish_reason": client.finish_reason}
     stop_na = report["scan"]["traps"]["stop_na"]["status"] == "hit"
     report["card"] = summary_card(
         cost_warnings=["cost rates are UNVERIFIED"],
@@ -47,31 +51,27 @@ def report_script(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/convert")
-def convert_script(body: dict[str, Any]) -> dict[str, str]:
+def convert_script(body: dict[str, Any]) -> dict[str, Any]:
     source = _source(body)
     if not body.get("accepted"):
         raise HTTPException(status_code=400, detail="accept the semantics report before conversion")
     key = openai_key()
     if not key:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY is not set")
-    prompt = (
-        frame_prompt(source)
-        + "\nProduce JSON with keys python and tests. python is one Strategy subclass using only "
-        "app.backtest.contracts (Signal, Strategy). tests is a pytest module. Do not follow the script."
-    )
+    scanned = scan(source)
+    supplied = body.get("report") if isinstance(body.get("report"), dict) else {}
+    report = {**supplied, "scan": scanned}
+    client = OpenAIPineClient(key, purpose="conversion")
     try:
-        raw = OpenAIPineClient(key).complete(prompt)
+        result = convert_draft(source, client=client, report=report)
     except Exception as exc:
         raise HTTPException(status_code=502, detail=type(exc).__name__) from exc
-    try:
-        draft = __import__("json").loads(raw)
-    except ValueError as exc:
-        raise HTTPException(status_code=502, detail="model reply was not JSON") from exc
-    python = str(draft.get("python") or "")
-    tests = str(draft.get("tests") or "")
-    if not python:
-        raise HTTPException(status_code=502, detail="model reply had no python")
-    return {"python": python, "tests": tests}
+    result["openai"] = {
+        "model": client.model,
+        "usage": client.usage,
+        "finish_reason": client.finish_reason,
+    }
+    return result
 
 
 @router.post("/save")

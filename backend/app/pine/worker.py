@@ -13,7 +13,13 @@ from typing import Any
 from app.backtest.contracts import LookAheadError, Signal, Strategy
 from app.pine.sandbox import SandboxError, check_source
 
-SECRET_ENV = ("OPENAI_API_KEY", "UPSTOX_ANALYTICS_TOKEN", "UPSTOX_API_KEY", "UPSTOX_API_SECRET")
+SECRET_ENV = (
+    "OPENAI_API_KEY",
+    "AI_API_KEY",
+    "UPSTOX_ANALYTICS_TOKEN",
+    "UPSTOX_API_KEY",
+    "UPSTOX_API_SECRET",
+)
 
 
 def scrubbed_env(base: dict[str, str] | None = None) -> dict[str, str]:

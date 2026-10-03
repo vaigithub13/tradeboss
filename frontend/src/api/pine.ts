@@ -21,6 +21,6 @@ export function reportPine(source: string): Promise<{ scan: PineScan; warnings: 
   return postJson("/api/pine/report", { source, accepted: false });
 }
 
-export function convertPine(source: string): Promise<{ python: string; tests: string }> {
+export function convertPine(source: string): Promise<{ python: string; tests: string; ready: boolean; errors: string[] }> {
   return postJson("/api/pine/convert", { source, accepted: true });
 }

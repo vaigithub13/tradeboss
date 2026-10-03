@@ -9,7 +9,10 @@ SESSION_CLOSE = 15 * 60 + 30
 TIMEFRAMES: tuple[tuple[str, int], ...] = (
     ("1m", 1), ("3m", 3), ("5m", 5), ("15m", 15), ("30m", 30), ("1h", 60),
 )
-_TIME = re.compile(r'time\s*\(\s*timeframe\.period\s*,\s*"(\d{4})-(\d{4})"\s*\)')
+UNRESOLVED = "unresolved: check by hand"
+_TIME_ARG = re.compile(r"time\s*\(\s*timeframe\.period\s*,\s*([^)]+?)\s*\)")
+_ASSIGN = re.compile(r"(?m)^([A-Za-z_]\w*)\s*=(?!=)\s*(.+)$")
+_IDENT = re.compile(r"[A-Za-z_]\w*")
 _PIVOT = re.compile(r"(?:ta\.)?pivot(?:high|low)\s*\(([^)]*)\)")
 _TR = re.compile(r"\bta\.(?:atr|tr)\b")
 
@@ -33,6 +36,53 @@ def bar_fits(window_start: int, window_end: int, bar_minutes: int) -> bool:
             return True
         start += bar_minutes
     return False
+
+
+def _session_literal(text: str) -> str | None:
+    match = re.fullmatch(r'"(\d{4}-\d{4})"', text.strip())
+    return match.group(1) if match else None
+
+
+def _input_session(rhs: str) -> str | None:
+    """The session string on an input() default, when it is a constant."""
+    if not rhs.lstrip().startswith("input"):
+        return None
+    match = re.search(r'defval\s*=\s*"(\d{4}-\d{4})"', rhs)
+    if match:
+        return match.group(1)
+    match = re.match(r'input\s*\(\s*"(\d{4}-\d{4})"', rhs.strip())
+    return match.group(1) if match else None
+
+
+def _constants(source: str) -> dict[str, str | None]:
+    """Names bound to a session string. None means the assignment is not a constant session."""
+    rows = [(name, rhs.strip()) for name, rhs in _ASSIGN.findall(source) if not rhs.strip().startswith("time")]
+    env: dict[str, str | None] = {}
+    for _ in range(len(rows) + 1):
+        for name, rhs in rows:
+            literal = _session_literal(rhs)
+            if literal:
+                env[name] = literal
+                continue
+            if rhs.lstrip().startswith("input"):
+                env[name] = _input_session(rhs)
+                continue
+            if _IDENT.fullmatch(rhs) and rhs in env:
+                env[name] = env[rhs]
+                continue
+            if name not in env and not (_IDENT.fullmatch(rhs) and rhs not in env):
+                env[name] = None
+    return env
+
+
+def _resolve_session(arg: str, env: dict[str, str | None]) -> str | None:
+    literal = _session_literal(arg)
+    if literal:
+        return literal
+    name = arg.strip()
+    if _IDENT.fullmatch(name) and env.get(name):
+        return env[name]
+    return None
 
 
 def session_timeframes(window: str) -> dict[str, str]:
@@ -75,14 +125,44 @@ def _kind(source: str) -> str:
     return "indicator"
 
 
-def scan(source: str) -> dict:
-    windows = [f"{a}-{b}" for a, b in _TIME.findall(source)]
-    per_tf: dict[str, str] = {name: "clear" for name, _ in TIMEFRAMES}
+def _session_trap(source: str) -> tuple[dict[str, str], list[str], str]:
+    """Per-timeframe hit/clear/unresolved, the windows that resolved, and the trap status.
+
+    A session passed through an input() default or a simple assignment is followed.
+    A time() argument that does not resolve is unresolved, never clear.
+    """
+    env = _constants(source)
+    args = _TIME_ARG.findall(source)
+    names = [name for name, _ in TIMEFRAMES]
+    if not args:
+        return {name: "clear" for name in names}, [], "clear"
+    windows: list[str] = []
+    unresolved = False
+    for arg in args:
+        window = _resolve_session(arg, env)
+        if window is None:
+            unresolved = True
+        elif window not in windows:
+            windows.append(window)
+    per_tf = {name: "clear" for name in names}
     for window in windows:
         for name, status in session_timeframes(window).items():
             if status == "hit":
                 per_tf[name] = "hit"
-    session_hit = any(status == "hit" for status in per_tf.values())
+    if unresolved:
+        for name in names:
+            if per_tf[name] != "hit":
+                per_tf[name] = UNRESOLVED
+    if any(status == "hit" for status in per_tf.values()):
+        return per_tf, windows, "hit"
+    if unresolved:
+        return per_tf, windows, UNRESOLVED
+    return per_tf, windows, "clear"
+
+
+def scan(source: str) -> dict:
+    per_tf, windows, session_status = _session_trap(source)
+    session_hit = session_status == "hit"
 
     stop_hit = False
     for args in _calls(source, "strategy.entry"):
@@ -103,12 +183,17 @@ def scan(source: str) -> dict:
             calls.append(name)
     kind = _kind(source)
     has_close = "strategy.close" in source
-    overnight = "hit" if session_hit or (kind == "strategy" and not has_close) else "clear"
+    if session_hit or (kind == "strategy" and not has_close):
+        overnight = "hit"
+    elif session_status == UNRESOLVED:
+        overnight = UNRESOLVED
+    else:
+        overnight = "clear"
     return {
         "kind": kind,
         "windows": windows,
         "traps": {
-            "session": {"status": "hit" if session_hit else "clear", "timeframes": per_tf},
+            "session": {"status": session_status, "timeframes": per_tf},
             "stop_na": {"status": "hit" if stop_hit else "clear"},
             "pivot": {"status": "hit" if pivot_delay is not None or _PIVOT.search(source) else "clear", "delay": pivot_delay},
             "lookahead": {"status": lookahead},
