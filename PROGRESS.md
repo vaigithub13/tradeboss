@@ -343,11 +343,11 @@ A window whose best eligible train net is not positive records `no choice: best 
 
 Three SpringPad scripts, from the Pine sources: Pivot Extension, Log XZ, Price Channel. Each has two execution modes. `realistic` is the default: the engine's 15:15 square-off, 1-minute ordering inside a bar, no overnight position. `tv_parity` matches what TradingView does with these scripts. The square-off is `strategy.close(..., when=time(timeframe.period, "1515-1520"))`. On a 5-minute or 15-minute chart that `time()` is na: the session is five minutes long, and no bar of the chart resolution fits inside it, so the close is never sent. Positions carry overnight, and the last trade stays open when the loaded range ends. A stop and a target inside one bar follow Pine's open→high→low→close or open→low→high→close path.
 
-Pivot Extension `faithful` uses a pivot only on the bar that confirms it. A missing stop is a market order, and the long side updates on a confirmed pivot low while flat, the short side on a confirmed pivot high while in a position. `carried_pivots` is Vaibhav's research variant: stops rest on the most recent confirmed pivot high and pivot low, carried forward. It is named as that variant. Walk-forward's default grid is both variants × 5m and 15m, so the research variant is inside the tried total. Log XZ defaults to RMA(close, 14); a buy is the previous XZ ≤ 0 and the current XZ > 0, and XZ is log(average) one bar ago minus log(average) four bars ago. Price Channel is stop-and-reverse, with the channel including the bar that just closed. 5m and 15m are a walk-forward axis for all three (Log XZ lengths 10 and 14; channel lengths 20 and 40).
+Pivot Extension `faithful` uses a pivot only on the bar that confirms it. In `realistic` a missing stop is a market order. In `tv_parity` that entry is skipped and the previous order with the same id stays working. The long side updates on a confirmed pivot low while flat, the short side on a confirmed pivot high while in a position. `carried_pivots` is Vaibhav's research variant: stops rest on the most recent confirmed pivot high and pivot low, carried forward. It is named as that variant. Walk-forward's default grid is both variants × 5m and 15m, so the research variant is inside the tried total. Log XZ defaults to RMA(close, 14); a buy is the previous XZ ≤ 0 and the current XZ > 0, and XZ is log(average) one bar ago minus log(average) four bars ago. Price Channel is stop-and-reverse, with the channel including the bar that just closed. 5m and 15m are a walk-forward axis for all three (Log XZ lengths 10 and 14; channel lengths 20 and 40).
 
 **Tests** (`backend/tests/test_pine_ports.py`, and the phase 3a no-look-ahead test on every port in both modes): written first. Collection failed (`app.strategies.log_xz` did not exist). Then implemented. Backend suite: 956 passed, 1 skipped.
 
-**TradingView parity (2026-10-03).** NIFTY 5m, script defaults, quantity 1, commission 0, slippage 0, empty state from the first stored bar on 2026-06-22 (09:15) through 2026-10-01. No square-off. Closed-trade results against the TradingView lists (175 / 351 / 267 closed; the last trade left open):
+**TradingView parity (2026-10-03).** NIFTY 5m, script defaults, quantity 1, commission 0, slippage 0, empty state from the first stored bar on 2026-06-22 (09:15) through 2026-10-01. No square-off. That window overlaps the final holdout (2026-07-01 through 2026-10-01), so for these three strategies the holdout is not clean. Their clean test is data after 2026-10-01. Closed-trade results against the TradingView lists (175 / 351 / 267 closed; the last trade left open):
 
 | script | our closed | TV closed | our wins | TV wins | our net | TV net | our PF | TV PF | our closed-trade max DD | TV max DD (includes open trades) |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
@@ -376,3 +376,31 @@ Overnight versus same-day, this run, closed trades only: Pivot +940.95 overnight
 | Price Channel | 352,152.29 | 34,407.39 | 731 | 28 | 0 | 7 of 7. Length 20 on 5m every window. Test nets +102,174.87, +62,505.99, +11,101.70, +26,453.05, +41,696.76, +50,464.50, +57,755.42. |
 
 The final holdout was not run.
+
+**Option fill on a stop (2026-10-03).** A real-premium fill is looked up at the index fill's timestamp, which is the start of the 1-minute bar that touched the stop. `premium_at` is that minute's option open, so a stop that triggers after the open was buying the option at the price from before the breakout. Market orders, and stops gapped through the open, stay on that open. `option_fill` is now a run setting: `minute_open` (that open), `adverse` (buyer pays the higher of the minute's open and close, seller receives the lower), `worst` (buyer pays the minute's high, seller receives the low). Saved on `b5ce7ca`, tree clean. Peek count stayed 0.
+
+Same realistic window as above, slippage 1.0. Index ₹ does not change with the fill setting.
+
+| strategy | fill | option ₹ | option win | option max DD |
+|---|---|---:|---:|---:|
+| Pivot Extension | minute_open | 145,391.26 | 32.05% | 72,026.09 |
+| Pivot Extension | adverse | −748,620.37 | 26.29% | 762,594.01 |
+| Pivot Extension | worst | −1,154,991.11 | 24.76% | 1,168,705.17 |
+| Log XZ | minute_open | −305,678.93 | 26.46% | 315,367.69 |
+| Log XZ | adverse | −305,678.93 | 26.46% | 315,367.69 |
+| Log XZ | worst | −305,678.93 | 26.46% | 315,367.69 |
+| Price Channel | minute_open | 481,810.37 | 40.89% | 34,407.39 |
+| Price Channel | adverse | −156,265.20 | 32.79% | 199,031.54 |
+| Price Channel | worst | −436,996.88 | 30.78% | 449,465.08 |
+
+Log XZ is unchanged across the three settings: its entries are market orders at the bar open. Pivot and Price Channel, which enter on stops, go from strongly positive to negative once the option is priced through the trigger minute.
+
+**Walk-forward with `adverse`, same window, no holdout.** Peek count stayed 0.
+
+| strategy | OOS option ₹ | OOS max DD | OOS trades | param changes | windows with a choice |
+|---|---:|---:|---:|---:|---|
+| Pivot Extension | −108,668.21 | 122,802.65 | 383 | 1 | 4 of 7. Windows 1, 3 and 6 stayed flat. Faithful 15m, then faithful 15m, then carried_pivots 15m, then carried_pivots 15m. Test nets −10,394.43, −23,544.93, −23,521.68, −51,207.17. |
+| Log XZ | 5,332.14 | 26,478.05 | 96 | 0 | 2 of 7. Same as the minute-open walk-forward: the first five stayed flat, then RMA 14 on 15m. Test nets +23,733.48 and −18,401.34. |
+| Price Channel | −14,183.70 | 71,950.19 | 93 | 0 | 3 of 7. Length 40 on 15m. Test nets +24,093.91, −13,824.89, −24,452.72. The last four windows stayed flat. |
+
+**Pivot `stop=na` (2026-10-03).** Same empty-state window as the parity table, quantity 1, no costs, no slippage. TradingView's #350 short stays open from 2026-09-30 12:15 until the 2026-10-01 14:25 stop, and the list has 351 closed trades. Turning a missing stop into a market order still produces 518 closed trades and several reversals through that afternoon. Skipping the missing stop and leaving the previous order working produces 13 closed trades, net −255.10, and the last closed trade exits 2026-09-01 10:50. Cancelling the missing side instead produces 11 closed trades, net −183.10, and the same last exit. Neither version is the Sep 30 short, and neither is 351. `tv_parity` keeps the previous order.
