@@ -425,6 +425,19 @@ Log XZ is unchanged across the three settings: its entries are market orders at 
 
 **Pine conversion fixes (2026-10-04).** `time()` session strings that arrive through an `input()` default or a simple assignment are resolved. A session that cannot be resolved is `unresolved: check by hand`, never clear. Price Channel's `1515-1520` input is a hit on 5m and 15m, and the overnight trap is a hit. The model saying the close does not fire while the scanner says clear or unresolved is a disagreement. A draft that is not a Strategy subclass is not a ready draft; the converter repairs at most twice. Conversion uses its own model (`gpt-5.4` on this account, at least 8000 output tokens). The report still uses `gpt-4o-mini`. Generated tests that do not run are dropped.
 
+**Price Channel entry window (2026-10-04).** `entry_window` was using the bar's start minute, so a 15-minute bar starting at 14:45 counted as inside 09:15-14:50. It now uses the scanner rule: the bar fits only when it starts at or after 09:15 and ends strictly before 14:50. The 14:45 bar of a 15-minute chart ends at 15:00 and does not arm. A 5-minute bar that ends exactly at 14:50 does not arm either. A stop armed on an earlier bar still fills after the window. Realistic hand-port rerun, NIFTY, slippage 1.0, delta-adjusted options, sessions normal and weekend_full. Holdout was not run.
+
+| window | timeframe | length | trades | index ₹ | option ₹ |
+|---|---|---:|---:|---:|---:|
+| 2026-04-01 .. 2026-06-30 | 5m | 20 | 163 | 93,034.50 | −2,224.21 |
+| 2024-10-03 .. 2026-06-30 | 5m | 20 | 1,089 | 633,199.75 | 16,621.49 |
+| 2026-04-01 .. 2026-06-30 | 15m | 20 | 71 | −3,562.00 | −45,204.07 |
+| 2026-04-01 .. 2026-06-30 | 15m | 40 | 45 | −29,939.00 | −33,002.64 |
+| 2024-10-03 .. 2026-06-30 | 15m | 20 | 506 | 187,840.75 | −73,280.70 |
+| 2024-10-03 .. 2026-06-30 | 15m | 40 | 342 | 240,411.50 | 11,318.45 |
+
+The previous full-window 5-minute result (1,098 trades, index 630,280.25, option 8,826.14) used the start-minute rule.
+
 **Pine report network error (2026-10-04).** The OpenAI call connects directly. A proxy that refuses the CONNECT tunnel no longer becomes an empty HTTP 500; the report endpoint returns the failure text and the panel shows that text.
 
 **Pine gates (2026-10-04).** The AST allow-list accepts exactly `from __future__ import annotations` and rejects every other `__future__` import. A failed check sent back to the model names the source line and the change, for example `remove line 1: from __future__ import print_function`. Convert refuses unless that exact report id and hash was accepted through `/api/pine/accept`. Save refuses unless that exact diff hash was approved through `/api/pine/approve`. Editing the report or the diff after that record is refused. A `accepted: true` field in the convert body is ignored. The holdout was not run. Peek count stayed 0.

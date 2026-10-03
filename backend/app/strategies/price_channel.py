@@ -2,8 +2,9 @@
 
 `highest(high, length)` and `lowest(low, length)` include the bar that just
 closed. Orders start once `close[length]` exists. Both stops are replaced on
-every bar inside 09:15-14:50 and stay working after that window. A fill of one
-side leaves the other working, so a later touch reverses the position.
+every bar whose whole span sits inside 09:15-14:50, and they stay working
+after that window. A fill of one side leaves the other working, so a later
+touch reverses the position.
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from __future__ import annotations
 from typing import Any
 
 from app.backtest.contracts import Signal
-from app.strategies.pine_common import PinePort, entry_window
+from app.strategies.pine_common import PinePort, entry_window, timeframe_minutes
 
 
 class PriceChannel(PinePort):
@@ -27,7 +28,7 @@ class PriceChannel(PinePort):
         closing = self.session_exit(bar, ctx)
         if closing is not None:
             return closing
-        if len(ctx.bars) <= self.length or not entry_window(int(bar["time"])):
+        if len(ctx.bars) <= self.length or not entry_window(int(bar["time"]), timeframe_minutes(ctx.timeframe)):
             return []
         window_high = float(ctx.bars.high[-self.length:].max())
         window_low = float(ctx.bars.low[-self.length:].min())

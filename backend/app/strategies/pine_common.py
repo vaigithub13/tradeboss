@@ -23,16 +23,34 @@ from app.backtest.contracts import Signal, Strategy
 EXECUTIONS = ("realistic", "tv_parity")
 TICK = 0.05
 ENTRY_LO = 9 * 60 + 15
-ENTRY_HI = 14 * 60 + 50  # Pine session "0915-1450" includes 14:50
+ENTRY_END = 14 * 60 + 50  # exclusive. "0915-1450" does not include a bar that ends at 14:50.
+TF_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
 
 
 def minute_of(t: int) -> int:
     return ((t + 19_800) % 86_400) // 60
 
 
-def entry_window(t: int) -> bool:
-    minute = minute_of(t)
-    return ENTRY_LO <= minute <= ENTRY_HI
+def timeframe_minutes(timeframe: str) -> int:
+    try:
+        return TF_MINUTES[timeframe]
+    except KeyError:
+        raise ValueError(f"timeframe {timeframe!r} is not an intraday chart") from None
+
+
+def entry_window(t: int, bar_minutes: int) -> bool:
+    """True when the whole bar sits inside 09:15-14:50.
+
+    Same rule as the session scanner. The bar starts at `t` and lasts
+    `bar_minutes`. It fits only when that start is at or after 09:15 and the
+    bar ends strictly before 14:50. The 14:45 bar of a 15-minute chart ends
+    at 15:00, so it is outside. A 5-minute bar that ends exactly at 14:50 is
+    outside too.
+    """
+    if bar_minutes < 1:
+        return False
+    start = minute_of(t)
+    return start >= ENTRY_LO and start + bar_minutes < ENTRY_END
 
 
 class PinePort(Strategy):

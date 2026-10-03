@@ -18,7 +18,7 @@ from typing import Any
 import numpy as np
 
 from app.backtest.contracts import Signal
-from app.strategies.pine_common import PinePort, entry_window
+from app.strategies.pine_common import PinePort, entry_window, timeframe_minutes
 
 VARIANTS = ("faithful", "carried_pivots")
 
@@ -64,7 +64,7 @@ class PivotExtension(PinePort):
         pl = confirmed_pivot(ctx.bars.low, self.left_bars, self.right_bars, high=False)
         if self.variant == "carried_pivots":
             return self._carried(bar, ctx, ph, pl)
-        if not entry_window(int(bar["time"])):
+        if not entry_window(int(bar["time"]), timeframe_minutes(ctx.timeframe)):
             return []
         flat = ctx.position.is_flat
         if not ((flat and pl is not None) or (not flat and ph is not None)):
@@ -89,7 +89,7 @@ class PivotExtension(PinePort):
             self.last_ph = ph
         if pl is not None:
             self.last_pl = pl
-        if not entry_window(int(bar["time"])) or (self.last_ph is None and self.last_pl is None):
+        if not entry_window(int(bar["time"]), timeframe_minutes(ctx.timeframe)) or (self.last_ph is None and self.last_pl is None):
             return []
         signals: list[Signal] = []
         if self.last_ph is not None:

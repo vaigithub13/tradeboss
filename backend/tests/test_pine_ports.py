@@ -9,12 +9,26 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from app.backtest.walkforward import child_backtest_config, default_grid, parse_walk_forward, run_walk_forward
+from app.strategies.pine_common import entry_window
 from app.strategies.log_xz import LogXZ
 from app.strategies.pivot_extension import PivotExtension
 from app.strategies.price_channel import PriceChannel
 from tests.bt_helpers import MON, TUE, IST, day_bars, fills, hhmm, kinds, run
 
 TICK = 0.05
+
+
+def test_entry_window_requires_the_whole_bar() -> None:
+    def at(hour: int, minute: int) -> int:
+        return int(datetime(*MON, hour, minute, tzinfo=IST).timestamp())
+
+    assert entry_window(at(14, 30), 15) is True
+    assert entry_window(at(14, 45), 15) is False
+    assert entry_window(at(14, 40), 5) is True
+    assert entry_window(at(14, 45), 5) is False
+    assert entry_window(at(9, 15), 5) is True
+    assert entry_window(at(14, 48), 1) is True
+    assert entry_window(at(14, 49), 1) is False
 
 
 def _rows(n: int, price: float = 100.0) -> list[tuple[float, float, float, float]]:
@@ -213,17 +227,41 @@ def test_price_channel_stop_includes_the_current_bar_and_reverses() -> None:
 
 
 def test_a_working_stop_still_fills_after_the_entry_window_closes() -> None:
-    # 14:40, 14:45, 14:50 arms, 14:55 is outside 09:15–14:50 and still fills the resting stop
+    # 14:40 arms (that 5m bar ends at 14:45). 14:45 ends on 14:50, so it does not arm.
+    # 14:55 is outside the window and still fills the resting stop.
     rows = [
-        (100, 100, 100, 100),
-        (100, 100, 100, 100),
-        (100, 110, 100, 100),
-        (105, 112, 105, 108),
+        (100, 100, 100, 100),  # 14:30
+        (100, 100, 100, 100),  # 14:35
+        (100, 110, 100, 100),  # 14:40 arms
+        (105, 105, 105, 105),  # 14:45 outside: ends at 14:50
+        (105, 105, 105, 105),  # 14:50
+        (105, 112, 105, 108),  # 14:55 fills
     ]
-    candles = day_bars(MON, rows, start=(14, 40), step_min=5)
+    candles = day_bars(MON, rows, start=(14, 30), step_min=5)
     res = run(PriceChannel(length=2), candles, base_minutes=5, timeframe="5m", square_off="15:15")
     assert _px(fills(res)[0]) == ("14:55", "BUY", 110.05)
-    assert "15:00" not in [hhmm(e["t"]) for e in kinds(res, "order_placed")]
+    # Order time is the bar end. 14:45 is the close of the 14:40 bar.
+    placed = [hhmm(e["t"]) for e in kinds(res, "order_placed")]
+    assert placed == ["14:45", "14:45"]
+
+
+def test_a_15m_bar_at_1445_is_outside_the_entry_window() -> None:
+    # 14:30 ends at 14:45 and arms. 14:45 ends at 15:00, so the whole bar does not fit.
+    rows = [
+        (100, 100, 100, 100),  # 14:00
+        (100, 100, 100, 100),  # 14:15
+        (100, 110, 100, 100),  # 14:30 arms
+        (100, 130, 100, 100),  # 14:45 must not replace the stop
+        (112, 112, 112, 112),  # 15:00 fills the 14:30 stop
+    ]
+    candles = day_bars(MON, rows, start=(14, 0), step_min=15)
+    res = run(PriceChannel(length=2), candles, base_minutes=15, timeframe="15m", square_off="15:15")
+    # Order time is the bar end. 14:45 is the close of the 14:30 bar, which armed.
+    # 15:00 would be the close of the 14:45 bar. That bar does not arm, and the
+    # stop placed at 14:30 fills while it is outside the entry window.
+    placed = [hhmm(e["t"]) for e in kinds(res, "order_placed")]
+    assert placed == ["14:45", "14:45"]
+    assert _px(fills(res)[0]) == ("14:45", "BUY", 110.05)
 
 
 def test_target_and_stop_follow_the_ohlc_path_when_both_are_on() -> None:

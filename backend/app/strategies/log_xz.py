@@ -11,7 +11,7 @@ import math
 from typing import Any
 
 from app.backtest.contracts import Signal
-from app.strategies.pine_common import PinePort, entry_window
+from app.strategies.pine_common import PinePort, entry_window, timeframe_minutes
 
 AVERAGES = ("rma", "ema")
 
@@ -41,7 +41,7 @@ class LogXZ(PinePort):
         closing = self.session_exit(bar, ctx)
         if closing is not None:
             return closing
-        if not entry_window(int(bar["time"])) or current is None or previous is None:
+        if not entry_window(int(bar["time"]), timeframe_minutes(ctx.timeframe)) or current is None or previous is None:
             return []
         buy = previous <= 0 < current
         sell = previous >= 0 > current
