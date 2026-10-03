@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { cardLines, convertEnabled, showBacktestCard, type PineCard } from "./present";
+import { approveEnabled, cardLines, convertEnabled, showBacktestCard, type PineCard } from "./present";
 
 describe("pine panel gates", () => {
   it("keeps conversion disabled until the report is accepted", () => {
     expect(convertEnabled(false)).toBe(false);
     expect(convertEnabled(true)).toBe(true);
+  });
+
+  it("hides Approve when the draft failed the check", () => {
+    expect(approveEnabled(false)).toBe(false);
+    expect(approveEnabled(true)).toBe(true);
   });
 
   it("hides the backtest card for an indicator script", () => {

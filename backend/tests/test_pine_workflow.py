@@ -430,6 +430,101 @@ class _Script:
         return self.replies[len(self.prompts) - 1]
 
 
+SUPER_INIT = '''from app.backtest.contracts import Signal, Strategy
+
+class Gate(Strategy):
+    name = "gate"
+
+    def __init__(self, length: int = 20):
+        super().__init__(length=length)
+        self.length = length
+
+    def on_bar(self, bar, ctx):
+        return []
+'''
+
+
+def _with_init(body: str) -> str:
+    return (
+        "from app.backtest.contracts import Signal, Strategy\n"
+        "class Gate(Strategy):\n"
+        "    name = 'gate'\n"
+        "    def __init__(self):\n"
+        f"{body}"
+        "    def on_bar(self, bar, ctx):\n"
+        "        return []\n"
+    )
+
+
+def test_super_init_is_allowed_and_other_dunders_stay_banned() -> None:
+    check_source(SUPER_INIT)
+    check_source(_with_init("        self.length = 1\n"))
+    banned = {
+        "self.__class__": _with_init("        self.__class__\n"),
+        "self.__dict__": _with_init("        self.__dict__\n"),
+        "self.__globals__": _with_init("        self.__globals__\n"),
+        "super().__getattribute__": _with_init("        super().__getattribute__('x')\n"),
+        "super(Strategy).__init__": _with_init("        super(Strategy).__init__(self)\n"),
+        "super().__init__ outside __init__": SUPER_INIT.replace(
+            "    def on_bar(self, bar, ctx):\n        return []\n",
+            "    def on_bar(self, bar, ctx):\n        super().__init__()\n        return []\n",
+        ),
+        "bare super().__init__": _with_init("        ref = super().__init__\n"),
+    }
+    for source in banned.values():
+        with pytest.raises(SandboxError, match="remove line"):
+            check_source(source)
+
+
+def test_a_draft_that_passes_convert_passes_approve_unchanged(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine import gates
+    from app.pine.gates import clear_gates, issue_draft
+
+    monkeypatch.setattr(gates, "_STORE", tmp_path / "pine")
+    monkeypatch.setattr("app.pine.save.USER_DIR", tmp_path / "user")
+    clear_gates()
+    result = convert_draft(
+        SESSION_CLOSE,
+        client=_Fake(json.dumps({"python": SUPER_INIT, "tests": ""})),
+        report={"scan": scan(SESSION_CLOSE)},
+    )
+    assert result["ready"] is True
+    assert result["python"] == SUPER_INIT
+    draft_id, digest = issue_draft(result["python"])
+    with TestClient(app) as client:
+        saved = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
+    assert saved.status_code == 200
+    assert (tmp_path / "user" / "gate.py").read_text() == SUPER_INIT
+
+
+def test_a_draft_that_fails_the_check_is_not_ready_and_approve_refuses_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine import gates
+    from app.pine.gates import clear_gates, issue_draft
+
+    refused_source = _with_init("        super().__getattribute__('x')\n")
+    monkeypatch.setattr(gates, "_STORE", tmp_path / "pine")
+    monkeypatch.setattr("app.pine.save.USER_DIR", tmp_path / "user")
+    clear_gates()
+    result = convert_draft(
+        SESSION_CLOSE,
+        client=_Fake(json.dumps({"python": refused_source, "tests": ""})),
+        report={"scan": scan(SESSION_CLOSE)},
+    )
+    assert result["ready"] is False
+    assert any("super().__getattribute__" in error for error in result["errors"])
+    draft_id, digest = issue_draft(refused_source)
+    with TestClient(app) as client:
+        refused = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
+    assert refused.status_code == 400
+    assert list((tmp_path / "user").glob("*.py")) == []
+
+
 def test_future_annotations_is_allowed_and_nothing_else_from_future() -> None:
     check_source("from __future__ import annotations\n" + GOOD)
     with pytest.raises(SandboxError, match=r"remove line 1: from __future__ import print_function"):

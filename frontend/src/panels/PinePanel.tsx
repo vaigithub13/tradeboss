@@ -23,7 +23,7 @@ class PanelBoundary extends Component<{ children: ReactNode }, { message: string
 
 import { ApiError } from "../api/client";
 import { acceptReport, approveDraft, convertPine, reportPine, scanPine, type PineReport, type PineScan } from "../api/pine";
-import { cardLines, convertEnabled, showBacktestCard, type PineCard } from "../pine/present";
+import { approveEnabled, cardLines, convertEnabled, showBacktestCard, type PineCard } from "../pine/present";
 
 const TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h"] as const;
 
@@ -138,9 +138,9 @@ function PineEditor() {
     try {
       const result = await convertPine(source, issued);
       setDraft(result.python);
-      setDraftId(result.id);
-      setDraftHash(result.hash);
       setDraftErrors(result.ready ? [] : result.errors ?? ["draft failed the checks"]);
+      setDraftId(result.ready ? result.id : null);
+      setDraftHash(result.ready ? result.hash : null);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "conversion failed");
     } finally {
@@ -258,7 +258,7 @@ function PineEditor() {
           <button
             type="button"
             className="mt-2 rounded border border-white/15 px-2 py-1 disabled:opacity-40"
-            disabled={!draftId || !draftHash || busy || draftApproved}
+            disabled={!approveEnabled(Boolean(draftId && draftHash)) || busy || draftApproved}
             onClick={() => void onApprove()}
           >
             {draftApproved ? "Saved" : "Approve diff"}

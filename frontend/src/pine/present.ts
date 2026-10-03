@@ -12,6 +12,11 @@ export function convertEnabled(reportAccepted: boolean): boolean {
   return reportAccepted;
 }
 
+/** Approve is offered only after Convert's check passed. The same check runs again on Approve. */
+export function approveEnabled(ready: boolean): boolean {
+  return ready;
+}
+
 export function showBacktestCard(kind: "strategy" | "indicator"): boolean {
   return kind === "strategy";
 }
