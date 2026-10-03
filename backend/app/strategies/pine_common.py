@@ -1,4 +1,18 @@
-"""Session clock and order helpers shared by the SpringPad Pine ports."""
+"""Session clock and order helpers shared by the SpringPad Pine ports.
+
+The scripts call strategy.close when time(timeframe.period, "1515-1520") is
+set. On a 5-minute or 15-minute chart that call never runs. time() is na
+unless a whole bar of the chart resolution fits inside the session, and this
+session is only five minutes long. The 15:15 bar ends at 15:20, on the
+session boundary, so it does not fit; a 15-minute bar cannot fit at all.
+when=na, so the close is never sent. TradingView carries the position
+overnight and leaves the last trade open when the loaded range ends.
+tv_parity does the same.
+
+The entry session "0915-1450" is hours long, so time() is set and entries
+are gated. Stops placed inside it stay working after 14:50 and into the
+next session.
+"""
 
 from __future__ import annotations
 
@@ -10,8 +24,6 @@ EXECUTIONS = ("realistic", "tv_parity")
 TICK = 0.05
 ENTRY_LO = 9 * 60 + 15
 ENTRY_HI = 14 * 60 + 50  # Pine session "0915-1450" includes 14:50
-EXIT_LO = 15 * 60 + 15
-EXIT_HI = 15 * 60 + 20  # "1515-1520" stops before 15:20
 
 
 def minute_of(t: int) -> int:
@@ -23,17 +35,12 @@ def entry_window(t: int) -> bool:
     return ENTRY_LO <= minute <= ENTRY_HI
 
 
-def exit_window(t: int) -> bool:
-    minute = minute_of(t)
-    return EXIT_LO <= minute < EXIT_HI
-
-
 class PinePort(Strategy):
     """`realistic` (default) squares off at 15:15 and does not carry overnight.
 
-    `tv_parity` is only for the TradingView check: the 15:15-15:20 bar sends a
-    market close that fills on the next bar's open, and stops inside one bar
-    follow Pine's OHLC path.
+    `tv_parity` matches what TradingView actually does with these scripts: no
+    square-off, positions carried overnight, the last trade left open, and
+    stops inside one bar following Pine's OHLC path.
     """
 
     def __init__(self, *, execution: str = "realistic", lots: int = 1, use_target: bool = False,
@@ -55,12 +62,15 @@ class PinePort(Strategy):
         self.stop_points = float(stop_points)
         self.tick = float(tick)
         self.allow_overnight = execution == "tv_parity"
+        # The loaded range ending is not a square-off. TradingView leaves the last trade open.
+        self.flatten_at_end = execution != "tv_parity"
         self.bar_path = "pine_ohlc" if execution == "tv_parity" else "1m"
         self.pyramiding = 0
 
     def session_exit(self, bar: dict[str, Any], ctx: Any) -> list[Signal] | None:
-        if self.execution == "tv_parity" and exit_window(int(bar["time"])) and ctx.position.lots:
-            return [Signal("EXIT", int(ctx.position.lots), tag="session")]
+        # time(timeframe.period, "1515-1520") is na on a 5m or 15m chart, so
+        # strategy.close(when=et) never runs. The ids match the entries; the
+        # session string is what keeps the position open.
         return None
 
     def arm(self, ctx: Any, signals: list[Signal]) -> list[Signal]:

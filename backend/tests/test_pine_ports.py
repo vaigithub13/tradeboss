@@ -59,14 +59,12 @@ def test_15m_tv_parity_carries_overnight_and_realistic_does_not() -> None:
     assert real.exit_reason == "square_off"
     assert realistic.strategy["allow_overnight"] is False
 
-    (tv,) = parity.trades
-    assert tv.direction == "LONG"
-    assert datetime.fromtimestamp(tv.entry_time, IST).date() == date(*MON)
-    assert datetime.fromtimestamp(tv.exit_time, IST).date() == date(*TUE)
-    assert hhmm(tv.exit_time) == "09:15"
-    assert round(tv.exit_price, 2) == 105.0
-    assert tv.exit_reason == "market"
+    # The 1515-1520 close never fires, and the data ending does not flatten it.
+    assert parity.trades == []
+    assert [hhmm(e["t"]) for e in kinds(parity, "fill")] == ["10:00"]
+    assert "09:15" not in [hhmm(e["t"]) for e in kinds(parity, "fill") if e["t"] != kinds(parity, "fill")[0]["t"]]
     assert parity.strategy["allow_overnight"] is True
+    assert parity.counters["end_of_data_exits"] == 0
 
 
 def test_tv_parity_ohlc_path_hits_the_far_stop_first_on_a_red_bar() -> None:

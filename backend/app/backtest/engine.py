@@ -328,7 +328,7 @@ def run_backtest(
             if not overnight:
                 reason = "end_of_data" if final and not session_complete(k) else "session_end"
                 broker.force_exit(last_ts, last_c, reason, reason)
-            elif final:
+            elif final and getattr(strategy, "flatten_at_end", True):
                 broker.force_exit(last_ts, last_c, "end_of_data", "end_of_data")
 
         # 2. the bar has closed: the strategy may look at it

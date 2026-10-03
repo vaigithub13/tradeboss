@@ -341,10 +341,22 @@ A window whose best eligible train net is not positive records `no choice: best 
 
 ## Phase 4a — Pine ports (code only)
 
-Three SpringPad scripts, from the Pine sources: Pivot Extension, Log XZ, Price Channel. Each has two execution modes. `realistic` is the default: the engine's 15:15 square-off, 1-minute ordering inside a bar, no overnight position. `tv_parity` is only for the TradingView check. The close decided on the 15:15–15:20 bar fills at the next bar's open, including the next session's 09:15 on a 15-minute chart, and a stop and a target inside one bar follow Pine's open→high→low→close or open→low→high→close path.
+Three SpringPad scripts, from the Pine sources: Pivot Extension, Log XZ, Price Channel. Each has two execution modes. `realistic` is the default: the engine's 15:15 square-off, 1-minute ordering inside a bar, no overnight position. `tv_parity` matches what TradingView does with these scripts. The square-off is `strategy.close(..., when=time(timeframe.period, "1515-1520"))`. On a 5-minute or 15-minute chart that `time()` is na: the session is five minutes long, and no bar of the chart resolution fits inside it, so the close is never sent. Positions carry overnight, and the last trade stays open when the loaded range ends. A stop and a target inside one bar follow Pine's open→high→low→close or open→low→high→close path.
 
 Pivot Extension `faithful` uses a pivot only on the bar that confirms it. A missing stop is a market order, and the long side updates on a confirmed pivot low while flat, the short side on a confirmed pivot high while in a position. `carried_pivots` is Vaibhav's research variant: stops rest on the most recent confirmed pivot high and pivot low, carried forward. It is named as that variant. Walk-forward's default grid is both variants × 5m and 15m, so the research variant is inside the tried total. Log XZ defaults to RMA(close, 14); a buy is the previous XZ ≤ 0 and the current XZ > 0, and XZ is log(average) one bar ago minus log(average) four bars ago. Price Channel is stop-and-reverse, with the channel including the bar that just closed. 5m and 15m are a walk-forward axis for all three (Log XZ lengths 10 and 14; channel lengths 20 and 40).
 
 **Tests** (`backend/tests/test_pine_ports.py`, and the phase 3a no-look-ahead test on every port in both modes): written first. Collection failed (`app.strategies.log_xz` did not exist). Then implemented. Backend suite: 956 passed, 1 skipped.
 
-**Not run.** TradingView parity (waiting on the trade lists), options at slippage 1.0, walk-forward, and the final holdout.
+**TradingView parity (2026-10-03).** NIFTY 5m, script defaults, quantity 1, commission 0, slippage 0, empty state from the first stored bar on 2026-06-22 (09:15) through 2026-10-01. No square-off. Closed-trade results against the TradingView lists (175 / 351 / 267 closed; the last trade left open):
+
+| script | our closed | TV closed | our wins | TV wins | our net | TV net | our PF | TV PF | our closed-trade max DD | TV max DD (includes open trades) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Pivot Extension | 518 | 351 | 183 | 136 | +43.60 | +692.60 | 1.005 | 1.123 | 1,303.85 | 1,097.40 |
+| Log XZ | 279 | 267 | 94 | 97 | −1,055.80 | +988.00 | 0.838 | 1.212 | 2,629.35 | 1,046.05 |
+| Price Channel | 173 | 175 | 68 | 77 | +615.70 | +1,968.70 | 1.118 | 1.416 | 969.50 | 1,033.50 |
+
+Price Channel's last four closed trades and the open long match TradingView's #172–#176 in time, direction, and price (the list is two trades shorter, so our #170 is their #172). Trade #149 on a start that forces 175 closed trades (2026-06-19 12:35) is the short that exits 2026-09-11 13:50, and the cumulative after it is 134.05, not TradingView's 1,348.65. No session open from 2026-06-01 through 2026-07-16 reproduces the three trade counts together, or that cumulative. Log XZ's last trades are the same reversals, with fills 0.05–0.20 points off our 5m opens and one entry a bar earlier. Pivot's Oct 1 14:25 long matches their #351 except the exit, which is our 14:50 open (22358.25) against their 22358.15; the trades before it do not match. Market fills are the bar's open in our engine. Several of TradingView's market prices are 0.05–0.20 off those opens (Upstox versus TradingView's tape). Stop fills are the stop level, not the open; the Price Channel stops in the matched tail equal our levels exactly.
+
+Overnight versus same-day, this run, closed trades only: Pivot +940.95 overnight (71) and −897.35 same-day (447). Log XZ +1,215.55 (68) and −2,271.35 (211). Price Channel +2,045.25 (67) and −1,429.55 (106).
+
+**Not run in this note.** Options at slippage 1.0 and walk-forward are the next step. The final holdout was not run.
