@@ -107,6 +107,12 @@ def strategy_catalog() -> list[dict[str, Any]]:
                 for key, field in fields.items()
             },
         })
+    from app.pine.save import USER_DIR
+    if USER_DIR.is_dir():
+        for path in sorted(USER_DIR.glob("*.py")):
+            if path.name == "__init__.py" or not path.stem.isidentifier():
+                continue
+            out.append({"name": f"user:{path.stem}", "params": {}})
     return out
 
 

@@ -45,6 +45,9 @@ export function convertPine(
   });
 }
 
-export function approveDraft(draftId: string, draftHash: string): Promise<{ approved: boolean }> {
+export function approveDraft(
+  draftId: string,
+  draftHash: string,
+): Promise<{ approved: boolean; path: string; strategy: string }> {
   return postJson("/api/pine/approve", { draft_id: draftId, draft_hash: draftHash });
 }

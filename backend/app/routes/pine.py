@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -9,13 +10,13 @@ from fastapi import APIRouter, HTTPException
 from app.pine.checks import planned_checks, realistic_options_config, summary_card
 from app.pine.convert import convert_draft
 from app.pine.gates import (
-    GateError, accept_report, approve_draft, draft_hash, issue_draft, issue_report,
-    report_hash, require_accepted, require_approved,
+    GateError, accept_report, draft_hash, issue_draft, issue_report, load_draft,
+    remember_written, report_hash, require_accepted, require_approved,
 )
 from app.pine.openai_client import OpenAIError, OpenAIPineClient, openai_key
 from app.pine.report import MissingKeyError, ReportError, build_report
-from app.pine.sandbox import SandboxError
-from app.pine.save import save_user_strategy
+from app.pine.sandbox import SandboxError, check_source
+from app.pine.save import module_name, save_user_strategy
 from app.pine.scanner import scan
 
 router = APIRouter(prefix="/api/pine", tags=["pine"])
@@ -98,13 +99,29 @@ def convert_script(body: dict[str, Any]) -> dict[str, Any]:
 
 
 @router.post("/approve")
-def approve_script(body: dict[str, Any]) -> dict[str, bool]:
-    """The Approve button for one exact diff. Saving cannot record this."""
+def approve_script(body: dict[str, Any]) -> dict[str, Any]:
+    """The Approve button. Re-check the AST, then write the strategy file."""
+    draft_id = str(body.get("draft_id") or "")
+    digest = str(body.get("draft_hash") or "")
     try:
-        approve_draft(str(body.get("draft_id") or ""), str(body.get("draft_hash") or ""))
+        issued = load_draft(draft_id)
+        python = issued.get("python") if issued is not None else None
+        if issued is None or issued.get("hash") != digest or not isinstance(python, str) or draft_hash(python) != digest:
+            raise GateError("this diff was not issued")
+        check_source(python)
+        chosen = str(body.get("name") or "").strip() or module_name(python)
+        path = save_user_strategy(chosen, python, replace=bool(body.get("replace")))
+        shown = _repo_path(path)
+        remember_written(draft_id, digest, path=shown, name=chosen)
     except GateError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return {"approved": True}
+    except SandboxError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=f"{exc} already exists") from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"approved": True, "path": _repo_path(path), "strategy": f"user:{chosen}"}
 
 
 @router.post("/save")
@@ -133,6 +150,14 @@ def save_script(body: dict[str, Any]) -> dict[str, Any]:
         include_walk_forward=bool(body.get("walk_forward")),
     )
     return {"path": str(path), "strategy": f"user:{name}", "card": card}
+
+
+def _repo_path(path: Path) -> str:
+    from app.config import ROOT_DIR
+    try:
+        return str(path.resolve().relative_to(ROOT_DIR))
+    except ValueError:
+        return str(path)
 
 
 def _source(body: dict[str, Any]) -> str:

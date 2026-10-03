@@ -74,6 +74,7 @@ function PineEditor() {
   const [draftId, setDraftId] = useState<string | null>(null);
   const [draftHash, setDraftHash] = useState<string | null>(null);
   const [draftApproved, setDraftApproved] = useState(false);
+  const [savedPath, setSavedPath] = useState<string | null>(null);
   const [draftErrors, setDraftErrors] = useState<string[]>([]);
   const [issued, setIssued] = useState<PineReport | null>(null);
   const [plotNote, setPlotNote] = useState<string | null>(null);
@@ -91,6 +92,7 @@ function PineEditor() {
     setDraftId(null);
     setDraftHash(null);
     setDraftApproved(false);
+    setSavedPath(null);
     setDraftErrors([]);
     setIssued(null);
     setCard(null);
@@ -132,6 +134,7 @@ function PineEditor() {
     setBusy(true);
     setError(null);
     setDraftApproved(false);
+    setSavedPath(null);
     try {
       const result = await convertPine(source, issued);
       setDraft(result.python);
@@ -150,8 +153,9 @@ function PineEditor() {
     setBusy(true);
     setError(null);
     try {
-      await approveDraft(draftId, draftHash);
+      const saved = await approveDraft(draftId, draftHash);
       setDraftApproved(true);
+      setSavedPath(saved.path);
     } catch (err) {
       setDraftApproved(false);
       setError(err instanceof ApiError ? err.message : "the diff was not approved");
@@ -254,11 +258,12 @@ function PineEditor() {
           <button
             type="button"
             className="mt-2 rounded border border-white/15 px-2 py-1 disabled:opacity-40"
-            disabled={!draftId || !draftHash || busy}
+            disabled={!draftId || !draftHash || busy || draftApproved}
             onClick={() => void onApprove()}
           >
-            {draftApproved ? "Diff approved" : "Approve diff"}
+            {draftApproved ? "Saved" : "Approve diff"}
           </button>
+          {savedPath && <p className="mt-1 break-all">Saved {savedPath}</p>}
         </section>
       )}
     </aside>

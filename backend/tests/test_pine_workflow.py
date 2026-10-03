@@ -528,6 +528,63 @@ def test_save_without_approval_is_refused_and_an_edited_diff_is_refused() -> Non
     assert not target.exists()
 
 
+def test_approve_writes_the_strategy_and_a_restart_keeps_it(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.backtest.catalog import strategy_catalog
+    from app.main import app
+    from app.pine import gates
+    from app.pine.gates import accept_report, clear_gates, issue_draft, issue_report, load_draft, require_accepted
+    from app.pine.save import USER_DIR
+
+    real_user = USER_DIR
+    monkeypatch.setattr(gates, "_STORE", tmp_path / "pine")
+    monkeypatch.setattr("app.pine.save.USER_DIR", tmp_path / "user")
+    clear_gates()
+    report = {
+        "scan": scan(SESSION_CLOSE),
+        "model": {"claims": {"session_close_fires": False}},
+        "warnings": [],
+        "card": {},
+    }
+    report_id, report_digest = issue_report(report)
+    accept_report(report_id, report_digest)
+    draft_id, digest = issue_draft(GOOD)
+    with TestClient(app) as client:
+        saved = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
+    assert saved.status_code == 200
+    body = saved.json()
+    assert body["strategy"] == "user:always_buy"
+    written = tmp_path / "user" / "always_buy.py"
+    assert written.read_text() == GOOD
+    assert body["path"].endswith("always_buy.py")
+
+    clear_gates()
+    kept = load_draft(draft_id)
+    assert kept is not None and kept["python"] == GOOD and kept["approved"] is True
+    require_accepted(report_id, report_digest)
+    assert written.is_file()
+    assert "user:always_buy" in [item["name"] for item in strategy_catalog()]
+    assert not (real_user / "always_buy.py").exists()
+
+
+def test_approve_does_not_write_a_draft_that_fails_the_ast_check(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine import gates
+    from app.pine.gates import clear_gates, issue_draft
+
+    monkeypatch.setattr(gates, "_STORE", tmp_path / "pine")
+    monkeypatch.setattr("app.pine.save.USER_DIR", tmp_path / "user")
+    clear_gates()
+    draft_id, digest = issue_draft("import os\n")
+    with TestClient(app) as client:
+        refused = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
+    assert refused.status_code == 400
+    assert list((tmp_path / "user").glob("*.py")) == []
+
+
 def test_conversion_uses_its_own_model_and_at_least_8000_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AI_MODEL", "gpt-4o-mini")
     monkeypatch.setenv("MAX_AI_OUTPUT_TOKENS", "800")

@@ -425,6 +425,8 @@ Log XZ is unchanged across the three settings: its entries are market orders at 
 
 **Pine conversion fixes (2026-10-04).** `time()` session strings that arrive through an `input()` default or a simple assignment are resolved. A session that cannot be resolved is `unresolved: check by hand`, never clear. Price Channel's `1515-1520` input is a hit on 5m and 15m, and the overnight trap is a hit. The model saying the close does not fire while the scanner says clear or unresolved is a disagreement. A draft that is not a Strategy subclass is not a ready draft; the converter repairs at most twice. Conversion uses its own model (`gpt-5.4` on this account, at least 8000 output tokens). The report still uses `gpt-4o-mini`. Generated tests that do not run are dropped.
 
+**Pine approve saves the file (2026-10-04).** Approve re-checks the AST and writes `app/strategies/user/<name>.py`. The panel shows that path. Drafts and acceptances are files in `data/pine/`, so a backend restart keeps the draft, the acceptance, and the saved strategy. The catalog lists `user:<name>`.
+
 **Price Channel entry window (2026-10-04).** `entry_window` was using the bar's start minute, so a 15-minute bar starting at 14:45 counted as inside 09:15-14:50. It now uses the scanner rule: the bar fits only when it starts at or after 09:15 and ends strictly before 14:50. The 14:45 bar of a 15-minute chart ends at 15:00 and does not arm. A 5-minute bar that ends exactly at 14:50 does not arm either. A stop armed on an earlier bar still fills after the window. Realistic hand-port rerun, NIFTY, slippage 1.0, delta-adjusted options, sessions normal and weekend_full. Holdout was not run.
 
 | window | timeframe | length | trades | index ₹ | option ₹ |
