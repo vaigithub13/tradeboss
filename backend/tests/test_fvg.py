@@ -57,6 +57,7 @@ def test_defaults_and_a_bad_mitigation_mode() -> None:
     assert params["when_mitigated"] == "stop"
     assert params["show_last"] == 10
     assert params["timeframe"] == ""
+    assert params["session_gaps"] == "include"
     assert PANES["fvg"] == "price"
     assert OUTPUTS["fvg"] == ["bull_bottom", "bull_top", "bear_bottom", "bear_top"]
     with pytest.raises(ValueError):
@@ -154,6 +155,50 @@ def test_show_last_keeps_the_newest_gap() -> None:
     )
     boxes = fvg_boxes(two, {"show_last": 1, "mitigation": "touch"})
     assert [box["formed_index"] for box in boxes] == [5]
+
+
+def test_a_higher_timeframe_gap_waits_until_candle_3_closes() -> None:
+    from tests.conftest import ist_ts
+
+    start = ist_ts(2026, 10, 1, 10, 0)
+    frame = pd.DataFrame(
+        {
+            "time": [start, start + 900, start + 1800],
+            "open": [98, 101, 108],
+            "high": [100, 112, 112],
+            "low": [97, 100, 105],
+            "close": [99, 110, 111],
+            "volume": [0.0, 0.0, 0.0],
+        }
+    )
+    # Candle 3 starts at 10:30 and closes at 10:45. A 5-minute chart at 10:40 has not closed it.
+    hidden = {"show_last": 10, "bar_seconds": 900, "as_of": start + 1800 + 600}
+    assert fvg_boxes(frame, hidden) == []
+    shown = {"show_last": 10, "bar_seconds": 900, "as_of": start + 2700}
+    assert fvg_boxes(frame, shown)[0]["formed_index"] == 2
+
+
+def test_overnight_gaps_are_included_unless_the_setting_excludes_them() -> None:
+    from tests.conftest import ist_ts
+
+    frame = pd.DataFrame(
+        {
+            "time": [
+                ist_ts(2026, 10, 1, 15, 0),
+                ist_ts(2026, 10, 1, 15, 15),
+                ist_ts(2026, 10, 5, 9, 15),
+            ],
+            "open": [98, 101, 108],
+            "high": [100, 112, 112],
+            "low": [97, 100, 110],
+            "close": [99, 110, 111],
+            "volume": [0.0, 0.0, 0.0],
+        }
+    )
+    kept = fvg_boxes(frame, {"show_last": 10, "session_gaps": "include"})
+    assert len(kept) == 1
+    assert kept[0]["bottom"] == 100
+    assert fvg_boxes(frame, {"show_last": 10, "session_gaps": "exclude"}) == []
 
 
 def test_later_bars_do_not_rewrite_the_gap_or_draw_it_early() -> None:

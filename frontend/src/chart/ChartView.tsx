@@ -3,6 +3,7 @@ import {
   ColorType,
   CrosshairMode,
   HistogramSeries,
+  LineSeries,
   TickMarkType,
   LineStyle,
   createChart,
@@ -43,6 +44,12 @@ import {
 import { hasVolume } from "./volume";
 import { browserStorage } from "../indicators/persistence";
 import { clipSeries, seriesThroughCursor } from "../replay/cap";
+import { fetchFvg } from "../draw/api";
+import { bindDrawings, type DrawBag } from "../draw/bind";
+import { DrawPrimitive, FvgPrimitive } from "../draw/primitive";
+import { whitespaceTimes } from "../draw/model";
+import { useDrawStore } from "../draw/store";
+import { useChartStore } from "../store/chartStore";
 
 const UP = "#26a69a";
 const DOWN = "#ef5350";
@@ -63,6 +70,7 @@ const tickMarkFormatter: TickMarkFormatter = (time, type) =>
   formatTick(Number(time), TICK_KIND[type]);
 
 interface Props {
+  symbol: string;
   /** shown in the legend (e.g. NIFTY, RELIANCE) */
   displayName: string;
   timeframe: Timeframe;
@@ -86,7 +94,7 @@ interface Props {
 }
 
 export function ChartView({
-  displayName, timeframe, scope, candles: loadedCandles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
+  symbol, displayName, timeframe, scope, candles: loadedCandles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
   markers = [], focus = null, onPickTime, tradeCard, levels = [], cursor = null,
 }: Props) {
   const candles = useMemo(() => seriesThroughCursor(loadedCandles, cursor).bars, [loadedCandles, cursor]);
@@ -94,6 +102,10 @@ export function ChartView({
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
+  const whitespaceRef = useRef<ISeriesApi<"Line"> | null>(null);
+  const drawPrimitiveRef = useRef<DrawPrimitive | null>(null);
+  const fvgPrimitiveRef = useRef<FvgPrimitive | null>(null);
+  const drawBagRef = useRef<DrawBag>({ candles: [], timeframe, cursor });
   const timeframeRef = useRef(timeframe);
   const candlesRef = useRef<readonly Candle[]>(candles);
   const snapshotRef = useRef<Snapshot | null>(null);
@@ -112,6 +124,15 @@ export function ChartView({
 
   const items = useIndicatorStore((s) => s.items);
   const cached = useIndicatorStore((s) => s.data[scope]);
+  const sessions = useChartStore((s) => s.loaded?.sessions);
+  const holidays = useDrawStore((s) => s.holidays);
+  const drawDrawings = useDrawStore((s) => s.drawings);
+  const drawHide = useDrawStore((s) => s.hideAll);
+  const drawSelected = useDrawStore((s) => s.selectedId);
+  const drawDraft = useDrawStore((s) => s.draft);
+  const drawHover = useDrawStore((s) => s.hover);
+  const drawTool = useDrawStore((s) => s.tool);
+  drawBagRef.current = { candles, timeframe, cursor };
 
   const volumeVisible = useMemo(() => hasVolume(candles), [candles]);
 
@@ -163,6 +184,7 @@ export function ChartView({
     });
 
     chart.subscribeClick((param) => {
+      if (useDrawStore.getState().tool !== "cursor") return;
       if (param.time !== undefined) onPickTimeRef.current?.(Number(param.time));
     });
 
@@ -181,16 +203,36 @@ export function ChartView({
 
     if (import.meta.env.DEV) (window as unknown as { __chart?: unknown }).__chart = { chart, candleSeries };
 
+    const whitespace = chart.addSeries(LineSeries, {
+      color: "rgba(0,0,0,0)",
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      autoscaleInfoProvider: () => null,
+    });
+    const drawings = new DrawPrimitive();
+    const gaps = new FvgPrimitive();
+    candleSeries.attachPrimitive(drawings);
+    candleSeries.attachPrimitive(gaps);
+    const unbind = bindDrawings(chart, candleSeries, el, drawings, drawBagRef);
+
     chartRef.current = chart;
     candleSeriesRef.current = candleSeries;
+    whitespaceRef.current = whitespace;
+    drawPrimitiveRef.current = drawings;
+    fvgPrimitiveRef.current = gaps;
     layerRef.current = new IndicatorLayer(chart);
     return () => {
+      unbind();
       layerRef.current?.dispose();
       markersRef.current = null;
       chart.remove();
       chartRef.current = null;
       candleSeriesRef.current = null;
       volumeSeriesRef.current = null;
+      whitespaceRef.current = null;
+      drawPrimitiveRef.current = null;
+      fvgPrimitiveRef.current = null;
       layerRef.current = null;
     };
   }, []);
@@ -315,6 +357,78 @@ export function ChartView({
   useEffect(() => {
     layerRef.current?.sync(items, (item) => clipSeries(cached?.[indicatorKey(item.type, item.params)], cursor));
   }, [items, cached, volumeVisible, candles, cursor]);
+
+  useEffect(() => {
+    const series = whitespaceRef.current;
+    if (!series) return;
+    const last = candles[candles.length - 1];
+    if (!last) {
+      series.setData([]);
+      return;
+    }
+    const slots = whitespaceTimes(last.time, timeframe, 48, holidays);
+    series.setData(slots.map((time) => ({ time: time as UTCTimestamp })));
+  }, [candles, timeframe, holidays]);
+
+  useEffect(() => {
+    drawPrimitiveRef.current?.setScene({
+      drawings: drawDrawings,
+      timeframe,
+      cursor,
+      hideAll: drawHide,
+      selectedId: drawSelected,
+      draft: drawDraft,
+      hover: drawHover,
+      tool: drawTool,
+    });
+  }, [drawDrawings, timeframe, cursor, drawHide, drawSelected, drawDraft, drawHover, drawTool]);
+
+  const fvgKey = items
+    .filter((item) => item.type === "fvg" && item.visible)
+    .map((item) => `${item.id}:${JSON.stringify(item.params)}:${item.colors["bull"] ?? ""}:${item.colors["bear"] ?? ""}`)
+    .join("|");
+  const chartFrom = candles[0]?.time ?? 0;
+  const chartLast = candles[candles.length - 1]?.time ?? 0;
+  const sessionKey = (sessions ?? []).join(",");
+
+  useEffect(() => {
+    const primitive = fvgPrimitiveRef.current;
+    if (!primitive) return;
+    const active = items.filter((item) => item.type === "fvg" && item.visible);
+    if (active.length === 0 || candles.length === 0) {
+      primitive.setLayers([]);
+      return;
+    }
+    const ac = new AbortController();
+    void Promise.all(
+      active.map(async (item) => {
+        const res = await fetchFvg(
+          {
+            symbol,
+            timeframe,
+            sessions: sessions ?? [],
+            cursor,
+            chartLast: chartLast || null,
+            from: chartFrom,
+            to: chartLast,
+            params: item.params,
+          },
+          ac.signal,
+        );
+        return {
+          boxes: res.boxes,
+          colors: { bull: item.colors["bull"] ?? "#26a69a", bear: item.colors["bear"] ?? "#ef5350" },
+        };
+      }),
+    )
+      .then((layers) => {
+        if (!ac.signal.aborted) primitive.setLayers(layers);
+      })
+      .catch(() => {
+        if (!ac.signal.aborted) primitive.setLayers([]);
+      });
+    return () => ac.abort();
+  }, [fvgKey, symbol, timeframe, cursor, chartFrom, chartLast, sessionKey, items, candles.length, sessions]);
 
   const lastIndex = candles.length - 1;
   const shownIndex = (hoverTime === null ? undefined : indexOfTime(candles, hoverTime)) ?? lastIndex;

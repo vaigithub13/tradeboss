@@ -1,13 +1,13 @@
 /**
- * Drawing model spec. Written before the chart toolbar.
- * Implementation is not in this slice. See PROJECT_PLAN.md, "Drawings and fair value gaps".
+ * Drawing model. See PROJECT_PLAN.md, "Drawings and fair value gaps".
  *
  * Public API under test (frontend/src/draw/model.ts, not written yet):
  *
  *   mapAnchor(anchor, timeframe) -> same price, time moved to the bar that contains it
  *   whitespaceTimes(lastBarTime, timeframe, count) -> future bar starts, after the last candle
  *   snapPrice(price, bar) -> nearest open/high/low/close; a tie keeps the earlier one
- *   shownDrawings(drawings, cursor, hideAll) -> hides createdAt after the cursor, and everything when hideAll
+ *   shownDrawings(drawings, cursor, hideAll) -> hides knownAt after the cursor, and everything when hideAll
+ *   stampKnownAt(drawing, cursor, lastBarTime) -> replay stamps the cursor, otherwise the last bar
  *   createHistory / commit / undo / redo
  *   editDrawing refuses changes while lockAll is set
  *   removeDrawing, translate, setAnchor
@@ -25,6 +25,7 @@ import {
   setAnchor,
   shownDrawings,
   snapPrice,
+  stampKnownAt,
   translate,
   whitespaceTimes,
   type Drawing,
@@ -40,7 +41,7 @@ const T_1300 = 1_790_839_800;
 
 const bar = { open: 22400, high: 22420, low: 22390, close: 22416 };
 
-function drawing(id: string, createdAt: number, time = T_1247): Drawing {
+function drawing(id: string, knownAt: number, time = T_1247): Drawing {
   return {
     id,
     tool: "trend",
@@ -48,7 +49,7 @@ function drawing(id: string, createdAt: number, time = T_1247): Drawing {
       { time, price: 100 },
       { time: time + 60, price: 110 },
     ],
-    createdAt,
+    knownAt,
     text: "",
     style: {
       color: "#2962ff",
@@ -81,6 +82,17 @@ describe("anchors stay in time and price", () => {
     expect(stored.time).toBe(next);
   });
 
+  it("skips the night, the weekend and a holiday, and lands on that candle when it arrives", () => {
+    const last = 1_790_847_900; // Thu 1 Oct 2026 15:15 IST
+    const mondayOpen = 1_791_171_900; // Mon 5 Oct 2026 09:15, after the 2 Oct holiday
+    const [slot] = whitespaceTimes(last, "15m", 1, ["2026-10-02"]);
+    expect(slot).toBe(mondayOpen);
+    expect(slot).not.toBe(1_790_848_800); // 15:30 is the close, not a bar
+    expect(slot).not.toBe(1_790_912_700); // Fri 2 Oct 09:15 is a holiday
+    const anchor = { time: slot, price: 22400 };
+    expect(mapAnchor(anchor, "15m").time).toBe(mondayOpen);
+  });
+
   it("snaps to the nearest open, high, low, or close", () => {
     expect(snapPrice(22410, bar)).toBe(22416);
     expect(snapPrice(22410, { open: 22400, high: 22420, low: 22390, close: 22450 })).toBe(22400);
@@ -101,6 +113,7 @@ describe("undo, lock, and replay", () => {
     history.undo();
     history.commit({ ...empty, drawings: [drawing("c", T_1245)] });
     expect(history.redo().drawings.map((item) => item.id)).toEqual(["c"]);
+    expect(history.undo().drawings.map((item) => item.id)).toEqual(["a"]);
     expect(history.undo()).toEqual(empty);
   });
 
@@ -118,12 +131,13 @@ describe("undo, lock, and replay", () => {
     expect(line.anchors[1]?.price).toBe(110);
   });
 
-  it("hides a drawing created after the replay cursor, and hides every drawing when hide all is on", () => {
-    const early = drawing("early", T_1245);
-    const later = drawing("later", T_1300);
-    expect(shownDrawings([early, later], T_1245, false).map((item) => item.id)).toEqual(["early"]);
-    expect(shownDrawings([early, later], null, false)).toHaveLength(2);
-    expect(shownDrawings([early], null, true)).toEqual([]);
+  it("keeps a drawing made during replay and hides a live drawing from a later date", () => {
+    const during = stampKnownAt(drawing("during", 0), T_1245, T_1300);
+    expect(during.knownAt).toBe(T_1245);
+    const laterLive = drawing("later", T_1300);
+    expect(shownDrawings([during, laterLive], T_1245, false).map((item) => item.id)).toEqual(["during"]);
+    expect(shownDrawings([during, laterLive], null, false)).toHaveLength(2);
+    expect(shownDrawings([during], null, true)).toEqual([]);
   });
 });
 

@@ -80,6 +80,8 @@ export function legendRows(args: {
           );
           break;
         }
+        case "fvg":
+          break;
       }
     }
     rows.push(row);

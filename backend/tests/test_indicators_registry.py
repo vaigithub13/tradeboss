@@ -31,10 +31,10 @@ PRICE_TOLERANCE = 0.01
 
 
 def test_types_panes_and_outputs() -> None:
-    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap")
+    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap", "fvg")
     assert PANES == {
         "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price",
-        "rsi": "separate", "macd": "separate",
+        "rsi": "separate", "macd": "separate", "fvg": "price",
     }  # fmt: skip
     assert OUTPUTS == {
         "sma": ["sma"],
@@ -44,6 +44,7 @@ def test_types_panes_and_outputs() -> None:
         "rsi": ["rsi"],
         "macd": ["macd", "signal", "hist"],
         "vwap": ["vwap"],
+        "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
     }
 
 

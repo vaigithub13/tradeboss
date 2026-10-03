@@ -212,6 +212,8 @@ export class IndicatorLayer {
         this.chart.panes()[pane]?.setStretchFactor(SEPARATE_PANE_STRETCH);
         return bundle("macd", { hist, macd, signal });
       }
+      case "fvg":
+        return bundle("fvg", {});
     }
   }
 
@@ -255,6 +257,8 @@ export class IndicatorLayer {
         lineJob("macd", () => linePoints(t, out("macd")));
         lineJob("signal", () => linePoints(t, out("signal")));
         jobs.push({ role: "hist", points: () => histogramPoints(t, out("hist"), color("histUp"), color("histDown")) });
+        break;
+      case "fvg":
         break;
     }
 

@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { SeriesMarker, Time, UTCTimestamp } from "lightweight-charts";
 
 import { ChartView } from "./chart/ChartView";
+import { DrawSync, DrawToolbar } from "./draw/toolbar";
 import { TimeframeBar } from "./chart/TimeframeBar";
 import { AnalysisPanel } from "./panels/AnalysisPanel";
 import { BacktestPanel } from "./panels/BacktestPanel";
@@ -248,9 +249,14 @@ export default function App() {
       )}
       {panelOpen && <BacktestPanel />}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <main className="relative min-h-0 flex-1">
+      <main className="relative flex min-h-0 flex-1">
         {loaded && symbol ? (
+          <>
+          <DrawSync symbol={loaded.symbol} />
+          <DrawToolbar />
+          <div className="relative h-full min-h-0 min-w-0 flex-1">
           <ChartView
+            symbol={loaded.symbol}
             displayName={info?.display_name ?? loaded.symbol}
             timeframe={loaded.timeframe}
             scope={scopeKey(loaded.symbol, loaded.timeframe, loaded.sessions)}
@@ -289,8 +295,10 @@ export default function App() {
             ]}
             cursor={replayActive ? replayCursorTime : null}
           />
+          </div>
+          </>
         ) : (
-          <div className="flex h-full items-center justify-center text-sm text-white/40">
+          <div className="flex h-full flex-1 items-center justify-center text-sm text-white/40">
             {error ??
               (backendStatus === "disconnected"
                 ? "Backend not reachable. Start it with: npm run dev"

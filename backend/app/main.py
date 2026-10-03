@@ -15,6 +15,8 @@ from app.config import settings
 from app.routes.ai import router as ai_router
 from app.routes.backtests import router as backtests_router
 from app.routes.candles import router as candles_router
+from app.routes.drawings import router as drawings_router
+from app.routes.fvg import router as fvg_router
 from app.routes.indicators import router as indicators_router
 from app.routes.live import router as live_router
 from app.routes.pine import router as pine_router
@@ -57,6 +59,8 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(backtests_router)
 app.include_router(candles_router)
 app.include_router(indicators_router)
+app.include_router(drawings_router)
+app.include_router(fvg_router)
 app.include_router(upstox_router)
 app.include_router(live_router)
 app.include_router(pine_router)

@@ -224,7 +224,7 @@ Stored candles only. No Upstox call. Replay does not start or stop the live feed
 
 ## Drawings and fair value gaps
 
-Not built. The tests in `frontend/src/draw/model.test.ts`, `backend/tests/test_drawings.py`, and `backend/tests/test_fvg.py` are the contract. They fail until this section is built.
+Built. The tests in `frontend/src/draw/model.test.ts`, `backend/tests/test_drawings.py`, and `backend/tests/test_fvg.py` are the contract. The left toolbar draws on the candlestick series with a Lightweight Charts v5 primitive. Fair value gaps are `fvg` in the indicator registry, and the chart draws the boxes from `POST /api/fvg`.
 
 ### Manual drawings
 
@@ -232,7 +232,7 @@ A left toolbar, in this order: cursor, trend line, ray, extended line, horizonta
 
 An anchor is `{ time, price }`. `time` is unix seconds. Nothing is stored in pixels. Zoom, scroll, a new candle, and a restart do not move an anchor. Switching timeframe does not rewrite the stored time. On screen, the anchor is drawn on the bar that contains that time. Intraday bars use the same 09:15 IST buckets as `resample`. A 12:47 anchor on a 15-minute chart is drawn at the 12:45 bar (unix `1790838900` on 1 Oct 2026) and the stored time stays 12:47 (`1790839020`). A 10:20 anchor on a 1-hour chart is drawn at 10:15. A daily bar maps to 09:15 IST of that date. A weekly bar maps to 09:15 IST on that week's Monday.
 
-The empty area to the right of the last candle is drawable. A whitespace series on the same time scale carries future bar-start times (no price, no price line, not in the legend). Lightweight Charts can then turn those times into coordinates. An anchor on the next 15-minute slot after `1790838900` is `1790839800`. It is not pulled back onto the last candle.
+The empty area to the right of the last candle is drawable. A whitespace series on the same time scale carries future bar-start times (no price, no price line, not in the legend). Those times follow the NSE session: 09:15–15:30 buckets, and they skip the night, the weekend, and holidays from the NSE calendar. An anchor on the next 15-minute slot after `1790838900` (12:45 on 1 Oct 2026) is `1790839800`. The slot after 15:15 that day is Monday 5 Oct 09:15 (`1791171900`), because 2 Oct 2026 is a holiday. It is not pulled back onto the last candle. When that candle arrives, the stored time is already the candle's start, so the line lands on it.
 
 Magnet snaps the price to the nearest of that bar's open, high, low, and close. An equal distance keeps the earlier of open, high, low, close.
 
@@ -244,7 +244,7 @@ Select, drag a handle, and move the whole drawing. Delete removes the selected d
 
 Drawings are per symbol, not per timeframe, in SQLite at `data/drawings.sqlite` (the `data/` directory stays gitignored). `GET /api/drawings?symbol=` loads them. `PUT /api/drawings` replaces that symbol's list. Export is `{ "symbol", "drawings" }`. Import replaces that symbol and leaves every other symbol alone. A missing symbol, an unknown tool, or an anchor without `time` and `price` is rejected. The allowed tools are `trend`, `ray`, `extended`, `horizontal`, `horizontal_ray`, `vertical`, `rectangle`, `fib`, `text`, and `measure`.
 
-Each drawing has `createdAt`, the replay cursor when it was made, or the last candle's time when not replaying. While a replay cursor is set, a drawing with `createdAt` after that cursor is not drawn. A drawing made at the cursor is drawn, including one whose anchor sits in the whitespace to the right. With no cursor, age does not hide anything. New live candles do not change stored anchors. The lines are a Lightweight Charts v5 series primitive on the candlestick series, so they move with the scale.
+Each drawing has `knownAt`. A drawing made during replay is stamped with the replay cursor, so it stays visible at that cursor. A drawing made live is stamped with the last candle's time. While a replay cursor is set, a drawing whose `knownAt` is after that cursor is not drawn. A later live drawing is hidden in an earlier replay. With no cursor, age does not hide anything. New live candles do not change stored anchors. The lines are a Lightweight Charts v5 series primitive on the candlestick series, so they move with the scale.
 
 ### Automatic fair value gap
 
@@ -255,6 +255,10 @@ Three consecutive candles. Candle 3 is the bar that has just closed. Bullish: `l
 Mitigation looks only at bars after candle 3. `touch`: a bullish bar whose low is at or below the top, or a bearish bar whose high is at or above the bottom. `half`: price reaches the midpoint (bullish low at or below it, bearish high at or above it). `full`: price trades through the far side (bullish low at or below the bottom, bearish high at or above the top). The default is `touch`. `when_mitigated` is `stop` or `fade`. Stop ends the box on the mitigation bar. Fade keeps the box extending and marks it faded. An open box extends and is not faded.
 
 `min_gap` defaults to 0. `min_gap_mode` is `points` or `percent`. Points compare the gap to `min_gap`. Percent compares `gap / close of candle 3 * 100` to `min_gap`. A gap equal to the minimum is kept. `show_last` defaults to 10 and keeps the most recently formed boxes. `timeframe` defaults to empty, which means the bars passed in. The chart asks for that timeframe's candles and then calls `fvg_boxes`. The function does not resample.
+
+A higher-timeframe gap is drawn on a lower chart only after candle 3 of the higher timeframe has closed. `fvg_boxes` drops a box when `bar_seconds` is set and `formed time + bar_seconds` is still after `as_of`. The chart's `as_of` is the replay cursor, or the last bar's close once that bar has finished, or the last bar's start while it is still forming.
+
+`session_gaps` is `include` (the default) or `exclude`. Exclude drops a gap whose candle 1 and candle 3 fall on different IST dates (an overnight gap). The indicator setting is labelled Overnight gaps.
 
 `compute` arrays `bull_top`, `bull_bottom`, `bear_top`, and `bear_bottom` are set on candle 3 only, and are NaN before that. `show_last` dropping an older box clears that bar too.
 

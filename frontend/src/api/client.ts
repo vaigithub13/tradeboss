@@ -139,6 +139,16 @@ export async function getJson<T>(url: string, signal?: AbortSignal): Promise<T> 
   return parseResponse<T>(await fetch(url, signal ? { signal } : undefined));
 }
 
+export async function putJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+    ...(signal ? { signal } : {}),
+  });
+  return parseResponse<T>(res);
+}
+
 export async function postJson<T>(url: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(url, {
     method: "POST",

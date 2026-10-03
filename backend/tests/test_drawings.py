@@ -19,7 +19,7 @@ def _line(drawing_id: str, when: int = 1_790_839_020) -> dict:
             {"time": when, "price": 22416.0},
             {"time": when + 60, "price": 22420.0},
         ],
-        "createdAt": when,
+        "knownAt": when,
         "text": "",
         "style": {
             "color": "#2962ff",

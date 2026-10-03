@@ -28,6 +28,26 @@ function ParamField({
   const [draft, setDraft] = useState(String(value));
   const [error, setError] = useState<string | null>(null);
 
+  if (def.kind === "choice") {
+    return (
+      <label className="flex items-center justify-between gap-2 text-xs text-white/70">
+        {def.label}
+        <select
+          value={String(value)}
+          aria-label={def.label}
+          onChange={(e) => setError(onCommit(e.target.value))}
+          className="w-28 rounded border border-white/15 bg-[#0b0e14] px-1.5 py-1 text-xs text-white"
+        >
+          {(def.options ?? []).map((option) => (
+            <option key={option.value || "chart"} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+    );
+  }
+
   if (def.kind === "source") {
     return (
       <label className="flex items-center justify-between gap-2 text-xs text-white/70">

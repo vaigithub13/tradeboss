@@ -14,15 +14,16 @@ import numpy as np
 import pandas as pd
 
 from app.indicators.basic import SOURCES, bollinger, ema, sma, source_series
+from app.indicators.fvg import compute_fvg, validate_fvg_params
 from app.indicators.momentum import macd, rsi
 from app.indicators.volatility import supertrend
 from app.indicators.volume import vwap
 
-INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap")
+INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap", "fvg")
 
 PANES: dict[str, str] = {
     "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price",
-    "rsi": "separate", "macd": "separate",
+    "rsi": "separate", "macd": "separate", "fvg": "price",
 }  # fmt: skip
 
 OUTPUTS: dict[str, list[str]] = {
@@ -33,6 +34,7 @@ OUTPUTS: dict[str, list[str]] = {
     "rsi": ["rsi"],
     "macd": ["macd", "signal", "hist"],
     "vwap": ["vwap"],
+    "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
 }
 
 MIN_WARMUP_BARS = 500
@@ -99,6 +101,8 @@ def _coerce(name: str, spec: ParamSpec, value: Any) -> Any:
 
 def validate_params(itype: str, params: Mapping[str, Any] | None) -> dict[str, Any]:
     """Defaults filled in; unknown names / out-of-range values raise ValueError."""
+    if itype == "fvg":
+        return validate_fvg_params(params)
     if itype not in PARAMS:
         raise ValueError(f"Unknown indicator type {itype!r}; expected one of {list(INDICATOR_TYPES)}")
     specs = PARAMS[itype]
@@ -129,6 +133,8 @@ def warmup_bars(itype: str, params: Mapping[str, Any], bar_minutes: int) -> int:
         rule = 8 * (params["slow"] + 1) + 8 * (params["signal"] + 1)
     elif itype == "vwap":
         rule = math.ceil(1440 / bar_minutes)  # 24h of bars: always reaches the start of the day
+    elif itype == "fvg":
+        rule = 2  # candle 3 is the first bar a gap can exist on
     else:
         raise ValueError(f"Unknown indicator type {itype!r}")
     floor = MIN_SUPERTREND_WARMUP_BARS if itype == "supertrend" else MIN_WARMUP_BARS
@@ -154,6 +160,8 @@ def compute(df: pd.DataFrame, itype: str, params: Mapping[str, Any]) -> dict[str
         series = {name: m[name] for name in OUTPUTS["macd"]}
     elif itype == "vwap":
         series = {"vwap": vwap(df, params["source"])}
+    elif itype == "fvg":
+        return compute_fvg(df, dict(params))
     else:
         raise ValueError(f"Unknown indicator type {itype!r}")
     return {name: s.to_numpy(dtype=float) for name, s in series.items()}

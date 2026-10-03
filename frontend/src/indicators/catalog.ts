@@ -1,6 +1,6 @@
 import type { Timeframe } from "../api/client";
 
-export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap"] as const;
+export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap", "fvg"] as const;
 export type IndicatorType = (typeof INDICATOR_TYPES)[number];
 
 export const SOURCES = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"] as const;
@@ -11,12 +11,14 @@ export type Params = Record<string, ParamValue>;
 export interface ParamDef {
   key: string;
   label: string;
-  kind: "int" | "float" | "source";
+  kind: "int" | "float" | "source" | "choice";
   default: ParamValue;
-  /** int: inclusive; float: exclusive lower bound (mirrors the backend) */
+  /** int: inclusive; float: exclusive lower bound unless inclusiveMin (mirrors the backend) */
   min?: number;
   max?: number;
   step?: number;
+  inclusiveMin?: boolean;
+  options?: { value: string; label: string }[];
 }
 
 export interface ColorDef {
@@ -120,6 +122,45 @@ export const CATALOG: Record<IndicatorType, IndicatorDef> = {
     colors: [{ key: "line", label: "Line", default: "#00bcd4" }],
     outputs: ["vwap"],
   },
+  fvg: {
+    type: "fvg", label: "FVG", pane: "price",
+    params: [
+      { key: "min_gap", label: "Min gap", kind: "float", default: 0, min: 0, max: 1_000_000, step: 0.1, inclusiveMin: true },
+      {
+        key: "min_gap_mode", label: "Min gap in", kind: "choice", default: "points",
+        options: [{ value: "points", label: "Points" }, { value: "percent", label: "Percent" }],
+      },
+      {
+        key: "mitigation", label: "Mitigation", kind: "choice", default: "touch",
+        options: [
+          { value: "touch", label: "Touch" },
+          { value: "half", label: "Half" },
+          { value: "full", label: "Full" },
+        ],
+      },
+      {
+        key: "when_mitigated", label: "When mitigated", kind: "choice", default: "stop",
+        options: [{ value: "stop", label: "Stop" }, { value: "fade", label: "Fade" }],
+      },
+      { key: "show_last", label: "Show last", kind: "int", default: 10, min: 1, max: 500, step: 1 },
+      {
+        key: "timeframe", label: "Timeframe", kind: "choice", default: "",
+        options: [
+          { value: "", label: "Chart" },
+          ...(["1m", "3m", "5m", "15m", "30m", "1h", "1D", "1W"] as const).map((tf) => ({ value: tf, label: tf })),
+        ],
+      },
+      {
+        key: "session_gaps", label: "Overnight gaps", kind: "choice", default: "include",
+        options: [{ value: "include", label: "Include" }, { value: "exclude", label: "Exclude" }],
+      },
+    ],
+    colors: [
+      { key: "bull", label: "Bullish", default: "#26a69a" },
+      { key: "bear", label: "Bearish", default: "#ef5350" },
+    ],
+    outputs: ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
+  },
 };
 
 export const isIndicatorType = (v: unknown): v is IndicatorType =>
@@ -135,6 +176,10 @@ export function parseParam(def: ParamDef, raw: string | number): ParamValue | nu
   if (def.kind === "source") {
     return typeof raw === "string" && (SOURCES as readonly string[]).includes(raw) ? raw : null;
   }
+  if (def.kind === "choice") {
+    const value = String(raw);
+    return def.options?.some((option) => option.value === value) ? value : null;
+  }
   if (typeof raw === "string" && raw.trim() === "") return null;
   const n = typeof raw === "number" ? raw : Number(raw);
   if (!Number.isFinite(n)) return null;
@@ -144,7 +189,7 @@ export function parseParam(def: ParamDef, raw: string | number): ParamValue | nu
     if (def.max !== undefined && n > def.max) return null;
     return n;
   }
-  if (def.min !== undefined && n <= def.min) return null;
+  if (def.min !== undefined && (def.inclusiveMin ? n < def.min : n <= def.min)) return null;
   if (def.max !== undefined && n > def.max) return null;
   return n;
 }
@@ -205,6 +250,11 @@ export function indicatorName(inst: Pick<IndicatorInstance, "type" | "params">):
       return `${label} (${fmtNum(p["fast"])}, ${fmtNum(p["slow"])}, ${fmtNum(p["signal"])}, ${fmtNum(p["source"])})`;
     case "vwap":
       return `${label} (${fmtNum(p["source"])})`;
+    case "fvg": {
+      const tf = p["timeframe"] ? String(p["timeframe"]) : "chart";
+      const gaps = p["session_gaps"] === "exclude" ? "overnight gaps excluded" : "overnight gaps included";
+      return `${label} (${tf}, ${gaps})`;
+    }
   }
 }
 
