@@ -173,6 +173,14 @@ Any other key is rejected, including `order`, `orders`, `side`, `qty`, `action`,
 
 An optional chart screenshot is a second argument. The client call includes those bytes only when the caller passed them.
 
+**Language.** `AI_ANALYSIS_LANGUAGE` defaults to `en`. The prompt tells the model to write every text field and every label in English. A reply that contains a non-English letter is rejected, and the repair loop is shown that it must be written in English.
+
+**Prices in the text.** A price written in the reasoning, a note, a pattern, or a label must equal a structured price (a key level, a trigger, or an invalidation). `22445.6` in the sentence and `22442.80` on the drawn line is rejected, and the repair loop is shown that error. `22445.60` and `22445.6` are the same price.
+
+**Replay.** Analyse sends the replay cursor. Candle loads for the context use that cursor, the option chain is not called, and `as_of` is the cursor. No candle time in the context is after it, and the last price and the day close are the cursor bar, not the 15:30 close. The chart's last-price line is the candlestick series line, which sits on the last bar in the series. During replay that series stops at the cursor, so the line is the cursor bar's close. Indicator values drawn on the chart stop at the same bar. An analysis made with a cursor is saved under `data/ai/replay/` with `"mode": "replay"`. The live track record does not load that folder and skips any file marked replay.
+
+**Auto-analyse.** `AI_ANALYSIS_AUTO` defaults off. When it is on, the app asks for an analysis every `AI_ANALYSIS_AUTO_MINUTES` (default 15) during weekday market hours, 09:15 until 15:30 IST. The first run waits one full interval after the app opens. Each run uses the same request, including the replay cursor, and the panel shows the same token and dollar line.
+
 **Cost.** The panel shows prompt and completion tokens, `100 in / 50 out`. A dollar figure appears only when both `AI_ANALYSIS_INPUT_USD_PER_MTOK` and `AI_ANALYSIS_OUTPUT_USD_PER_MTOK` are set. No rate is invented for a model name.
 
 **Panel.** Side panel, plus horizontal price lines on the candle series (the same `createPriceLine` the RSI guides use). The panel always shows `AI analysis: context, not a trade signal`. There is no place-order function and no such button (`canPlaceOrders()` is false).

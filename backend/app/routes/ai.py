@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from app.ai.cost import auto_analysis
 from app.ai.run import AnalysisRunError, run_analysis, track_symbol
 from app.config import settings
 
@@ -15,16 +16,22 @@ class AnalyseIn(BaseModel):
     symbol: str
     sessions: list[str] = Field(default_factory=list)
     image_base64: str | None = None
+    cursor: int | None = None
 
 
 def _sessions(given: list[str]) -> list[str]:
     return given or list(settings.default_sessions)
 
 
+@router.get("/settings")
+def analysis_settings() -> dict:
+    return auto_analysis()
+
+
 @router.post("/analyse")
 def analyse_chart(body: AnalyseIn) -> dict:
     try:
-        return run_analysis(body.symbol, _sessions(body.sessions), body.image_base64)
+        return run_analysis(body.symbol, _sessions(body.sessions), body.image_base64, body.cursor)
     except AnalysisRunError as exc:
         raise HTTPException(exc.status, exc.message) from exc
 

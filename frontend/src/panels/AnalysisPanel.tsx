@@ -1,7 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { ApiError, type SessionType } from "../api/client";
-import { analyseSymbol, fetchTrack, type AnalyseResult, type TrackResult } from "../api/ai";
+import { analyseSymbol, fetchAiSettings, fetchTrack, type AnalyseResult, type TrackResult } from "../api/ai";
+import { autoDue, autoLabel, type AutoSettings } from "../ai/auto";
 import { ANALYSIS_LABEL, HORIZONS, hitRateText, levelLines, type LevelLine } from "../ai/present";
 
 interface Props {
@@ -10,13 +11,19 @@ interface Props {
   /** Increment to run an analysis. Zero does not run. */
   requestToken: number;
   onLevels: (lines: LevelLine[]) => void;
+  /** The panel stays mounted while this is false so the auto timer can run. */
+  open?: boolean;
 }
 
-export function AnalysisPanel({ symbol, sessions, requestToken, onLevels }: Props) {
+export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open = true }: Props) {
   const [track, setTrack] = useState<TrackResult | null>(null);
   const [result, setResult] = useState<AnalyseResult | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [running, setRunning] = useState(false);
+  const [settings, setSettings] = useState<AutoSettings | null>(null);
+  const [autoToken, setAutoToken] = useState(0);
+  const runningRef = useRef(false);
+  runningRef.current = running;
 
   useEffect(() => {
     if (!symbol) return;
@@ -32,7 +39,33 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels }: Prop
   }, [symbol, sessions, result]);
 
   useEffect(() => {
-    if (requestToken === 0 || !symbol) return;
+    let stop = false;
+    void fetchAiSettings()
+      .then((next) => {
+        if (!stop) setSettings(next);
+      })
+      .catch(() => {
+        if (!stop) setSettings({ language: "en", auto: false, auto_minutes: 15 });
+      });
+    return () => {
+      stop = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let last = Date.now();
+    const id = window.setInterval(() => {
+      const current = settings;
+      if (!current || runningRef.current) return;
+      if (!autoDue(new Date(), last, current.auto_minutes, current.auto)) return;
+      last = Date.now();
+      setAutoToken((token) => token + 1);
+    }, 15_000);
+    return () => window.clearInterval(id);
+  }, [settings, symbol]);
+
+  useEffect(() => {
+    if ((requestToken === 0 && autoToken === 0) || !symbol) return;
     const controller = new AbortController();
     setRunning(true);
     setError(null);
@@ -51,12 +84,12 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels }: Prop
         if (!controller.signal.aborted) setRunning(false);
       });
     return () => controller.abort();
-  }, [requestToken, symbol, sessions, onLevels]);
+  }, [requestToken, autoToken, symbol, sessions, onLevels]);
 
   const analysis = result?.analysis;
 
   return (
-    <aside className="flex h-full w-80 shrink-0 flex-col overflow-y-auto border-l border-white/10 bg-[#0e1219] text-xs text-white/80">
+    <aside className={`${open ? "flex" : "hidden"} h-full w-80 shrink-0 flex-col overflow-y-auto border-l border-white/10 bg-[#0e1219] text-xs text-white/80`}>
       <div className="border-b border-white/10 px-3 py-2">
         <p className="font-medium text-white">{ANALYSIS_LABEL}</p>
         <p className="mt-1 text-white/40">{symbol ?? "No symbol"}</p>
@@ -69,6 +102,7 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels }: Prop
             <p>
               Bias <span className="text-white">{analysis.bias}</span>
               <span className="text-white/40"> · confidence {analysis.confidence}</span>
+              {result?.mode === "replay" && <span className="text-amber-200"> · replay</span>}
             </p>
             <p className="text-white/70">{analysis.reasoning}</p>
             <ul className="space-y-1 text-white/60">
@@ -82,6 +116,7 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels }: Prop
             {result?.cost && <p className="text-white/50">{result.model} · {result.cost}</p>}
           </section>
         )}
+        {settings && <p className="text-white/40">{autoLabel(settings)}</p>}
         <section className="space-y-2">
           <p className="font-medium text-white/90">Track record</p>
           {HORIZONS.map((horizon) => {

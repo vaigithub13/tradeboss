@@ -1,9 +1,12 @@
 import { getJson, postJson, type SessionType } from "./client";
+import type { AutoSettings } from "../ai/auto";
 import type { AnalysisView } from "../ai/present";
+import { replayCursor } from "../replay/session";
 
 export interface AnalyseResult {
   ready: boolean;
   id: string | null;
+  mode: "live" | "replay";
   analysis: AnalysisView | null;
   error: string | null;
   usage: { prompt_tokens: number; completion_tokens: number };
@@ -33,7 +36,12 @@ export function analyseSymbol(
     symbol,
     sessions,
     image_base64: imageBase64 ?? null,
+    cursor: replayCursor(),
   });
+}
+
+export function fetchAiSettings(): Promise<AutoSettings> {
+  return getJson<AutoSettings>("/api/ai/settings");
 }
 
 export function fetchTrack(symbol: string, sessions: readonly SessionType[]): Promise<TrackResult> {

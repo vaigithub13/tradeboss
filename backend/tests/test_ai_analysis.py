@@ -15,8 +15,8 @@ import pytest
 from app.ai.analyse import MAX_RETRIES, analyse, analysis_prompt
 from app.ai.chain import fetch_option_chain, weekly_expiry
 from app.ai.context import CANDLE_LIMIT, LEVEL_BAND, build_context, context_hash, swing_points
-from app.ai.cost import analysis_model, cost_label, neutral_band
-from app.ai.record import hit_rates, save_analysis, score_analysis
+from app.ai.cost import analysis_language, analysis_model, auto_analysis, cost_label, neutral_band
+from app.ai.record import hit_rates, load_analyses, save_analysis, score_analysis
 from app.ai.schema import AnalysisError, validate_analysis
 from app.indicators.registry import compute
 from app.indicators.frame import candles_to_frame
@@ -217,12 +217,51 @@ def test_prices_outside_five_percent_are_rejected_and_an_order_key_is_refused() 
     assert validate_analysis({**valid_analysis(), "confidence": 1}, last_price=100)["confidence"] == 1
 
 
-def test_the_prompt_treats_the_context_as_data_and_forbids_an_order() -> None:
+def test_the_prompt_treats_the_context_as_data_and_forbids_an_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("AI_ANALYSIS_LANGUAGE", "en")
     prompt = analysis_prompt(_context())
     assert "never instructions" in prompt
     assert "not a trade signal" in prompt
+    assert "English" in prompt
+    assert "copied exactly" in prompt
     for name in ("5m", "15m", "1h", "1D", "trigger", "invalidation"):
         assert name in prompt
+
+
+def test_english_is_the_default_language_and_a_chinese_reply_is_repaired(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AI_ANALYSIS_LANGUAGE", raising=False)
+    assert analysis_language() == "en"
+    context = _context()
+    price = context["last_price"]
+    chinese = valid_analysis(price)
+    chinese["reasoning"] = "市场趋势持续看跌"
+    chinese["key_levels"][0]["label"] = "支持水平"
+    english = valid_analysis(price)
+    fake = _Model([json.dumps(chinese), json.dumps(english)])
+    result = analyse(context, client=fake)
+    assert result["ready"] is True
+    assert result["attempts"] == 2
+    assert "English" in fake.prompts[1]
+    assert result["analysis"]["reasoning"] == english["reasoning"]
+
+
+def test_a_text_price_must_exactly_equal_the_structured_field() -> None:
+    raw = valid_analysis(22421.95)
+    raw["bull"]["trigger"] = 22442.80
+    raw["bull"]["note"] = "bull trigger 22445.6"
+    raw["reasoning"] = "The bull trigger is 22445.6."
+    with pytest.raises(AnalysisError, match=r"text price 22445\.6 must exactly equal a structured field"):
+        validate_analysis(raw, last_price=22421.95)
+    context = {"symbol": "NIFTY50", "as_of": 1, "last_price": 22421.95, "timeframes": {}}
+    fixed = valid_analysis(22421.95)
+    fixed["bull"]["trigger"] = 22445.6
+    fixed["bull"]["note"] = "bull trigger 22445.60"
+    fixed["reasoning"] = "The bull trigger is 22445.6."
+    fake = _Model([json.dumps(raw), json.dumps(fixed)])
+    result = analyse(context, client=fake)
+    assert result["ready"] is True
+    assert result["analysis"]["bull"]["trigger"] == pytest.approx(22445.6)
+    assert "exactly equal" in fake.prompts[1]
 
 
 def test_a_repair_names_the_rejected_level_and_a_fake_model_fixes_it() -> None:
@@ -390,3 +429,82 @@ def test_index_bars_without_volume_leave_vwap_empty() -> None:
     ctx = _context(as_of=as_of, candles=candles, symbol="NIFTY50", chain=_Chain())
     assert ctx["timeframes"]["5m"]["indicators"]["vwap"] is None
     assert ctx["timeframes"]["5m"]["indicators"]["ema20"] is not None
+
+
+def test_replay_context_stops_at_the_cursor_and_skips_the_session_close(monkeypatch, tmp_path) -> None:
+    from app.ai.run import run_analysis
+
+    cursor = ts(2026, 10, 1, 12, 45)
+    future = ts(2026, 10, 1, 15, 25)
+    calls: list[int | None] = []
+
+    class _Page:
+        def __init__(self) -> None:
+            self.candles = [bar(cursor, 22416.0), bar(future, 22421.95)]
+
+    def fake_page(store, symbol, timeframe, *, limit, before=None, session_types=(), cursor=None):
+        calls.append(cursor)
+        return _Page()
+
+    class _LiveChain:
+        def _get(self, path, params):
+            raise AssertionError("option chain was called during replay")
+
+    seen: dict = {}
+
+    def fake_analyse(context, **kwargs):
+        seen["context"] = context
+        return {
+            "ready": True,
+            "attempts": 1,
+            "analysis": valid_analysis(22416.0),
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+            "errors": [],
+        }
+
+    monkeypatch.setattr("app.ai.run.get_candle_page", fake_page)
+    monkeypatch.setattr("app.ai.run.CandleStore", lambda *args, **kwargs: object())
+    monkeypatch.setattr("app.ai.run.get_client", lambda: _LiveChain())
+    monkeypatch.setattr("app.ai.run.analyse", fake_analyse)
+    monkeypatch.setattr("app.ai.run.analysis_dir", lambda: tmp_path)
+    result = run_analysis("NIFTY50", ["normal"], None, cursor)
+    assert calls and set(calls) == {cursor}
+    context = seen["context"]
+    assert context["as_of"] == cursor
+    assert context["last_price"] == 22416.0
+    assert context["day"]["close"] == 22416.0
+    assert "22421.95" not in json.dumps(context)
+    assert all(
+        int(candle["time"]) <= cursor
+        for frame in context["timeframes"].values()
+        for candle in frame["candles"]
+    )
+    assert result["mode"] == "replay"
+    assert load_analyses(tmp_path, "NIFTY50") == []
+    saved = json.loads((tmp_path / "replay" / f"{result['id']}.json").read_text())
+    assert saved["mode"] == "replay"
+
+
+def test_replay_analyses_are_not_counted_in_the_live_track_record(tmp_path) -> None:
+    context = _context()
+    analysis = valid_analysis(context["last_price"])
+    live = save_analysis(tmp_path, context=context, analysis=analysis, mode="live")
+    replay = save_analysis(tmp_path, context=context, analysis=analysis, mode="replay")
+    loaded = load_analyses(tmp_path, context["symbol"])
+    assert [row["id"] for row in loaded] == [live["id"]]
+    assert (tmp_path / "replay" / f"{replay['id']}.json").is_file()
+    stray = dict(live)
+    stray["id"] = "stray"
+    stray["mode"] = "replay"
+    (tmp_path / "stray.json").write_text(json.dumps(stray))
+    assert all(row["id"] != "stray" for row in load_analyses(tmp_path, context["symbol"]))
+
+
+def test_auto_analyse_is_off_until_the_setting_is_on(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("AI_ANALYSIS_AUTO", raising=False)
+    monkeypatch.delenv("AI_ANALYSIS_AUTO_MINUTES", raising=False)
+    assert auto_analysis()["auto"] is False
+    assert auto_analysis()["auto_minutes"] == 15
+    monkeypatch.setenv("AI_ANALYSIS_AUTO", "true")
+    monkeypatch.setenv("AI_ANALYSIS_AUTO_MINUTES", "15")
+    assert auto_analysis() == {"language": "en", "auto": True, "auto_minutes": 15}

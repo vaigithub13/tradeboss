@@ -42,6 +42,7 @@ import {
 } from "./view";
 import { hasVolume } from "./volume";
 import { browserStorage } from "../indicators/persistence";
+import { clipSeries, seriesThroughCursor } from "../replay/cap";
 
 const UP = "#26a69a";
 const DOWN = "#ef5350";
@@ -80,12 +81,15 @@ interface Props {
   onPickTime?: (time: number) => void;
   tradeCard?: ReactNode;
   levels?: { price: number; title: string; color: string }[];
+  /** Replay cursor. The series last-price line is the last bar at or before it. */
+  cursor?: number | null;
 }
 
 export function ChartView({
-  displayName, timeframe, scope, candles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
-  markers = [], focus = null, onPickTime, tradeCard, levels = [],
+  displayName, timeframe, scope, candles: loadedCandles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
+  markers = [], focus = null, onPickTime, tradeCard, levels = [], cursor = null,
 }: Props) {
+  const candles = useMemo(() => seriesThroughCursor(loadedCandles, cursor).bars, [loadedCandles, cursor]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
@@ -154,6 +158,7 @@ export function ChartView({
       wickUpColor: UP,
       wickDownColor: DOWN,
       borderVisible: false,
+      priceLineVisible: true,
       priceFormat: { type: "price", precision: 2, minMove: 0.05 },
     });
 
@@ -308,8 +313,8 @@ export function ChartView({
 
   // ---- indicators: draw what is cached for this data set (nothing stale can be here: the cache is keyed by scope)
   useEffect(() => {
-    layerRef.current?.sync(items, (item) => cached?.[indicatorKey(item.type, item.params)]);
-  }, [items, cached, volumeVisible, candles]);
+    layerRef.current?.sync(items, (item) => clipSeries(cached?.[indicatorKey(item.type, item.params)], cursor));
+  }, [items, cached, volumeVisible, candles, cursor]);
 
   const lastIndex = candles.length - 1;
   const shownIndex = (hoverTime === null ? undefined : indexOfTime(candles, hoverTime)) ?? lastIndex;
@@ -322,12 +327,12 @@ export function ChartView({
     () =>
       legendRows({
         items,
-        entryFor: (item) => cached?.[indicatorKey(item.type, item.params)],
+        entryFor: (item) => clipSeries(cached?.[indicatorKey(item.type, item.params)], cursor),
         candles,
         timeframe,
         time: shown?.time ?? null,
       }),
-    [items, cached, candles, timeframe, shown],
+    [items, cached, candles, timeframe, shown, cursor],
   );
 
   return (

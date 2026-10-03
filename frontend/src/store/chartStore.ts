@@ -292,8 +292,9 @@ export const useChartStore = create<ChartState>((set, get) => ({
             ),
       );
       const olderBars = replayTo == null ? res.candles : acceptBars(res.candles, replayTo);
-      // The chunk belongs to `key` even if the user has since switched away: keep it cached.
-      const base = cacheGet(key) ?? { candles, hasMore: hasMoreOlder, hasMoreNewer: get().hasMoreNewer };
+      // The live cache holds whole bars, including the session close. Replay must not merge it back in.
+      const live = replayTo == null ? cacheGet(key) : undefined;
+      const base = live ?? { candles, hasMore: hasMoreOlder, hasMoreNewer: get().hasMoreNewer };
       const firstNow = base.candles[0]?.time ?? Infinity;
       const older = olderBars.filter((c) => c.time < firstNow);
       const joined = prependWindow(older, base.candles);
@@ -302,7 +303,7 @@ export const useChartStore = create<ChartState>((set, get) => ({
         hasMore: res.has_more,
         hasMoreNewer: base.hasMoreNewer || joined.droppedNewer,
       };
-      cachePut(key, merged);
+      if (replayTo == null) cachePut(key, merged);
       const cur = get().loaded;
       if (cur && loadedScope(cur) === key) {
         set({
@@ -348,7 +349,8 @@ export const useChartStore = create<ChartState>((set, get) => ({
             ),
       );
       const newerBars = replayTo == null ? res.candles : acceptBars(res.candles, replayTo);
-      const base = cacheGet(key) ?? { candles, hasMore: get().hasMoreOlder, hasMoreNewer };
+      const live = replayTo == null ? cacheGet(key) : undefined;
+      const base = live ?? { candles, hasMore: get().hasMoreOlder, hasMoreNewer };
       const lastNow = base.candles[base.candles.length - 1]?.time ?? -Infinity;
       const newer = newerBars.filter((c) => c.time > lastNow);
       const joined = appendWindow(base.candles, newer);
@@ -357,7 +359,7 @@ export const useChartStore = create<ChartState>((set, get) => ({
         hasMore: base.hasMore || joined.droppedOlder,
         hasMoreNewer: res.has_more_newer,
       };
-      cachePut(key, merged);
+      if (replayTo == null) cachePut(key, merged);
       const cur = get().loaded;
       if (cur && loadedScope(cur) === key) {
         set({

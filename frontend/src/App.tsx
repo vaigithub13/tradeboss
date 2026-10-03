@@ -287,6 +287,7 @@ export default function App() {
               ...analysisLevels,
               ...(replayReveal?.stops.map((stop) => ({ price: stop.price, title: "stop", color: "#ef5350" })) ?? []),
             ]}
+            cursor={replayActive ? replayCursorTime : null}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-white/40">
@@ -304,14 +305,13 @@ export default function App() {
       </main>
       <BacktestResults />
       </div>
-      {analysisOpen && (
-        <AnalysisPanel
-          symbol={symbol}
-          sessions={sessions}
-          requestToken={requestToken}
-          onLevels={onAnalysisLevels}
-        />
-      )}
+      <AnalysisPanel
+        symbol={symbol}
+        sessions={sessions}
+        requestToken={requestToken}
+        onLevels={onAnalysisLevels}
+        open={analysisOpen}
+      />
       </div>
     </div>
   );

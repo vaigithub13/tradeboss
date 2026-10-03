@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { Candle, CandlesResponse, SymbolInfo, SymbolsResponse } from "../api/client";
+import { setReplayCursor } from "../replay/session";
 import { INITIAL_BARS, OLDER_BARS, OLDER_BARS_MAX, clearChartCache, olderChunkSize, timeframeState, useChartStore } from "./chartStore";
 
 const INFO: SymbolInfo = {
@@ -68,6 +69,7 @@ const candleCalls = (f: ReturnType<typeof stubApi>): URL[] =>
     .filter((u) => u.pathname === "/api/candles");
 
 beforeEach(() => {
+  setReplayCursor(null);
   clearChartCache();
   useChartStore.setState({
     hasMoreOlder: false,
@@ -276,6 +278,38 @@ describe("lazy loading", () => {
     expect(call?.searchParams.get("limit")).toBe(String(INITIAL_BARS));
     expect(call?.searchParams.has("before")).toBe(false);
     expect(useChartStore.getState().hasMoreOlder).toBe(true);
+  });
+
+  it("loadOlder during replay keeps the cursor bar and drops the session close", async () => {
+    const cursor = 1_790_838_900;
+    const sessionClose = 1_790_848_500;
+    const f = stubApi({
+      candles: (u) => {
+        const asked = u.searchParams.get("cursor");
+        if (u.searchParams.has("before")) return candlesBody("15m", [candle(cursor - 900, 22400)], undefined, false);
+        if (asked === String(cursor)) {
+          return candlesBody("15m", [candle(cursor - 900, 22433.7), candle(cursor, 22416)], undefined, true);
+        }
+        return candlesBody(
+          "15m",
+          [candle(cursor - 900, 22433.7), candle(cursor, 22324.8), candle(sessionClose, 22421.95)],
+          undefined,
+          true,
+        );
+      },
+    });
+    await useChartStore.getState().init();
+    expect(useChartStore.getState().candles.at(-1)?.close).toBe(22421.95);
+
+    setReplayCursor(cursor);
+    await useChartStore.getState().load();
+    await useChartStore.getState().loadOlder();
+
+    const shown = useChartStore.getState().candles;
+    expect(shown.some((bar) => bar.time > cursor)).toBe(false);
+    expect(shown.find((bar) => bar.time === cursor)?.close).toBe(22416);
+    expect(shown.some((bar) => bar.close === 22421.95 || bar.close === 22324.8)).toBe(false);
+    expect(candleCalls(f).some((url) => url.searchParams.get("cursor") === String(cursor))).toBe(true);
   });
 
   it("loadOlder fetches the chunk before the first candle and prepends it", async () => {

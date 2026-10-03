@@ -17,26 +17,39 @@ HORIZONS = ("60m", "session_close", "1", "3", "5")
 SESSION_CLOSE_MINUTE = 15 * 60 + 15
 
 
-def save_analysis(directory: Path, *, context: dict, analysis: dict) -> dict[str, Any]:
+def save_analysis(
+    directory: Path,
+    *,
+    context: dict,
+    analysis: dict,
+    mode: str = "live",
+) -> dict[str, Any]:
+    if mode not in {"live", "replay"}:
+        raise ValueError("mode must be live or replay")
     record = {
         "id": uuid.uuid4().hex,
         "time": context["as_of"],
         "symbol": context["symbol"],
+        "mode": mode,
         "context": context,
         "analysis": analysis,
         "context_hash": context_hash(context),
     }
-    directory.mkdir(parents=True, exist_ok=True)
-    (directory / f"{record['id']}.json").write_text(json.dumps(record))
+    folder = directory / "replay" if mode == "replay" else directory
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{record['id']}.json").write_text(json.dumps(record))
     return record
 
 
 def load_analyses(directory: Path, symbol: str | None = None) -> list[dict]:
+    """Live track-record files only. Replay analyses live in `replay/` and are left out."""
     if not directory.is_dir():
         return []
     rows = []
     for path in sorted(directory.glob("*.json")):
         row = json.loads(path.read_text())
+        if row.get("mode") == "replay":
+            continue
         if symbol is None or row.get("symbol") == symbol:
             rows.append(row)
     return rows

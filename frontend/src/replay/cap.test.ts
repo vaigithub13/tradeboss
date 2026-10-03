@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Candle } from "../api/client";
-import { acceptBars, capCandlesQuery, capIndicatorsRequest } from "./cap";
+import { acceptBars, capCandlesQuery, capIndicatorsRequest, clipSeries, seriesThroughCursor } from "./cap";
 
 const candle = (time: number): Candle => ({ time, open: 1, high: 1, low: 1, close: 1, volume: 1, oi: null });
 
@@ -24,5 +24,23 @@ describe("replay request cap", () => {
   it("rejects a response that contains a bar after the cursor", () => {
     expect(acceptBars([candle(100), candle(300)], 300).map((bar) => bar.time)).toEqual([100, 300]);
     expect(() => acceptBars([candle(100), candle(301)], 300)).toThrow(/after the cursor/);
+  });
+
+  it("keeps the last-price line on the cursor bar, not the session close", () => {
+    const cursor = 1_790_838_900;
+    const sessionClose = 1_790_848_500;
+    const bars = [
+      { ...candle(cursor), close: 22416 },
+      { ...candle(sessionClose), close: 22421.95 },
+    ];
+    const view = seriesThroughCursor(bars, cursor);
+    expect(view.lastPrice).toBe(22416);
+    expect(view.bars.map((bar) => bar.close)).toEqual([22416]);
+    const indicator = clipSeries(
+      { times: [cursor, sessionClose], outputs: { ema: [22416, 22421.95] } },
+      cursor,
+    );
+    expect(indicator?.times).toEqual([cursor]);
+    expect(indicator?.outputs.ema).toEqual([22416]);
   });
 });

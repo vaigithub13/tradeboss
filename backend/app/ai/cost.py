@@ -23,6 +23,28 @@ def neutral_band() -> float:
         return DEFAULT_NEUTRAL_BAND
 
 
+def analysis_language() -> str:
+    """`AI_ANALYSIS_LANGUAGE`, otherwise English."""
+    return (_setting("AI_ANALYSIS_LANGUAGE") or "en").strip().lower() or "en"
+
+
+def auto_analysis() -> dict[str, object]:
+    """Optional timer. Off unless `AI_ANALYSIS_AUTO` is true. Interval defaults to 15 minutes."""
+    raw = (_setting("AI_ANALYSIS_AUTO") or "").strip().lower()
+    minutes_raw = _setting("AI_ANALYSIS_AUTO_MINUTES") or "15"
+    try:
+        minutes = int(minutes_raw)
+    except ValueError:
+        minutes = 15
+    if minutes < 1:
+        minutes = 15
+    return {
+        "language": analysis_language(),
+        "auto": raw in {"1", "true", "yes", "on"},
+        "auto_minutes": minutes,
+    }
+
+
 def cost_label(usage: dict) -> str:
     incoming = int(usage.get("prompt_tokens") or 0)
     outgoing = int(usage.get("completion_tokens") or 0)

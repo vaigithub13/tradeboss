@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from app.ai.context import LEVEL_BAND
+from app.ai.cost import analysis_language
 
 ORDER_KEYS = ("order", "orders", "side", "qty", "action")
 TRENDS = ("5m", "15m", "1h", "1D")
@@ -12,6 +14,7 @@ DIRECTIONS = ("up", "down", "sideways")
 BIASES = ("bull", "bear", "neutral")
 LEVEL_KINDS = ("support", "resistance")
 FIELDS = ("trends", "bias", "key_levels", "patterns", "bull", "bear", "confidence", "reasoning")
+_NUMBER = re.compile(r"\d+(?:\.\d+)?")
 
 
 class AnalysisError(ValueError):
@@ -94,13 +97,60 @@ def validate_analysis(raw: Any, *, last_price: float) -> dict[str, Any]:
     reasoning = raw.get("reasoning")
     if not isinstance(reasoning, str) or not reasoning.strip():
         raise AnalysisError("reasoning is required")
-    return {
+    analysis = {
         "trends": clean_trends,
         "bias": bias,
         "key_levels": clean_levels,
-        "patterns": list(patterns),
+        "patterns": [item.strip() for item in patterns],
         "bull": _scenario(raw.get("bull"), "bull", last_price),
         "bear": _scenario(raw.get("bear"), "bear", last_price),
         "confidence": float(confidence),
         "reasoning": reasoning.strip(),
     }
+    _english(analysis)
+    _prices_match(analysis, last_price)
+    return analysis
+
+
+def _texts(analysis: dict) -> list[tuple[str, str]]:
+    rows = [("reasoning", analysis["reasoning"]), ("bull.note", analysis["bull"]["note"]), ("bear.note", analysis["bear"]["note"])]
+    for index, pattern in enumerate(analysis["patterns"]):
+        rows.append((f"patterns[{index}]", pattern))
+    for index, level in enumerate(analysis["key_levels"]):
+        rows.append((f"key_levels[{index}].label", level["label"]))
+    return rows
+
+
+def _english(analysis: dict) -> None:
+    if analysis_language() != "en":
+        return
+    for field, text in _texts(analysis):
+        if any(char.isalpha() and ord(char) > 127 for char in text):
+            raise AnalysisError(f"{field} must be written in English")
+
+
+def _price_mention(token: str, last_price: float) -> bool:
+    value = float(token)
+    if "." in token and value >= 1:
+        return True
+    if last_price == 0:
+        return False
+    return abs(value - last_price) / abs(last_price) <= LEVEL_BAND
+
+
+def _prices_match(analysis: dict, last_price: float) -> None:
+    structured = [float(level["price"]) for level in analysis["key_levels"]]
+    structured.extend([
+        float(analysis["bull"]["trigger"]),
+        float(analysis["bull"]["invalidation"]),
+        float(analysis["bear"]["trigger"]),
+        float(analysis["bear"]["invalidation"]),
+    ])
+    for _field, text in _texts(analysis):
+        for token in _NUMBER.findall(text):
+            if not _price_mention(token, last_price):
+                continue
+            value = float(token)
+            if any(abs(value - price) <= 1e-6 for price in structured):
+                continue
+            raise AnalysisError(f"text price {token} must exactly equal a structured field")

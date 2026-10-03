@@ -41,45 +41,78 @@ class _Chain:
         return self._client._get(path, {key: str(value) for key, value in params.items()})
 
 
-def _rows(store: CandleStore, symbol: str, timeframe: str, sessions: list[str]) -> list[dict]:
-    page = get_candle_page(store, symbol, timeframe, limit=PAGE, session_types=sessions)
+def _rows(
+    store: CandleStore,
+    symbol: str,
+    timeframe: str,
+    sessions: list[str],
+    cursor: int | None,
+) -> list[dict]:
+    page = get_candle_page(store, symbol, timeframe, limit=PAGE, session_types=sessions, cursor=cursor)
     return [dict(candle) for candle in page.candles]
 
 
-def run_analysis(symbol: str, sessions: list[str], image_base64: str | None) -> dict[str, Any]:
+def _assert_capped(context: dict, cursor: int | None) -> None:
+    """No candle time, and no last price taken from a bar after the cursor."""
+    if cursor is None:
+        return
+    if int(context["as_of"]) > cursor:
+        raise AnalysisRunError(500, "analysis context is after the cursor")
+    for frame in context["timeframes"].values():
+        for candle in frame["candles"]:
+            if int(candle["time"]) > cursor:
+                raise AnalysisRunError(500, "analysis context contains a bar after the cursor")
+    five = context["timeframes"]["5m"]["candles"]
+    if five and float(context["last_price"]) != float(five[-1]["close"]):
+        raise AnalysisRunError(500, "analysis last price is not the cursor bar")
+    day_close = context["day"]["close"]
+    if five and day_close is not None and float(day_close) != float(five[-1]["close"]):
+        raise AnalysisRunError(500, "analysis day close is not the cursor bar")
+
+
+def run_analysis(
+    symbol: str,
+    sessions: list[str],
+    image_base64: str | None,
+    cursor: int | None = None,
+) -> dict[str, Any]:
     image = _image(image_base64)
     store = CandleStore(settings.candles_dir)
     try:
-        candles = {name: _rows(store, symbol, name, sessions) for name in ("5m", "15m", "1h", "1D")}
+        candles = {name: _rows(store, symbol, name, sessions, cursor) for name in ("5m", "15m", "1h", "1D")}
     except SymbolNotFound as exc:
         raise AnalysisRunError(404, f"unknown symbol {symbol}") from exc
     if not candles["5m"]:
         raise AnalysisRunError(400, f"no candles for {symbol}")
     try:
-        vix = _rows(store, VIX_SYMBOL, "1m", sessions)
+        vix = _rows(store, VIX_SYMBOL, "1m", sessions, cursor)
     except (SymbolNotFound, TimeframeUnavailable, UnknownTimeframe):
         vix = []
+    as_of = int(cursor) if cursor is not None else int(candles["5m"][-1]["time"])
     client = get_client()
     context = build_context(
         symbol=symbol,
-        as_of=int(candles["5m"][-1]["time"]),
+        as_of=as_of,
         candles=candles,
         vix=vix,
         events=load_default_events(),
-        chain=_Chain(client) if client is not None else None,
+        chain=None if cursor is not None or client is None else _Chain(client),
     )
+    _assert_capped(context, cursor)
     try:
         result = analyse(context, client=OpenAIAnalysisClient(require_key()), image=image)
     except OpenAIError as exc:
         raise AnalysisRunError(502, str(exc)) from exc
     saved_id = None
     if result["ready"]:
-        saved = save_analysis(analysis_dir(), context=context, analysis=result["analysis"])
+        mode = "replay" if cursor is not None else "live"
+        saved = save_analysis(analysis_dir(), context=context, analysis=result["analysis"], mode=mode)
         saved_id = saved["id"]
     error = None if result["ready"] else (result["errors"][-1] if result["errors"] else "analysis was not ready")
     return {
         "ready": result["ready"],
         "id": saved_id,
+        "mode": "replay" if cursor is not None else "live",
         "analysis": result["analysis"],
         "error": error,
         "usage": result["usage"],
