@@ -116,6 +116,53 @@ def test_a_script_comment_cannot_override_the_scanner() -> None:
     assert "sk-test" not in json.dumps(report)
 
 
+def test_openai_connects_directly_and_a_tunnel_403_is_the_error_text(monkeypatch: pytest.MonkeyPatch) -> None:
+    import urllib.error
+    import urllib.request
+
+    from app.pine.openai_client import OpenAIError, OpenAIPineClient
+
+    monkeypatch.setenv("https_proxy", "http://127.0.0.1:9")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:9")
+    seen: dict[str, list[dict[str, str]]] = {}
+
+    def fake_open(self: urllib.request.OpenerDirector, request: urllib.request.Request, timeout: float | None = None):
+        del request, timeout
+        seen["proxies"] = [
+            dict(handler.proxies)
+            for handler in self.handlers
+            if isinstance(getattr(handler, "proxies", None), dict)
+        ]
+        raise urllib.error.URLError("Tunnel connection failed: 403 Forbidden")
+
+    monkeypatch.setattr(urllib.request.OpenerDirector, "open", fake_open)
+    with pytest.raises(OpenAIError, match="Tunnel connection failed: 403 Forbidden"):
+        OpenAIPineClient("sk-test").complete("hello")
+    assert seen["proxies"] == []
+
+
+def test_the_report_endpoint_returns_the_openai_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine.openai_client import OpenAIError
+
+    class Boom:
+        def __init__(self, api_key: str, purpose: str = "report") -> None:
+            del api_key, purpose
+
+        def complete(self, prompt: str) -> str:
+            del prompt
+            raise OpenAIError("OpenAI request failed: Tunnel connection failed: 403 Forbidden")
+
+    monkeypatch.setattr("app.routes.pine.OpenAIPineClient", Boom)
+    monkeypatch.setattr("app.routes.pine.openai_key", lambda: "present")
+    with TestClient(app) as client:
+        refused = client.post("/api/pine/report", json={"source": SESSION_CLOSE})
+    assert refused.status_code == 502
+    assert refused.json()["detail"] == "OpenAI request failed: Tunnel connection failed: 403 Forbidden"
+
+
 def test_a_missing_key_does_not_call_the_model() -> None:
     fake = _Fake("{}")
     with pytest.raises(MissingKeyError):

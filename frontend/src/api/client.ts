@@ -102,17 +102,33 @@ export function candlesUrl(q: CandlesQuery): string {
   return `/api/candles?${p.toString()}`;
 }
 
-async function parseResponse<T>(res: Response): Promise<T> {
-  if (!res.ok) {
-    let detail = `HTTP ${res.status}`;
-    try {
-      const body = (await res.json()) as { detail?: unknown };
-      if (typeof body.detail === "string") detail = body.detail;
-    } catch {
-      // keep generic message
+async function errorMessage(res: Response): Promise<string> {
+  const fallback = `HTTP ${res.status}`;
+  try {
+    if (typeof res.text === "function") {
+      const text = (await res.text()).trim();
+      if (text) {
+        try {
+          const body = JSON.parse(text) as { detail?: unknown };
+          if (typeof body.detail === "string" && body.detail.trim()) return body.detail;
+        } catch {
+          return text;
+        }
+        return text;
+      }
     }
-    throw new ApiError(res.status, detail);
+    if (typeof res.json === "function") {
+      const body = (await res.json()) as { detail?: unknown };
+      if (typeof body.detail === "string" && body.detail.trim()) return body.detail;
+    }
+  } catch {
+    return fallback;
   }
+  return fallback;
+}
+
+async function parseResponse<T>(res: Response): Promise<T> {
+  if (!res.ok) throw new ApiError(res.status, await errorMessage(res));
   return (await res.json()) as T;
 }
 

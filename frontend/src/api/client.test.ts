@@ -89,6 +89,22 @@ describe("fetchCandles", () => {
     expect((err as ApiError).message).toBe("3m is not available: stored data is 5m");
   });
 
+  it("shows a plain-text server error instead of only the status", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 500,
+        text: async () => "OpenAI request failed: Tunnel connection failed: 403 Forbidden",
+      }),
+    );
+    const err = await fetchCandles({ symbol: "NIFTY50", timeframe: "5m" }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).message).toBe(
+      "OpenAI request failed: Tunnel connection failed: 403 Forbidden",
+    );
+  });
+
   it("falls back to a generic message when the error body is not JSON", async () => {
     vi.stubGlobal(
       "fetch",

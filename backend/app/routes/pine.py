@@ -12,7 +12,7 @@ from app.pine.gates import (
     GateError, accept_report, approve_draft, draft_hash, issue_draft, issue_report,
     report_hash, require_accepted, require_approved,
 )
-from app.pine.openai_client import OpenAIPineClient, openai_key
+from app.pine.openai_client import OpenAIError, OpenAIPineClient, openai_key
 from app.pine.report import MissingKeyError, ReportError, build_report
 from app.pine.sandbox import SandboxError
 from app.pine.save import save_user_strategy
@@ -37,7 +37,7 @@ def report_script(body: dict[str, Any]) -> dict[str, Any]:
         report = build_report(source, client=client, api_key=key)
     except MissingKeyError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except ReportError as exc:
+    except (ReportError, OpenAIError) as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
     if client is not None:
         report["openai"] = {"model": client.model, "usage": client.usage, "finish_reason": client.finish_reason}
@@ -82,6 +82,8 @@ def convert_script(body: dict[str, Any]) -> dict[str, Any]:
     client = OpenAIPineClient(key, purpose="conversion")
     try:
         result = convert_draft(source, client=client, report=report)
+    except OpenAIError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=type(exc).__name__) from exc
     result["openai"] = {

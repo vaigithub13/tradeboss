@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 
@@ -73,6 +74,19 @@ def conversion_max_tokens() -> int:
     return max(8000, chosen)
 
 
+class OpenAIError(RuntimeError):
+    """The OpenAI call failed before a reply arrived."""
+
+
+def _direct_opener() -> urllib.request.OpenerDirector:
+    """Connect to api.openai.com directly.
+
+    urllib otherwise uses HTTP(S)_PROXY. A proxy that refuses the CONNECT
+    tunnel raises URLError and the report endpoint turns that into an empty 500.
+    """
+    return urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
 class OpenAIPineClient:
     def __init__(self, api_key: str, *, purpose: str = "report") -> None:
         self._api_key = api_key
@@ -110,8 +124,15 @@ class OpenAIPineClient:
             headers={"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"},
         )
         timeout = 360 if self.purpose == "conversion" else 90
-        with urllib.request.urlopen(request, timeout=timeout) as response:
-            payload = json.loads(response.read().decode())
+        try:
+            with _direct_opener().open(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode())
+        except urllib.error.HTTPError as exc:
+            raise OpenAIError(f"OpenAI request failed: HTTP {exc.code}") from exc
+        except urllib.error.URLError as exc:
+            raise OpenAIError(f"OpenAI request failed: {exc.reason}") from exc
+        except TimeoutError as exc:
+            raise OpenAIError("OpenAI request failed: timed out") from exc
         choice = payload["choices"][0]
         self.usage = payload.get("usage")
         self.finish_reason = choice.get("finish_reason")
