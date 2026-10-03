@@ -19,6 +19,10 @@ from app.backtest.result import BacktestResult, Trade
 from app.backtest.sources import ist_date
 from app.data.resampler import DAY_S, IST_OFFSET_S
 from app.options.bs import PricingError, bs_forward_delta, bs_forward_price, snap_premium
+
+
+class OptionOverlayError(ValueError):
+    """The trade is not one entry fill and one exit fill, so it cannot be priced as one option."""
 from app.options.contract import OptionContract, choose_contract
 from app.options.events import EventCalendar, load_default_events
 from app.options.history import default_history_store
@@ -351,7 +355,9 @@ def overlay_options(
     unverified_step = False
     before_history = False
 
+    breaches: list[tuple[int, float, float]] = []
     for trade in result.trades:
+        _require_single_fill(trade)
         if ist_date(trade.entry_time) < HISTORY_START or ist_date(trade.exit_time) < HISTORY_START:
             before_history = True
         row = _one_trade(
@@ -366,6 +372,11 @@ def overlay_options(
             on_trade(len(priced) + len(unpriced), len(result.trades))
         if row.get("unpriced"):
             continue
+        move = _index_move(trade, int(row["units"]))
+        # A smaller loss is not a breach. The option exceeds the move only when it
+        # makes more than the index made (including a profit the index did not).
+        if float(row["net_pnl"]) > 0 and float(row["net_pnl"]) > move + 0.01:
+            breaches.append((int(trade.id), float(row["net_pnl"]), move))
         used_days.add(date.fromisoformat(row["entry_date"]))
         used_days.add(date.fromisoformat(row["exit_date"]))
         if "expired_while_held" in row["flags"]:
@@ -389,6 +400,12 @@ def overlay_options(
     premium_source, fill_counts = _premium_split(priced, cfg.real_premiums)
     if cfg.option_fill == "optimistic":
         warnings.append(OPTIMISTIC_FILL_WARNING)
+    if breaches:
+        trade_id, option_net, move = breaches[0]
+        warnings.append(
+            f"option P&L exceeds the index move on {len(breaches)} trade(s): "
+            f"trade {trade_id} option net {option_net} is larger than the index move {round(move, 2)}"
+        )
     if cfg.real_premiums:
         total_fills = fill_counts["real"] + fill_counts["modelled"]
         if total_fills and fill_counts["modelled"] / total_fills > 0.20:
@@ -481,6 +498,23 @@ def _premium_split(trades: list[dict[str, Any]], real_mode: bool) -> tuple[dict[
         "real": {**block(real_rows), "fills": real_fills},
         "modelled": {**block(modelled_rows), "fills": modelled_fills},
     }, {"real": real_fills, "modelled": modelled_fills}
+
+
+def _require_single_fill(trade: Trade) -> None:
+    entries = int(getattr(trade, "entry_fills", 1) or 1)
+    exits = int(getattr(trade, "exit_fills", 1) or 1)
+    if entries == 1 and exits == 1:
+        return
+    raise OptionOverlayError(
+        f"trade {trade.id} has {entries} entry fills and {exits} exit fills; "
+        "the option overlay prices one entry and one exit, not an averaged position"
+    )
+
+
+def _index_move(trade: Trade, units: int) -> float:
+    """Rupees the index itself made on this position. An option cannot honestly exceed it."""
+    sign = 1.0 if trade.direction == "LONG" else -1.0
+    return (float(trade.exit_price) - float(trade.entry_price)) * sign * units
 
 
 def _one_trade(

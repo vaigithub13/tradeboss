@@ -18,6 +18,17 @@ from app.indicators.frame import candles_to_frame
 from app.indicators.registry import compute, validate_params
 from app.pine.sandbox import SandboxError, check_source
 
+# Settings the engine reads off the strategy object. A missing one uses the safe value.
+STRATEGY_SETTINGS = ("name", "pyramiding", "lots", "allow_overnight", "flatten_at_end", "bar_path")
+SAFE_SETTINGS = {
+    "name": "user",
+    "pyramiding": 0,
+    "lots": 1,
+    "allow_overnight": False,
+    "flatten_at_end": True,
+    "bar_path": "1m",
+}
+
 SECRET_ENV = (
     "OPENAI_API_KEY",
     "AI_API_KEY",
@@ -188,6 +199,27 @@ def make_worker_context(
     )
 
 
+def strategy_settings(strategy: Any) -> tuple[dict[str, Any], list[str]]:
+    """Values the loaded strategy defines, and the names it leaves unset.
+
+    Class attributes on Strategy itself are not treated as a choice the strategy made.
+    """
+    present: dict[str, Any] = {}
+    for cls in type(strategy).__mro__:
+        if cls is Strategy or cls is object:
+            break
+        for key in STRATEGY_SETTINGS:
+            if key in cls.__dict__ and key not in present:
+                present[key] = cls.__dict__[key]
+    for key in STRATEGY_SETTINGS:
+        if key in vars(strategy):
+            present[key] = vars(strategy)[key]
+    missing = [key for key in STRATEGY_SETTINGS if key not in present]
+    values = dict(SAFE_SETTINGS)
+    values.update(present)
+    return values, missing
+
+
 def _load(path: Path, params: dict[str, Any]) -> Any:
     source = path.read_text()
     check_source(source)
@@ -233,7 +265,35 @@ def main() -> None:
             op = message.get("op")
             if op == "load":
                 strategy = _load(Path(message["path"]), dict(message.get("params") or {}))
-                send({"op": "loaded"})
+                values, missing = strategy_settings(strategy)
+                send({"op": "loaded", "settings": values, "missing": missing})
+            elif op == "seed":
+                if strategy is None:
+                    raise SandboxError("strategy is not loaded")
+                for row in message.get("bars") or []:
+                    bars.append(dict(row))
+                fields = message.get("context")
+                if not isinstance(fields, dict):
+                    raise SandboxError("seed is missing the strategy context")
+                held = dict(message.get("position") or {})
+                ctx = WorkerContext(
+                    bars,
+                    PositionView(
+                        int(held.get("side", 0)),
+                        int(held.get("lots", 0)),
+                        int(held.get("units", 0)),
+                        float(held.get("avg_price", 0)),
+                    ),
+                    symbol=str(fields.get("symbol") or ""),
+                    timeframe=str(fields["timeframe"]),
+                    base_minutes=int(fields["base_minutes"]),
+                    time=int(fields["time"]),
+                    cash=float(fields.get("cash") or 0),
+                    lot_size=int(fields.get("lot_size") or 1),
+                    open_orders=list(fields.get("open_orders") or []),
+                )
+                strategy.on_start(ctx)
+                send({"op": "seeded", "bars": len(bars)})
             elif op == "bar":
                 if strategy is None:
                     raise SandboxError("strategy is not loaded")

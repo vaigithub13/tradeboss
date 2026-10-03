@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date
 from decimal import Decimal
 
+import pytest
+
 from app.backtest.costs import load_default_cost_table
 from app.options.bs import bs_price, snap_premium
 from app.options.model import OptionModelConfig
@@ -112,6 +114,48 @@ def test_22_end_to_end_golden_mon_5_oct_2026() -> None:
         "brokerage": 20.0, "stt": 14.68, "exchange": 3.48, "sebi": 0.01, "stamp": 0.0, "gst": 4.23,
     }
     assert (row["charges_total"], row["net_pnl"]) == (69.71, 1483.79)
+
+
+def test_an_averaged_position_is_refused() -> None:
+    from app.backtest.contracts import Signal
+    from app.options.model import OptionOverlayError, overlay_options
+    from tests.bt_helpers import MON, day_bars, run
+    from tests.bt_helpers import Scripted, buy
+
+    candles = day_bars(MON, [(100, 101, 99, 100)] * 5)
+    result = run(Scripted({0: [buy()], 1: [buy()], 2: [Signal("EXIT", 2)]}), candles)
+    assert result.trades[0].entry_fills == 2
+    assert result.trades[0].exit_fills == 1
+    with pytest.raises(OptionOverlayError, match=r"trade 1 has 2 entry fills and 1 exit fills"):
+        overlay_options(result, [], [])
+
+
+def test_option_pnl_above_the_index_move_is_warned() -> None:
+    fill, ex = ist(2026, 10, 5, 10, 0), ist(2026, 10, 5, 10, 30)
+    index = [bar(fill - 60, 25010), bar(fill, 25010), bar(ex, 25060)]
+    vix = [bar(fill, 14.0), bar(ex, 14.0)]
+
+    def rich(model, **kwargs):
+        return (10.0 if kwargs["side"] == "BUY" else 500.0), "model"
+
+    from app.options import model as overlay
+    original = overlay._taken_premium
+    overlay._taken_premium = rich
+    try:
+        out = estimate([trade(entry=(fill, 25010), exit=(ex, 25060))], index, vix)
+    finally:
+        overlay._taken_premium = original
+    warning = next(item for item in out.option.warnings if "exceeds the index move" in item)
+    assert "larger than the index move" in warning
+    assert "trade 1" in warning
+    quiet = estimate([trade(entry=(fill, 25010), exit=(ex, 25060))], index, vix)
+    assert not any("exceeds the index move" in item for item in quiet.option.warnings)
+    loser = estimate(
+        [trade(direction="SHORT", entry=(fill, 25010), exit=(ex, 28000))],
+        [bar(fill - 60, 25010), bar(fill, 25010), bar(ex, 28000)],
+        vix,
+    )
+    assert not any("exceeds the index move" in item for item in loser.option.warnings)
 
 
 def test_slippage_is_configurable_and_defaults_to_half_a_point() -> None:

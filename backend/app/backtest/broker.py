@@ -476,6 +476,8 @@ class BacktestBroker:
             optimistic=tr.optimistic,
             entry_at_open=tr.entry_at_open,
             exit_at_open=tr.exit_at_open,
+            entry_fills=len(tr.entries),
+            exit_fills=len(tr.exits),
         ))
         self._open = None
         self._avg = Decimal("0")

@@ -47,7 +47,42 @@ class IsolatedStrategy(Strategy):
         threading.Thread(target=self._drain, args=(self._proc.stderr,), daemon=True).start()
         ready = self._read(5.0)
         self.secrets_seen = [key for key in ready.get("secrets", []) if key in SECRET_ENV]
-        self._rpc({"op": "load", "path": str(self.path), "params": self.params}, 5.0)
+        loaded = self._rpc({"op": "load", "path": str(self.path), "params": self.params}, 5.0)
+        self._apply_settings(loaded.get("settings") or {}, loaded.get("missing") or [])
+
+    def _apply_settings(self, values: dict[str, Any], missing: list[str]) -> None:
+        """Copy the loaded strategy's settings. A missing one keeps the safe value and is warned."""
+        self.settings_warnings: list[str] = []
+        for key, value in values.items():
+            setattr(self, key, value)
+        for key in missing:
+            value = getattr(self, key)
+            self.settings_warnings.append(f"strategy does not set {key}; using {value!r}")
+
+    def on_start(self, ctx: Any) -> None:
+        """Give the worker the warm-up bars the engine already has, and the same context."""
+        rows = []
+        for i in range(len(ctx.bars)):
+            bar = ctx.bars[i]
+            rows.append({key: bar[key] for key in ("time", "open", "high", "low", "close", "volume")})
+        position = ctx.position
+        self._rpc({
+            "op": "seed",
+            "bars": rows,
+            "position": {
+                "side": position.side, "lots": position.lots,
+                "units": position.units, "avg_price": position.avg_price,
+            },
+            "context": {
+                "symbol": ctx.symbol,
+                "timeframe": ctx.timeframe,
+                "base_minutes": ctx.base_minutes,
+                "time": int(ctx.time),
+                "cash": ctx.cash,
+                "lot_size": ctx.lot_size,
+                "open_orders": ctx.open_orders,
+            },
+        }, self.call_timeout)
 
     def _drain(self, pipe: Any) -> None:
         for line in pipe:

@@ -372,6 +372,7 @@ def run_backtest(
     metrics = compute_metrics([TradeRecord(t.entry_time, t.exit_time, t.net_pnl) for t in trades])
     days = {ist_date(t.entry_time) for t in trades} | {ist_date(t.exit_time) for t in trades}
     warnings.extend(cfg.cost_model.unverified_warnings(days))
+    warnings.extend(str(note) for note in getattr(strategy, "settings_warnings", ()))
     if not trades:
         warnings.append(ZERO_TRADES_WARNING)
     metrics["gross_pnl"] = float(sum((Decimal(str(t.gross_pnl)) for t in trades), Decimal("0")))

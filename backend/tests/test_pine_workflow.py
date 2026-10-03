@@ -867,3 +867,107 @@ def test_conversion_uses_its_own_model_and_at_least_8000_tokens(monkeypatch: pyt
     assert max_output_tokens() == 800
     assert conversion_model() == "gpt-5.4"
     assert conversion_max_tokens() >= 8000
+
+
+SET = '''
+from app.backtest.contracts import Signal, Strategy
+
+
+class Gate(Strategy):
+    name = "gate"
+    pyramiding = 0
+    lots = 3
+    allow_overnight = False
+    flatten_at_end = True
+    bar_path = "1m"
+
+    def on_bar(self, bar, ctx):
+        return [Signal("BUY", self.lots, "MARKET", tag="LE")]
+'''
+
+BARE = '''
+from app.backtest.contracts import Signal, Strategy
+
+
+class Bare(Strategy):
+    def on_bar(self, bar, ctx):
+        return [Signal("BUY", 1, "MARKET", tag="LE")]
+'''
+
+WARM = '''
+from app.backtest.contracts import Signal, Strategy
+
+
+class Warm(Strategy):
+    name = "warm"
+    pyramiding = 0
+    lots = 1
+    allow_overnight = False
+    flatten_at_end = True
+    bar_path = "1m"
+
+    def on_bar(self, bar, ctx):
+        if len(ctx.bars) == 4:
+            return [Signal("BUY", 1, "MARKET", tag="LE")]
+        return []
+'''
+
+
+def test_the_worker_copies_strategy_settings(tmp_path: Path) -> None:
+    path = tmp_path / "gate.py"
+    path.write_text(SET)
+    strategy = IsolatedStrategy(path)
+    assert strategy.name == "gate"
+    assert strategy.pyramiding == 0
+    assert strategy.lots == 3
+    assert strategy.allow_overnight is False
+    assert strategy.flatten_at_end is True
+    assert strategy.bar_path == "1m"
+    assert strategy.settings_warnings == []
+    result = _run(strategy)
+    assert result.trades[0].lots == 3
+    assert result.trades[0].entry_fills == 1
+    strategy.close()
+
+
+def test_a_missing_setting_uses_the_safe_default_and_warns(tmp_path: Path) -> None:
+    path = tmp_path / "bare.py"
+    path.write_text(BARE)
+    strategy = IsolatedStrategy(path)
+    assert strategy.pyramiding == 0
+    assert strategy.lots == 1
+    assert strategy.allow_overnight is False
+    assert strategy.flatten_at_end is True
+    assert strategy.bar_path == "1m"
+    assert strategy.name == "user"
+    text = " ".join(strategy.settings_warnings)
+    assert "does not set pyramiding; using 0" in text
+    assert "does not set lots; using 1" in text
+    result = _run(strategy)
+    assert result.trades[0].lots == 1
+    assert any("does not set pyramiding; using 0" in note for note in result.warnings)
+    strategy.close()
+
+
+def test_the_worker_sees_the_same_warmup_bars_as_the_engine(tmp_path: Path) -> None:
+    from tests.bt_helpers import TUE
+
+    path = tmp_path / "warm.py"
+    path.write_text(WARM)
+    monday = day_bars(MON, [(100, 101, 99, 100)] * 3, step_min=5)
+    tuesday = day_bars(TUE, [(110, 112, 109, 111)] * 6, step_min=5)
+    bars = monday + tuesday
+    config = BacktestConfig(
+        timeframe="5m", start="2026-01-06", end="2026-01-06",
+        lot_size=1, warmup_bars=3, square_off=None,
+    )
+    source = ListSource(bars, base_minutes=5, symbol="NIFTY50")
+    namespace: dict = {}
+    exec(WARM, namespace)
+    inside = run_backtest(namespace["Warm"](), source, config)
+    outside = run_backtest(IsolatedStrategy(path), source, config)
+    assert [(t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.lots) for t in outside.trades] == [
+        (t.entry_time, t.entry_price, t.exit_time, t.exit_price, t.lots) for t in inside.trades
+    ]
+    assert len(inside.trades) == 1
+    assert inside.trades[0].entry_time == tuesday[1]["time"]

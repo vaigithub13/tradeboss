@@ -32,6 +32,8 @@ class Trade:
     optimistic: bool
     entry_at_open: bool = True  # market or a stop gapped through: the fill is the minute's open
     exit_at_open: bool = True
+    entry_fills: int = 1  # more than one means the entry price is an average
+    exit_fills: int = 1
 
 
 def canonical(obj: Any) -> str:
