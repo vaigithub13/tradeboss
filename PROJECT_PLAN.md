@@ -198,6 +198,24 @@ An optional chart screenshot is a second argument. The client call includes thos
 
 ---
 
+## Replay (planned, not built)
+
+Waiting for OK. Tests that name the API are in `frontend/src/replay/cursor.test.ts` and `backend/tests/test_replay_cursor.py`. The modules they import are not written yet.
+
+Stored candles only. No Upstox call. Replay does not start or stop the live feed.
+
+**Cursor.** A Replay button takes an IST date and time. That moment snaps to the last 1-minute bar at or before it. The chart, on every timeframe, is the resample of only those 1-minute bars. A 5-minute bucket that has three minutes so far is a partial candle. Bars after the cursor are not loaded, not resampled, and not sent to an indicator.
+
+**Indicators.** The same `compute_indicators` path as the chart, with `to_time` equal to the last visible bar. Warm-up may read earlier stored bars. It may not read a bar after the cursor.
+
+**Controls.** Play and pause. Step moves one bar forward and pauses. Speed is 1, 2, 5, or 10 bars per second. Jump goes to the next trade's entry time after the cursor, and pauses. Exit leaves replay and shows the full stored series again. On the last bar, step and play stay put.
+
+**Overlay, optional.** Either a saved backtest run revealed as the cursor arrives, or a strategy called with only the visible bars each time the cursor moves. A saved trade draws its entry marker at the entry bar, its stop line while the trade is open, and its exit marker and trade card on the exit bar. A later trade draws nothing. A bar-by-bar strategy is given the visible series and cannot see the next bar.
+
+**Later, plan only.** Replay a recorded live session from `data/feed-recordings`. A practice mode where manual paper trades can be placed during replay, with option costs. Neither has an API in this slice.
+
+---
+
 ## 6. Honest limits (keep in mind)
 
 - **Pine Script**: no tool outside TradingView runs 100% of Pine. PineTS covers a large and growing subset; strategy functions (`strategy.entry` etc.) and some `request.*` calls may not be fully supported. AI conversion + manual review is the reliable path for strategies.

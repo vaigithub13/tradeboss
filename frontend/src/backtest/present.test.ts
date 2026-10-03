@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import { useBacktestStore } from "../store/backtestStore";
 import {
   DIRTY_WARNING,
   HOLDOUT_COUNT,
+  RESEARCH_END,
   compareSelection,
   compareSeries,
   compareWarningLines,
   formFromRun,
+  holdoutFormWarning,
   jumpWindow,
   sortTrades,
   warningLines,
@@ -86,6 +89,26 @@ describe("jumpWindow", () => {
     expect(placed.to - placed.from).toBe(120);
     expect((90 - placed.from) / (placed.to - placed.from)).toBeCloseTo(1 / 3, 5);
     expect(jumpWindow(times, 50, 120)).toEqual({ kind: "load", center: 50 });
+  });
+});
+
+describe("holdout form", () => {
+  it("defaults a research run to the day before the fixed holdout", () => {
+    expect(useBacktestStore.getState().form.end).toBe(RESEARCH_END);
+    expect(useBacktestStore.getState().form.end).toBe("2026-06-30");
+    expect(holdoutFormWarning("2024-10-03", RESEARCH_END)).toBeNull();
+  });
+
+  it("warns when the range overlaps the holdout, including an open end", () => {
+    const warning =
+      "This range overlaps the fixed holdout 2026-07-01 to 2026-10-01. Research runs should end on 2026-06-30.";
+    expect(holdoutFormWarning("2026-06-30", "2026-07-01")).toBe(warning);
+    expect(holdoutFormWarning("2026-07-01", "2026-10-01")).toBe(warning);
+    expect(holdoutFormWarning("2026-10-01", "2026-10-01")).toBe(warning);
+    expect(holdoutFormWarning("2024-10-03", null)).toBe(warning);
+    expect(holdoutFormWarning("2026-06-01", "2026-06-30")).toBeNull();
+    expect(holdoutFormWarning("2026-10-02", "2026-10-05")).toBeNull();
+    expect(holdoutFormWarning("2026-08-01", "2026-07-01")).toBeNull();
   });
 });
 

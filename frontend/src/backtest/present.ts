@@ -128,6 +128,20 @@ export function HOLDOUT_COUNT(peeks: number): string {
   return `final holdout has been run ${peeks} times`;
 }
 
+/** Frozen in backend/app/backtest/data/holdout.json. Research ends the day before. */
+export const HOLDOUT_START = "2026-07-01";
+export const HOLDOUT_END = "2026-10-01";
+export const RESEARCH_END = "2026-06-30";
+
+export function holdoutFormWarning(start: string, end: string | null): string | null {
+  if (!start || (end !== null && end < start)) return null;
+  const rangeEnd = end ?? "9999-12-31";
+  if (start <= HOLDOUT_END && rangeEnd >= HOLDOUT_START) {
+    return `This range overlaps the fixed holdout ${HOLDOUT_START} to ${HOLDOUT_END}. Research runs should end on ${RESEARCH_END}.`;
+  }
+  return null;
+}
+
 export function compareSeries(result: {
   kind?: string;
   equity?: { option?: { exit_time: number; equity: number; drawdown: number }[]; index?: { exit_time: number; equity: number; drawdown: number }[] };

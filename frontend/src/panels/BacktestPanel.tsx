@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 import type { StrategySpec } from "../api/backtests";
-import { gridHint, runLabel, type RunConfig } from "../backtest/present";
+import { gridHint, holdoutFormWarning, runLabel, type RunConfig } from "../backtest/present";
 import { useBacktestStore } from "../store/backtestStore";
 import { useChartStore } from "../store/chartStore";
 
@@ -49,6 +49,7 @@ export function BacktestPanel() {
   }, [symbol, timeframe, sessions, useChartDefaults]);
 
   const spec = catalog.find((item) => item.name === form.strategy);
+  const holdoutWarning = holdoutFormWarning(form.start, form.end);
   const running = active?.status === "queued" || active?.status === "running" || runs.some((run) => run.status === "queued" || run.status === "running");
 
   return (
@@ -125,6 +126,11 @@ export function BacktestPanel() {
         End
         <input aria-label="End" type="date" className="rounded border border-white/10 bg-white/5 px-2 py-1" value={form.end ?? ""} onChange={(e) => setForm({ end: e.target.value || null })} />
       </label>
+      {holdoutWarning && (
+        <p role="status" className="rounded border border-amber-400/40 bg-amber-400/10 px-2 py-1 text-amber-200">
+          {holdoutWarning}
+        </p>
+      )}
       <fieldset className="flex flex-col gap-1">
         <legend>Sessions</legend>
         {(["normal", "weekend_full", "special_short", "muhurat"] as const).map((session) => (

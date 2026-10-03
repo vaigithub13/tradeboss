@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import { fetchRun, fetchRuns, fetchStrategies, startBacktest, startHoldout, startWalkForward, type BacktestRun, type StrategySpec } from "../api/backtests";
-import { formFromRun, type RunConfig } from "../backtest/present";
+import { RESEARCH_END, formFromRun, type RunConfig } from "../backtest/present";
 import type { SessionType, Timeframe } from "../api/client";
 
 interface Focus {
@@ -65,7 +65,7 @@ const INITIAL: RunConfig = {
   symbol: "NIFTY50",
   timeframe: "5m",
   start: "2024-10-03",
-  end: null,
+  end: RESEARCH_END,
   sessions: ["normal", "weekend_full"],
   mode: "options",
   strike_offset: 0,
