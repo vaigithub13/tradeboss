@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { approveEnabled, cardLines, convertEnabled, replaceAsked, showBacktestCard, type PineCard } from "./present";
+import { approveEnabled, cardLines, convertEnabled, disabledReasons, replaceAsked, showBacktestCard, type PineCard } from "./present";
 
 describe("pine panel gates", () => {
   it("keeps conversion disabled until the report is accepted", () => {
@@ -11,6 +11,23 @@ describe("pine panel gates", () => {
   it("hides Approve when the draft failed the check", () => {
     expect(approveEnabled(false)).toBe(false);
     expect(approveEnabled(true)).toBe(true);
+  });
+
+  it("shows why a disabled button cannot be used", () => {
+    const open = { busy: false, hasReport: true, accepted: true, ready: true, approved: false, errors: [] };
+    expect(disabledReasons("approve", open)).toEqual([]);
+    expect(disabledReasons("approve", { ...open, busy: true })).toEqual(["The check is still running."]);
+    expect(disabledReasons("approve", { ...open, ready: false, errors: ["remove line 3: from typing import Any"] })).toEqual([
+      "remove line 3: from typing import Any",
+    ]);
+    expect(disabledReasons("approve", { ...open, ready: false, errors: [] })).toEqual(["The draft failed the checks."]);
+    expect(disabledReasons("convert", { ...open, accepted: false })).toEqual([
+      "Accept the semantics report before converting.",
+    ]);
+    expect(disabledReasons("accept", { ...open, hasReport: false })).toEqual([
+      "Run the semantics report before accepting.",
+    ]);
+    expect(disabledReasons("report", { ...open, busy: true })).toEqual(["The semantics report is still running."]);
   });
 
   it("asks before replacing a strategy that is already saved", () => {

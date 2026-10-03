@@ -23,7 +23,7 @@ class PanelBoundary extends Component<{ children: ReactNode }, { message: string
 
 import { ApiError } from "../api/client";
 import { acceptReport, approveDraft, convertPine, reportPine, scanPine, type PineReport, type PineScan } from "../api/pine";
-import { approveEnabled, cardLines, convertEnabled, replaceAsked, showBacktestCard, type PineCard } from "../pine/present";
+import { approveEnabled, cardLines, convertEnabled, disabledReasons, replaceAsked, showBacktestCard, type PineButton, type PineCard } from "../pine/present";
 
 const TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h"] as const;
 
@@ -83,6 +83,18 @@ function PineEditor() {
   const [error, setError] = useState<string | null>(null);
 
   const kind = scan?.kind ?? null;
+  const gate = {
+    busy,
+    hasReport: issued != null,
+    accepted,
+    ready: Boolean(draftId && draftHash),
+    approved: draftApproved,
+    errors: draftErrors,
+  };
+
+  function reasons(button: PineButton): string[] {
+    return disabledReasons(button, gate);
+  }
 
   async function onReport(): Promise<void> {
     setBusy(true);
@@ -190,6 +202,9 @@ function PineEditor() {
       >
         Semantics report
       </button>
+      {reasons("report").map((line) => (
+        <p key={line} className="text-amber-200">{line}</p>
+      ))}
       {error && <p className="text-red-300">{error}</p>}
       {modelError && <p className="text-amber-200">{modelError}</p>}
       {scan && (
@@ -219,6 +234,9 @@ function PineEditor() {
           >
             Accept report
           </button>
+          {reasons("accept").map((line) => (
+            <p key={line} className="text-amber-200">{line}</p>
+          ))}
           {kind === "strategy" && (
             <button
               type="button"
@@ -229,6 +247,9 @@ function PineEditor() {
               Convert to Python
             </button>
           )}
+          {kind === "strategy" && reasons("convert").map((line) => (
+            <p key={line} className="text-amber-200">{line}</p>
+          ))}
         </section>
       )}
       {kind === "indicator" && (
@@ -255,18 +276,18 @@ function PineEditor() {
       {draft && (
         <section>
           <h3 className="mb-1 font-semibold text-white">Diff — new strategy</h3>
-          {draftErrors.map((line) => (
-            <p key={line} className="text-amber-200">{line}</p>
-          ))}
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 p-2">{draft}</pre>
           <button
             type="button"
             className="mt-2 rounded border border-white/15 px-2 py-1 disabled:opacity-40"
-            disabled={!approveEnabled(Boolean(draftId && draftHash)) || busy || draftApproved}
+            disabled={!approveEnabled(gate.ready) || busy || draftApproved}
             onClick={() => void onApprove()}
           >
             {draftApproved ? "Saved" : "Approve diff"}
           </button>
+          {reasons("approve").map((line) => (
+            <p key={line} className="mt-1 text-amber-200">{line}</p>
+          ))}
           {replaceOffer && (
             <button
               type="button"
