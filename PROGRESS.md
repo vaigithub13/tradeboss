@@ -460,4 +460,4 @@ The previous full-window 5-minute result (1,098 trades, index 630,280.25, option
 
 **Holdout warning (2026-10-04).** The backtest form ends a research run on 2026-06-30. If Start/End overlaps the fixed holdout 2026-07-01 to 2026-10-01, including a blank End, the form shows that overlap and the research end date. A range that starts after 2026-10-01 does not warn. The holdout was not run.
 
-**Replay (planned, 2026-10-04).** The plan is in PROJECT_PLAN.md. Tests name the cursor, partial resample, controls, and overlay. The implementation is not written. Waiting for OK. The holdout was not run.
+**Replay (2026-10-04).** Replay plays stored candles only. The step unit is a chart bar or one minute, and one-minute steps leave the current candle forming. Speed is 1, 2, 5, or 10 of that unit per second. Candle, indicator, and lazy-load responses are capped at the cursor. A strategy stepped bar by bar matches the normal backtest on the same dates. "Next trade (review)" is a review shortcut and stays disabled in the future practice mode. The live feed is not started or stopped. The holdout was not run.

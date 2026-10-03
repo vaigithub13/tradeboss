@@ -13,6 +13,9 @@ import { DataTokenBadge } from "./panels/DataTokenBadge";
 import { LiveBadge } from "./panels/LiveBadge";
 import { SessionsMenu } from "./panels/SessionsMenu";
 import { SymbolSelector } from "./panels/SymbolSelector";
+import { ReplayBar, useReplayClock } from "./replay/ReplayBar";
+import { reveal } from "./replay/cursor";
+import { useReplayStore } from "./replay/store";
 import { useBackendStore, type BackendStatus } from "./store/backendStore";
 import { useBacktestStore } from "./store/backtestStore";
 import { useChartStore } from "./store/chartStore";
@@ -118,6 +121,9 @@ export default function App() {
   const info = symbols.find((s) => s.symbol === symbol);
   const ui = STATUS_UI[backendStatus];
   const panelOpen = useBacktestStore((s) => s.panelOpen);
+  const replayActive = useReplayStore((s) => s.active);
+  const replayCursorTime = useReplayStore((s) => s.cursor);
+  useReplayClock();
   const setPanelOpen = useBacktestStore((s) => s.setPanelOpen);
   const [pineOpen, setPineOpen] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(false);
@@ -132,22 +138,57 @@ export default function App() {
   const selectTrade = useBacktestStore((s) => s.selectTrade);
   const showAround = useChartStore((s) => s.showAround);
   const markers: SeriesMarker<Time>[] = [];
-  for (const trade of activeRun?.result?.trades ?? []) {
-    const long = trade.direction === "LONG";
+  const replayReveal = replayActive && replayCursorTime != null
+    ? reveal(
+        (activeRun?.result?.trades ?? []).map((trade) => ({
+          id: trade.id,
+          entry_time: trade.entry_time,
+          exit_time: trade.exit_time,
+          stop: null,
+        })),
+        replayCursorTime,
+      )
+    : null;
+  const snapBar = (time: number): number => {
+    let snapped = time;
+    for (const candle of candles) {
+      if (candle.time <= time) snapped = candle.time;
+      else break;
+    }
+    return snapped;
+  };
+  for (const mark of replayReveal ? replayReveal.markers : []) {
+    const trade = activeRun?.result?.trades.find((item) => item.id === mark.id);
+    const long = trade?.direction === "LONG";
     markers.push({
-      time: trade.entry_time as UTCTimestamp,
-      position: long ? "belowBar" : "aboveBar",
-      shape: long ? "arrowUp" : "arrowDown",
-      color: long ? "#26a69a" : "#ef5350",
-      text: String(trade.id),
-    });
-    markers.push({
-      time: trade.exit_time as UTCTimestamp,
-      position: "aboveBar",
-      shape: "circle",
-      color: "#94a3b8",
+      time: snapBar(mark.time) as UTCTimestamp,
+      position: mark.kind === "entry" && long ? "belowBar" : "aboveBar",
+      shape: mark.kind === "exit" ? "circle" : long ? "arrowUp" : "arrowDown",
+      color: mark.kind === "exit" ? "#94a3b8" : long ? "#26a69a" : "#ef5350",
+      text: mark.kind === "entry" ? String(mark.id) : undefined,
     });
   }
+  if (!replayReveal) {
+    for (const trade of activeRun?.result?.trades ?? []) {
+      const long = trade.direction === "LONG";
+      markers.push({
+        time: trade.entry_time as UTCTimestamp,
+        position: long ? "belowBar" : "aboveBar",
+        shape: long ? "arrowUp" : "arrowDown",
+        color: long ? "#26a69a" : "#ef5350",
+        text: String(trade.id),
+      });
+      markers.push({
+        time: trade.exit_time as UTCTimestamp,
+        position: "aboveBar",
+        shape: "circle",
+        color: "#94a3b8",
+      });
+    }
+  }
+  const replayCard = replayReveal?.cardId == null
+    ? null
+    : activeRun?.result?.trades.find((trade) => trade.id === replayReveal.cardId);
   markers.sort((a, b) => Number(a.time) - Number(b.time));
   const pickTime = (time: number): void => {
     const trade = activeRun?.result?.trades.find((item) => item.entry_time === time || item.exit_time === time);
@@ -157,7 +198,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-11 shrink-0 items-center gap-4 border-b border-white/10 px-3">
+      <header className="flex min-h-11 shrink-0 flex-wrap items-center gap-4 border-b border-white/10 px-3 py-1">
         <span className="text-sm font-semibold tracking-tight">Chart Analyser</span>
         <SymbolSelector />
         <TimeframeBar info={info} selected={timeframe} onSelect={(tf) => void setTimeframe(tf)} />
@@ -170,6 +211,7 @@ export default function App() {
         >
           Backtest
         </button>
+        <ReplayBar />
         <button
           type="button"
           className="rounded border border-white/15 px-2 py-1 text-xs text-white/80"
@@ -220,8 +262,31 @@ export default function App() {
             markers={markers}
             focus={focus}
             onPickTime={pickTime}
-            tradeCard={<TradeCard />}
-            levels={analysisLevels}
+            tradeCard={
+              <>
+                <TradeCard />
+                {replayCard && (
+                  <div
+                    data-testid="replay-trade"
+                    className="absolute bottom-16 right-3 z-20 w-52 rounded border border-amber-400/40 bg-[#0b0e14]/95 p-2 text-[11px] text-white/80"
+                  >
+                    <p className="font-semibold text-white">
+                      {replayCard.direction} trade {replayCard.id}
+                    </p>
+                    <p>Entry {replayCard.entry_price}</p>
+                    {replayCursorTime != null && replayCard.exit_time <= replayCursorTime ? (
+                      <p>Exit {replayCard.exit_price}</p>
+                    ) : (
+                      <p>Open</p>
+                    )}
+                  </div>
+                )}
+              </>
+            }
+            levels={[
+              ...analysisLevels,
+              ...(replayReveal?.stops.map((stop) => ({ price: stop.price, title: "stop", color: "#ef5350" })) ?? []),
+            ]}
           />
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-white/40">

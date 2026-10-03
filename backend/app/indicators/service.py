@@ -53,6 +53,7 @@ def compute_indicators(
     from_time: int | None = None,
     to_time: int | None = None,
     session_types: Iterable[str] = DEFAULT_INCLUDED_SESSION_TYPES,
+    cursor: int | None = None,
 ) -> IndicatorsResult:
     """Indicator values for every candle whose start lies in [from_time, to_time].
 
@@ -71,7 +72,11 @@ def compute_indicators(
     if timeframe in ("1D", "1W") and any(s.type == "vwap" for s in specs):
         raise IndicatorNotAvailable("VWAP is intraday only: it resets daily, so it is not available on 1D/1W")
 
-    candles = _load_with_warmup(store, symbol, timeframe, types, specs, bar_minutes, from_time, to_time)
+    if cursor is not None and (to_time is None or to_time > cursor):
+        to_time = cursor
+    candles = _load_with_warmup(
+        store, symbol, timeframe, types, specs, bar_minutes, from_time, to_time, cursor
+    )
     frame = candles_to_frame(candles)
     times = frame["time"].tolist()
     first = bisect.bisect_left(times, from_time) if from_time is not None else 0
@@ -87,7 +92,10 @@ def compute_indicators(
                 outputs={name: _to_json_list(v[first:]) for name, v in values.items()},
             )
         )
-    return IndicatorsResult(times=times[first:], indicators=outputs)
+    visible = times[first:]
+    if cursor is not None and any(t > cursor for t in visible):
+        raise RuntimeError("indicator response contains a bar after the cursor")
+    return IndicatorsResult(times=visible, indicators=outputs)
 
 
 def _load_with_warmup(
@@ -99,9 +107,12 @@ def _load_with_warmup(
     bar_minutes: int,
     from_time: int | None,
     to_time: int | None,
+    cursor: int | None = None,
 ) -> list:
     if from_time is None or not specs:
-        return get_candles(store, symbol, timeframe, to_time=to_time, session_types=types).candles
+        return get_candles(
+            store, symbol, timeframe, to_time=to_time, session_types=types, cursor=cursor
+        ).candles
     needed = max(warmup_bars(s.type, s.params, bar_minutes) for s in specs)
     data_start, _ = store.time_range(symbol)
     bar_seconds = bar_minutes * 60
@@ -109,7 +120,8 @@ def _load_with_warmup(
     while True:
         load_from = from_time - lookback
         candles = get_candles(
-            store, symbol, timeframe, from_time=load_from, to_time=to_time, session_types=types
+            store, symbol, timeframe, from_time=load_from, to_time=to_time, session_types=types,
+            cursor=cursor,
         ).candles
         before = sum(1 for c in candles if c["time"] < from_time)
         if before >= needed or load_from <= data_start:

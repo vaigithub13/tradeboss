@@ -20,11 +20,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  NEXT_TRADE_LABEL,
   REPLAY_SPEEDS,
   advanceBars,
   barsUpTo,
+  chartBars,
   createReplay,
   indicatorTo,
+  istCursor,
+  nextChartOpen,
   nextTradeEntry,
   reveal,
   snapCursor,
@@ -153,6 +157,43 @@ describe("replay controller", () => {
     const replay = createReplay(bars);
     expect(() => replay.setSpeed(3)).toThrow(/1, 2, 5, 10/);
     expect(() => createReplay(bars, { source: "recording" })).toThrow(/later/);
+  });
+
+  it("steps one minute so the chart candle is still forming, and speed uses that unit", () => {
+    const minutes = [0, 60, 120, 180, 240, 300].map((time) => ({
+      time,
+      open: time / 60,
+      high: time / 60 + 1,
+      low: time / 60 - 1,
+      close: time / 60 + 0.5,
+      volume: 1,
+    }));
+    const replay = createReplay(minutes, { unit: "1m", timeframeSeconds: 300 });
+    replay.jumpTo(0);
+    expect(replay.visible()).toEqual([
+      expect.objectContaining({ time: 0, open: 0, close: 0.5, volume: 1 }),
+    ]);
+    replay.step();
+    expect(replay.cursor).toBe(60);
+    expect(replay.visible()[0]).toEqual(expect.objectContaining({ time: 0, close: 1.5, high: 2, volume: 2 }));
+    replay.setSpeed(2);
+    replay.play();
+    replay.tick(1);
+    expect(replay.cursor).toBe(180);
+    expect(chartBars(minutes, 300, 180)[0]?.volume).toBe(4);
+  });
+
+  it("a chart-bar step lands on the next 09:15-anchored open", () => {
+    expect(nextChartOpen(istCursor("2026-06-15", "09:17"), 300)).toBe(istCursor("2026-06-15", "09:20"));
+    expect(nextChartOpen(istCursor("2026-06-15", "09:15"), 300)).toBe(istCursor("2026-06-15", "09:20"));
+  });
+
+  it("labels jump-to-next-trade as a review shortcut and disables it in practice mode", () => {
+    expect(NEXT_TRADE_LABEL).toBe("Next trade (review)");
+    const replay = createReplay(bars, { practice: true });
+    replay.jumpTo(50);
+    expect(() => replay.jumpTrade(trades)).toThrow(/practice mode/);
+    expect(replay.cursor).toBeNull();
   });
 
   it("jump to the next trade pauses on that entry", () => {

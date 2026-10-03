@@ -107,6 +107,10 @@ def candles(
         int | None,
         Query(description="with limit: the OLDEST N candles that start after this unix time (exclusive)"),
     ] = None,
+    cursor: Annotated[
+        int | None,
+        Query(description="replay: no source minute after this unix time is resampled"),
+    ] = None,
 ) -> CandlesResponse:
     """Candles whose start time is within [from, to]; resampled from stored base data.
 
@@ -116,24 +120,32 @@ def candles(
     has_more = False
     has_more_newer = False
     try:
-        if after is not None:
+        if cursor is not None and after is not None and after >= cursor:
+            result_candles, source_minutes = [], store.base_minutes(symbol)
+        elif after is not None:
             if limit is None or from_ is not None or to is not None or before is not None:
                 raise HTTPException(status_code=422, detail="after needs limit and cannot be combined with from/to/before")
-            fwd = get_candle_page_after(store, symbol, timeframe, limit=limit, after=after, session_types=types)
+            fwd = get_candle_page_after(
+                store, symbol, timeframe, limit=limit, after=after, session_types=types, cursor=cursor
+            )
             result_candles, source_minutes, has_more_newer = fwd.candles, fwd.source_minutes, fwd.has_more
         elif limit is not None:
             if from_ is not None or to is not None:
                 raise HTTPException(status_code=422, detail="limit cannot be combined with from/to; use before")
             page = get_candle_page(
-                store, symbol, timeframe, limit=limit, before=before, session_types=types
+                store, symbol, timeframe, limit=limit, before=before, session_types=types, cursor=cursor
             )
             result_candles, source_minutes, has_more = page.candles, page.source_minutes, page.has_more
         else:
             upper = to if before is None else (before - 1 if to is None else min(to, before - 1))
+            if cursor is not None:
+                upper = cursor if upper is None else min(upper, cursor)
             result = get_candles(
-                store, symbol, timeframe, from_time=from_, to_time=upper, session_types=types
+                store, symbol, timeframe, from_time=from_, to_time=upper, session_types=types, cursor=cursor
             )
             result_candles, source_minutes = result.candles, result.source_minutes
+        if cursor is not None and any(c["time"] > cursor for c in result_candles):
+            raise HTTPException(status_code=500, detail="replay response contains a bar after the cursor")
     except SymbolNotFound:
         raise HTTPException(status_code=404, detail=f"Unknown symbol {symbol!r}") from None
     except (UnknownTimeframe, TimeframeUnavailable, UnknownSessionType) as e:

@@ -17,7 +17,7 @@ from __future__ import annotations
 import hashlib
 import re
 from bisect import bisect_right
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -34,7 +34,7 @@ from app.backtest.costs import CostModel, Slippage
 from app.backtest.lots import LotSizeTable
 from app.backtest.metrics import TradeRecord, compute_metrics
 from app.backtest.result import BacktestResult, Trade, canonical, digest
-from app.backtest.sources import CandleSource, ist_date
+from app.backtest.sources import CandleSource, Loaded, ist_date
 from app.data.resampler import DAY_S, IST_OFFSET_S, TIMEFRAMES, resample
 from app.data.service import TimeframeUnavailable
 from app.data.sessions import DEFAULT_INCLUDED_SESSION_TYPES, SESSION_TYPES
@@ -235,8 +235,27 @@ def run_backtest(
     source: CandleSource,
     config: BacktestConfig | None = None,
     on_progress: Callable[[int, int], None] | None = None,
+    replay_cursor: int | None = None,
 ) -> BacktestResult:
+    """`replay_cursor` drops source minutes after that time and does not flatten a position
+    merely because the clipped series ends mid-session."""
     cfg = config or BacktestConfig()
+    data_continues = False
+    if replay_cursor is not None:
+        cursor = replay_cursor
+        inner = source
+
+        class _Clip:
+            symbol = getattr(inner, "symbol", "")
+
+            def load(self, from_time: int | None, to_time: int | None, session_types: Iterable[str]) -> Loaded:
+                nonlocal data_continues
+                loaded = inner.load(from_time, to_time, session_types)
+                kept = [c for c in loaded.candles if c["time"] <= cursor]
+                data_continues = any(c["time"] > cursor for c in loaded.candles)
+                return Loaded(kept, loaded.base_minutes, loaded.anchored)
+
+        source = _Clip()
     tf = cfg.timeframe
     intraday = tf in INTRADAY_MIN
     overnight = bool(getattr(strategy, "allow_overnight", False))
@@ -324,8 +343,10 @@ def run_backtest(
                 if d in sq_done:
                     continue
                 broker.on_sub_bar(ts, o, h, lo_, base_s)
-        final = k == n - 1
-        if k == n - 1 or dates[k + 1] != dates[k]:
+        final = k == n - 1 and not data_continues
+        day_ends = k + 1 < n and dates[k + 1] != dates[k]
+        clipped_session_done = k == n - 1 and data_continues and session_complete(k)
+        if day_ends or final or clipped_session_done:
             last_ts, last_c = lasts[k], subs[k][-1][4]
             if not overnight:
                 reason = "end_of_data" if final and not session_complete(k) else "session_end"

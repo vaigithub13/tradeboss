@@ -89,6 +89,8 @@ export interface CandlesQuery {
   before?: number;
   /** the OLDEST `limit` candles that start after this unix time (exclusive); needs `limit` */
   after?: number;
+  /** replay: the server resamples no minute after this unix time */
+  cursor?: number;
 }
 
 export function candlesUrl(q: CandlesQuery): string {
@@ -99,6 +101,7 @@ export function candlesUrl(q: CandlesQuery): string {
   if (q.limit !== undefined) p.set("limit", String(q.limit));
   if (q.before !== undefined) p.set("before", String(q.before));
   if (q.after !== undefined) p.set("after", String(q.after));
+  if (q.cursor !== undefined) p.set("cursor", String(q.cursor));
   return `/api/candles?${p.toString()}`;
 }
 

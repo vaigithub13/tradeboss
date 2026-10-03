@@ -79,6 +79,7 @@ def get_candles(
     from_time: int | None = None,
     to_time: int | None = None,
     session_types: Iterable[str] = DEFAULT_INCLUDED_SESSION_TYPES,
+    cursor: int | None = None,
 ) -> CandleResult:
     """Candles whose START time lies in [from_time, to_time] (unix seconds).
 
@@ -103,19 +104,32 @@ def get_candles(
             f"(candles are never fabricated). Available: {list(available_timeframes(base))}"
         )
 
+    if cursor is not None and (to_time is None or to_time > cursor):
+        to_time = cursor
     load_from = None if from_time is None else _bucket_start(from_time, timeframe)
-    load_to = None if to_time is None else _bucket_end(to_time, timeframe)
+    # A replay cursor clips source minutes before resample, so a forming bar cannot
+    # contain a later minute. The ordinary path still loads the whole edge bucket.
+    load_to = cursor if cursor is not None else (None if to_time is None else _bucket_end(to_time, timeframe))
     source, source_minutes = store.load(
         symbol, from_time=load_from, to_time=load_to, session_types=types
     )
     anchored = store.dates_of_type(symbol, "muhurat") if "muhurat" in types else frozenset()
-    out = resample(
-        source, timeframe, source_minutes, anchor_to_first_bar_dates=anchored
-    )
+    if cursor is not None:
+        from app.replay.cursor import replay_bars
+
+        out = replay_bars(
+            source, timeframe, cursor, source_minutes, anchor_to_first_bar_dates=anchored
+        )
+    else:
+        out = resample(
+            source, timeframe, source_minutes, anchor_to_first_bar_dates=anchored
+        )
     if from_time is not None:
         out = [c for c in out if c["time"] >= from_time]
     if to_time is not None:
         out = [c for c in out if c["time"] <= to_time]
+    if cursor is not None and any(c["time"] > cursor for c in out):
+        raise RuntimeError("replay response contains a bar after the cursor")
     return CandleResult(candles=out, source_minutes=source_minutes)
 
 
@@ -127,6 +141,7 @@ def get_candle_page_after(
     limit: int,
     after: int,
     session_types: Iterable[str] = DEFAULT_INCLUDED_SESSION_TYPES,
+    cursor: int | None = None,
 ) -> CandlePage:
     """The OLDEST `limit` candles whose start time is > `after`; `has_more` = newer ones exist.
 
@@ -137,12 +152,15 @@ def get_candle_page_after(
     types = list(session_types)
     bar_s = timeframe_seconds(timeframe)
     _, data_end = store.time_range(symbol)  # raises SymbolNotFound
+    if cursor is not None:
+        data_end = min(data_end, cursor)
     from_time = after + 1
     lookback = (limit + 1) * bar_s * 6
     while True:
         to_time = min(data_end, from_time + lookback)
         result = get_candles(
-            store, symbol, timeframe, from_time=from_time, to_time=to_time, session_types=types
+            store, symbol, timeframe, from_time=from_time, to_time=to_time, session_types=types,
+            cursor=cursor,
         )
         if len(result.candles) > limit or to_time >= data_end:
             break
@@ -162,6 +180,7 @@ def get_candle_page(
     limit: int,
     before: int | None = None,
     session_types: Iterable[str] = DEFAULT_INCLUDED_SESSION_TYPES,
+    cursor: int | None = None,
 ) -> CandlePage:
     """The newest `limit` candles whose start time is < `before` (None = the very latest).
 
@@ -175,11 +194,14 @@ def get_candle_page(
     bar_s = timeframe_seconds(timeframe)
     data_start, data_end = store.time_range(symbol)  # raises SymbolNotFound
     to_time = data_end if before is None else before - 1
+    if cursor is not None:
+        to_time = min(to_time, cursor)
     lookback = (limit + 1) * bar_s * 6  # trading hours are ~1/4 of the clock: start generous, grow
     while True:
         from_time = to_time - lookback
         result = get_candles(
-            store, symbol, timeframe, from_time=from_time, to_time=to_time, session_types=types
+            store, symbol, timeframe, from_time=from_time, to_time=to_time, session_types=types,
+            cursor=cursor,
         )
         if len(result.candles) > limit or from_time <= data_start:
             break

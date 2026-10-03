@@ -11,6 +11,8 @@ import {
 } from "../indicators/catalog";
 import { loadItems, saveItems } from "../indicators/persistence";
 import { buildIndicatorsRequest, planFetches, type FetchGroup, type RequestContext } from "../indicators/request";
+import { acceptBars, capIndicatorsRequest } from "../replay/cap";
+import { replayCursor } from "../replay/session";
 
 /** scopes (symbol / timeframe / sessions) whose indicator values stay cached; match chartStore */
 const MAX_CACHED_SCOPES = 12;
@@ -178,7 +180,10 @@ async function run(
   running++;
   set({ status: "loading", error: null });
   try {
-    const res = await fetchIndicators(buildIndicatorsRequest(ctx, group));
+    const cursor = replayCursor();
+    const request = cursor == null ? buildIndicatorsRequest(ctx, group) : capIndicatorsRequest(buildIndicatorsRequest(ctx, group), cursor);
+    const res = await fetchIndicators(request);
+    if (cursor != null) acceptBars(res.times.map((time) => ({ time })), cursor);
     const forScope = { ...(get().data[scope] ?? {}) };
     for (const out of res.indicators) {
       const planned = group.indicators[Number(out.id)];

@@ -10,6 +10,8 @@ import {
 } from "../api/client";
 import { scopeKey } from "../indicators/cache";
 import { mergeLiveCandles } from "../live/merge";
+import { acceptBars, capCandlesQuery } from "../replay/cap";
+import { replayCursor } from "../replay/session";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
@@ -213,7 +215,8 @@ export const useChartStore = create<ChartState>((set, get) => ({
     if (!symbol) return;
     const key = scopeKey(symbol, timeframe, sessions);
 
-    const cached = cacheGet(key);
+    const replayTo = replayCursor();
+    const cached = replayTo == null ? cacheGet(key) : undefined;
     if (cached) {
       inflight?.abort();
       requestSeq++;
@@ -237,14 +240,15 @@ export const useChartStore = create<ChartState>((set, get) => ({
     set({ status: "loading", error: null });
 
     try {
-      const res = await fetchCandles(
-        { symbol, timeframe, sessions, limit: INITIAL_BARS },
-        controller.signal,
-      );
+      const query = replayTo == null
+        ? { symbol, timeframe, sessions, limit: INITIAL_BARS }
+        : capCandlesQuery({ symbol, timeframe, sessions, limit: INITIAL_BARS }, replayTo);
+      const res = await fetchCandles(query, controller.signal);
       if (seq !== requestSeq) return; // a newer request superseded this one
-      cachePut(key, { candles: res.candles, hasMore: res.has_more, hasMoreNewer: false });
+      const candles = replayTo == null ? res.candles : acceptBars(res.candles, replayTo);
+      if (replayTo == null) cachePut(key, { candles, hasMore: res.has_more, hasMoreNewer: false });
       set({
-        candles: res.candles,
+        candles,
         hasMoreOlder: res.has_more,
         hasMoreNewer: false,
         loadingOlder: false,
@@ -266,17 +270,32 @@ export const useChartStore = create<ChartState>((set, get) => ({
     const key = loadedScope(loaded);
     set({ loadingOlder: true });
     try {
-      const res = await fetchCandles({
-        symbol: loaded.symbol,
-        timeframe: loaded.timeframe,
-        sessions: loaded.sessions,
-        limit: olderChunkSize(candles.length),
-        before: first.time,
-      });
+      const replayTo = replayCursor();
+      const res = await fetchCandles(
+        replayTo == null
+          ? {
+              symbol: loaded.symbol,
+              timeframe: loaded.timeframe,
+              sessions: loaded.sessions,
+              limit: olderChunkSize(candles.length),
+              before: first.time,
+            }
+          : capCandlesQuery(
+              {
+                symbol: loaded.symbol,
+                timeframe: loaded.timeframe,
+                sessions: loaded.sessions,
+                limit: olderChunkSize(candles.length),
+                before: first.time,
+              },
+              replayTo,
+            ),
+      );
+      const olderBars = replayTo == null ? res.candles : acceptBars(res.candles, replayTo);
       // The chunk belongs to `key` even if the user has since switched away: keep it cached.
       const base = cacheGet(key) ?? { candles, hasMore: hasMoreOlder, hasMoreNewer: get().hasMoreNewer };
       const firstNow = base.candles[0]?.time ?? Infinity;
-      const older = res.candles.filter((c) => c.time < firstNow);
+      const older = olderBars.filter((c) => c.time < firstNow);
       const joined = prependWindow(older, base.candles);
       const merged: ScopeData = {
         candles: joined.candles,
@@ -303,19 +322,35 @@ export const useChartStore = create<ChartState>((set, get) => ({
     const { loaded, candles, hasMoreNewer, loadingOlder, loadingNewer, status } = get();
     const last = candles[candles.length - 1];
     if (!loaded || !last || !hasMoreNewer || loadingOlder || loadingNewer || status === "loading") return;
+    const replayTo = replayCursor();
+    if (replayTo != null && last.time >= replayTo) return;
     const key = loadedScope(loaded);
     set({ loadingNewer: true });
     try {
-      const res = await fetchCandles({
-        symbol: loaded.symbol,
-        timeframe: loaded.timeframe,
-        sessions: loaded.sessions,
-        limit: olderChunkSize(candles.length),
-        after: last.time,
-      });
+      const res = await fetchCandles(
+        replayTo == null
+          ? {
+              symbol: loaded.symbol,
+              timeframe: loaded.timeframe,
+              sessions: loaded.sessions,
+              limit: olderChunkSize(candles.length),
+              after: last.time,
+            }
+          : capCandlesQuery(
+              {
+                symbol: loaded.symbol,
+                timeframe: loaded.timeframe,
+                sessions: loaded.sessions,
+                limit: olderChunkSize(candles.length),
+                after: last.time,
+              },
+              replayTo,
+            ),
+      );
+      const newerBars = replayTo == null ? res.candles : acceptBars(res.candles, replayTo);
       const base = cacheGet(key) ?? { candles, hasMore: get().hasMoreOlder, hasMoreNewer };
       const lastNow = base.candles[base.candles.length - 1]?.time ?? -Infinity;
-      const newer = res.candles.filter((c) => c.time > lastNow);
+      const newer = newerBars.filter((c) => c.time > lastNow);
       const joined = appendWindow(base.candles, newer);
       const merged: ScopeData = {
         candles: joined.candles,
@@ -377,6 +412,7 @@ export const useChartStore = create<ChartState>((set, get) => ({
   },
 
   applyLive: (symbol, timeframe, incoming) => {
+    if (replayCursor() != null) return false;
     const { loaded, candles, hasMoreNewer } = get();
     if (!loaded || loaded.symbol !== symbol || loaded.timeframe !== timeframe || hasMoreNewer) return false;
     const merged = mergeLiveCandles(candles, incoming);
@@ -394,19 +430,21 @@ export const useChartStore = create<ChartState>((set, get) => ({
     if (!symbol) return;
     const step = TF_SECONDS[timeframe];
     try {
-      const res = await fetchCandles({
-        symbol,
-        timeframe,
-        sessions,
-        from: time - 80 * step,
-        to: time + 120 * step,
-      });
+      const replayTo = replayCursor();
+      const from = time - 80 * step;
+      const to = time + 120 * step;
+      const res = await fetchCandles(
+        replayTo == null
+          ? { symbol, timeframe, sessions, from, to }
+          : capCandlesQuery({ symbol, timeframe, sessions, from, to }, replayTo),
+      );
+      const shown = replayTo == null ? res.candles : acceptBars(res.candles, replayTo);
       const key = scopeKey(symbol, timeframe, sessions);
-      cachePut(key, { candles: res.candles, hasMore: true, hasMoreNewer: true });
+      if (replayTo == null) cachePut(key, { candles: shown, hasMore: true, hasMoreNewer: true });
       set({
-        candles: res.candles,
+        candles: shown,
         hasMoreOlder: true,
-        hasMoreNewer: true,
+        hasMoreNewer: replayTo == null,
         loadingOlder: false,
         loadingNewer: false,
         loaded: { symbol, timeframe, sessions },

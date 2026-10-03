@@ -32,6 +32,7 @@ class IndicatorsRequest(BaseModel):
         default=None, description="session types to include; default = server setting"
     )
     indicators: list[IndicatorIn] = Field(max_length=50)
+    cursor: int | None = Field(default=None, description="replay: no bar after this unix time")
 
 
 class IndicatorOut(BaseModel):
@@ -66,7 +67,7 @@ def indicators(
         ]
         result = compute_indicators(
             store, req.symbol, req.timeframe, specs,
-            from_time=req.from_, to_time=req.to, session_types=types,
+            from_time=req.from_, to_time=req.to, session_types=types, cursor=req.cursor,
         )  # fmt: skip
     except SymbolNotFound:
         raise HTTPException(status_code=404, detail=f"Unknown symbol {req.symbol!r}") from None

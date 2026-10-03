@@ -87,6 +87,66 @@ def test_a_cursor_before_the_session_yields_no_bars() -> None:
     assert replay_bars(morning(), "5m", ist(9, 14)) == []
 
 
+def test_candle_and_indicator_responses_have_no_bar_after_the_cursor(tmp_path) -> None:
+    """The HTTP body itself stops at the cursor, including lazy pages."""
+    from fastapi.testclient import TestClient
+
+    from app.data.importer import build_frame, write_parquet
+    from app.data.store import CandleStore
+    from app.main import app
+    from app.routes.candles import get_default_sessions, get_store
+
+    t0 = ist(9, 15)
+    raw = []
+    for i in range(375):
+        price = 10.0
+        high, low, close, volume = 10.0, 10.0, 10.0, 1.0
+        if i == 0:
+            price, high, low, close = 10, 12, 9, 11
+        elif i == 1:
+            price, high, low, close = 11, 14, 10, 13
+        elif i == 2:
+            price, high, low, close = 13, 13, 8, 12
+        elif i == 3:
+            price, high, low, close, volume = 20, 30, 1, 25, 100
+        elif i == 4:
+            price, high, low, close = 1, 1, 1, 1
+        raw.append({"t": (t0 + 60 * i) * 1000, "open": price, "high": high, "low": low, "close": close, "volume": volume})
+    frame, _report = build_frame(raw)
+    write_parquet(frame, tmp_path / "NIFTY" / "1m.parquet")
+    store = CandleStore(tmp_path)
+    app.dependency_overrides[get_store] = lambda: store
+    app.dependency_overrides[get_default_sessions] = lambda: ("normal", "weekend_full")
+    try:
+        client = TestClient(app)
+        cursor = ist(9, 17)
+        for params in (
+            {"symbol": "NIFTY", "timeframe": "5m", "cursor": cursor},
+            {"symbol": "NIFTY", "timeframe": "5m", "cursor": cursor, "limit": 20},
+            {"symbol": "NIFTY", "timeframe": "5m", "cursor": cursor, "limit": 20, "before": ist(9, 30)},
+            {"symbol": "NIFTY", "timeframe": "1m", "cursor": cursor, "limit": 5, "after": ist(9, 15)},
+        ):
+            body = client.get("/api/candles", params=params).json()
+            assert body["candles"], params
+            assert all(bar["time"] <= cursor for bar in body["candles"]), params
+        formed = client.get("/api/candles", params={"symbol": "NIFTY", "timeframe": "5m", "cursor": cursor}).json()
+        assert formed["candles"][0]["high"] == 14
+        assert formed["candles"][0]["volume"] == 3
+        indicators = client.post(
+            "/api/indicators",
+            json={
+                "symbol": "NIFTY",
+                "timeframe": "5m",
+                "cursor": cursor,
+                "indicators": [{"id": "e", "type": "ema", "params": {"length": 2}}],
+            },
+        ).json()
+        assert indicators["times"]
+        assert all(t <= cursor for t in indicators["times"])
+    finally:
+        app.dependency_overrides.clear()
+
+
 def test_replay_does_not_open_a_network_connection(monkeypatch: pytest.MonkeyPatch) -> None:
     def boom(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("network")

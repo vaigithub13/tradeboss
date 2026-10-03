@@ -15,6 +15,8 @@ export interface IndicatorsRequest {
   to?: number;
   sessions?: readonly SessionType[];
   indicators: IndicatorRequestItem[];
+  /** replay: no returned time is after this unix time */
+  cursor?: number;
 }
 
 export interface IndicatorResult {
