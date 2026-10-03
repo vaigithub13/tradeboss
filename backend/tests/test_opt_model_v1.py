@@ -107,7 +107,7 @@ class BarTape:
 
 
 def test_a_stop_inside_the_minute_is_not_filled_at_the_option_open() -> None:
-    """minute_open buys the pre-breakout open. adverse and worst pay through the minute.
+    """optimistic buys the pre-breakout open. adverse and worst pay through the minute.
     A market fill at the open stays at 80 in every mode."""
     fill, ex, index, vix = _oct5()
     contract = choose_contract(
@@ -118,7 +118,7 @@ def test_a_stop_inside_the_minute_is_not_filled_at_the_option_open() -> None:
     at_open = trade(entry=(fill, 25010), exit=(ex, 25060))
     shipped = load_option_model()
     for mode, entry, exit_ in (
-        ("minute_open", 80.0, 80.0),
+        ("optimistic", 80.0, 80.0),
         ("adverse", 90.0, 80.0),
         ("worst", 100.0, 70.0),
     ):
@@ -228,3 +228,129 @@ def test_store_premium_at_is_the_open_of_that_minute(tmp_path) -> None:
     assert store.premium_at(exp, 25000, "CE", t + 60) is None
     assert store.premium_at(exp, 25050, "CE", t) is None
     assert store.premium_at(exp, 25000, "PE", t) is None
+
+
+def _ncdf(x: float) -> float:
+    return 0.5 * (1.0 + math.erf(x / math.sqrt(2.0)))
+
+
+def _hand_delta(kind: str, S: float, K: float, t_vol: float, t_carry: float, sigma: float, r: float, q: float) -> float:
+    """Black-Scholes delta written out here, so the example does not call the implementation."""
+    vs = sigma * math.sqrt(t_vol)
+    d1 = (math.log(S / K) + (r - q) * t_carry + 0.5 * sigma * sigma * t_vol) / vs
+    signed = _ncdf(d1) if kind == "CE" else _ncdf(d1) - 1.0
+    return math.exp(-q * t_carry) * signed
+
+
+def test_delta_adjusted_premium_is_the_hand_example_and_clamps_to_the_minute() -> None:
+    from app.options.model import delta_adjusted_premium
+
+    # 80 + 0.40 * (25025 - 25000) = 90, inside 70..100
+    assert delta_adjusted_premium(80.0, 0.40, 25025.0, 25000.0, 70.0, 100.0) == 90.0
+    # A put delta is negative: the same rise cuts the premium. 80 + (-0.40) * 25 = 70
+    assert delta_adjusted_premium(80.0, -0.40, 25025.0, 25000.0, 60.0, 100.0) == 70.0
+    # 80 + 0.40 * 100 = 120, above the minute high
+    assert delta_adjusted_premium(80.0, 0.40, 25100.0, 25000.0, 70.0, 100.0) == 100.0
+    # 80 + 0.40 * (-40) = 64, below the minute low
+    assert delta_adjusted_premium(80.0, 0.40, 24960.0, 25000.0, 70.0, 100.0) == 70.0
+    # 80 + (-0.40) * 100 = 40, a put on a rally, clamped up to the low
+    assert delta_adjusted_premium(80.0, -0.40, 25100.0, 25000.0, 70.0, 100.0) == 70.0
+
+
+def test_a_stop_fill_uses_model_v1_delta_and_a_market_fill_stays_at_the_open() -> None:
+    fill, ex = ist(2026, 10, 5, 10, 0), ist(2026, 10, 5, 10, 30)
+    index = [
+        bar(fill - 60, 25000),
+        {"time": fill, "open": 25000.0, "high": 25040.0, "low": 24980.0, "close": 25020.0, "volume": 1, "oi": None},
+        bar(ex, 25020),
+    ]
+    vix = [bar(fill, 20.0), bar(ex, 20.0)]
+    cfg = OptionModelConfig(
+        r=0.0, q=0.0, vix_scale=1.0, real_premiums=True, slippage_points=0.0, snap_tick=False,
+        option_fill="delta_adjusted", time_basis="trading", carry_basis="trading",
+    )
+    long = choose_contract("LONG", 25000, date(2026, 10, 5), calendar=CAL, lots=LOTS, steps=STEPS)
+    short = choose_contract("SHORT", 25000, date(2026, 10, 5), calendar=CAL, lots=LOTS, steps=STEPS)
+    wide = (80.0, 200.0, 1.0, 90.0)
+
+    def tape_for(contract):
+        class _Tape:
+            def premium_at(self, expiry, strike, kind, time):
+                bar_ = self.bar_at(expiry, strike, kind, time)
+                return None if bar_ is None else bar_[0]
+
+            def bar_at(self, expiry, strike, kind, time):
+                if (expiry, float(strike), kind) == (contract.expiry, contract.strike, contract.kind) and int(time) in (fill, ex):
+                    return wide
+                return None
+        return _Tape()
+
+    def expect(contract, trigger: float) -> float:
+        iv = 20.0 / 100.0
+        t_vol = years_to_expiry(fill, contract.expiry, CAL.is_trading_day, "trading")
+        t_carry = years_to_expiry(fill, contract.expiry, CAL.is_trading_day, "trading")
+        delta = _hand_delta(contract.kind, 25000.0, contract.strike, t_vol, t_carry, iv, 0.0, 0.0)
+        return 80.0 + delta * (trigger - 25000.0)
+
+    call = estimate(
+        [trade(entry=(fill, 25020), exit=(ex, 25020), entry_at_open=False)],
+        index, vix, config=cfg, tape=tape_for(long),
+    ).option.trades[0]
+    assert call["entry_premium"] == expect(long, 25020.0)
+    assert call["entry_premium"] > 80.0
+    assert call["exit_premium"] == 80.0
+
+    put = estimate(
+        [trade(direction="SHORT", entry=(fill, 25020), exit=(ex, 25020), entry_at_open=False)],
+        index, vix, config=cfg, tape=tape_for(short),
+    ).option.trades[0]
+    assert put["entry_premium"] == expect(short, 25020.0)
+    assert put["entry_premium"] < 80.0
+
+    tight = (80.0, 81.0, 79.0, 80.5)
+
+    class Tight:
+        def premium_at(self, expiry, strike, kind, time):
+            return 80.0
+
+        def bar_at(self, expiry, strike, kind, time):
+            return tight
+
+    clamped = estimate(
+        [trade(entry=(fill, 26000), exit=(ex, 25020), entry_at_open=False)],
+        index, vix, config=cfg, tape=Tight(),
+    ).option.trades[0]
+    assert clamped["entry_premium"] == 81.0
+
+    opened = estimate(
+        [trade(entry=(fill, 25020), exit=(ex, 25020))],
+        index, vix, config=cfg, tape=tape_for(long),
+    ).option.trades[0]
+    assert opened["entry_premium"] == 80.0 and opened["exit_premium"] == 80.0
+
+
+def test_delta_adjusted_is_the_default_and_minute_open_is_labelled_optimistic() -> None:
+    from app.backtest.catalog import parse_config
+
+    assert OptionModelConfig().option_fill == "delta_adjusted"
+    parsed = parse_config({
+        "strategy": "log_xz", "symbol": "NIFTY50", "timeframe": "5m",
+        "start": "2024-10-03", "end": "2026-06-30",
+        "sessions": ["normal", "weekend_full"], "mode": "options",
+    })
+    assert parsed["option_fill"] == "delta_adjusted"
+    renamed = parse_config({**parsed, "option_fill": "minute_open"})
+    assert renamed["option_fill"] == "optimistic"
+
+    fill, ex, index, vix = _oct5()
+    contract = choose_contract("LONG", 25010, date(2026, 10, 5), calendar=CAL, lots=LOTS, steps=STEPS)
+    tape = BarTape(contract.expiry, contract.strike, contract.kind, [fill, ex])
+    shipped = load_option_model()
+    cfg = OptionModelConfig(**{**shipped.to_dict(), "vix_scales": shipped.vix_scales, "option_fill": "optimistic"})
+    out = estimate(
+        [trade(entry=(fill, 25010), exit=(ex, 25060), entry_at_open=False, exit_at_open=False)],
+        index, vix, config=cfg, tape=tape,
+    )
+    assert out.option.trades[0]["entry_premium"] == 80.0
+    assert out.option.settings["option_fill"] == "optimistic"
+    assert any("optimistic" in warning for warning in out.option.warnings)

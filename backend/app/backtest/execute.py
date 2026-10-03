@@ -26,7 +26,7 @@ from app.backtest.walkforward import child_backtest_config, run_walk_forward
 from app.config import settings
 from app.data.store import CandleStore
 from app.options.history import default_history_store
-from app.options.model import OptionModelConfig, load_option_model, overlay_options
+from app.options.model import OptionModelConfig, canonical_option_fill, load_option_model, overlay_options
 
 IST = timezone(timedelta(hours=5, minutes=30))
 VIX_SYMBOL = "NSE_INDEX_India_VIX"
@@ -158,7 +158,7 @@ def _model(config: dict[str, Any]) -> OptionModelConfig:
         vix_scale=shipped.vix_scale,
         time_basis=shipped.time_basis,
         slippage_points=float(config["slippage_points"]),
-        option_fill=str(config.get("option_fill", "minute_open")),
+        option_fill=canonical_option_fill(str(config.get("option_fill", "delta_adjusted"))),
         tick=shipped.tick,
         min_premium=shipped.min_premium,
         snap_tick=shipped.snap_tick,
@@ -211,6 +211,7 @@ def _view(result: BacktestResult, option: Any, config: dict[str, Any]) -> dict[s
             "modelled_pnl": source.get("modelled", {}).get("net_pnl"),
             "real_trades": source.get("real", {}).get("trades"),
             "modelled_trades": source.get("modelled", {}).get("trades"),
+            "option_fill": canonical_option_fill(str(config.get("option_fill", "delta_adjusted"))),
         }
     chosen = opt_rows if option is not None else [
         {"entry_time": t.entry_time, "net_pnl": t.net_pnl, "flags": []} for t in result.trades

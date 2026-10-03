@@ -14,6 +14,7 @@ from app.strategies.orb import OpeningRangeBreakout
 from app.strategies.pivot_extension import PivotExtension
 from app.strategies.price_channel import PriceChannel
 from app.strategies.supertrend_flip import SupertrendFlip
+from app.options.model import canonical_option_fill
 
 NIFTY_SYMBOL = "NIFTY50"
 
@@ -109,6 +110,15 @@ def strategy_catalog() -> list[dict[str, Any]]:
     return out
 
 
+def _option_fill(value: Any) -> str:
+    if not isinstance(value, str):
+        raise RunRequestError("option_fill must be delta_adjusted, optimistic, adverse or worst")
+    try:
+        return canonical_option_fill(value)
+    except ValueError as exc:
+        raise RunRequestError(str(exc)) from exc
+
+
 def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     extra = sorted(set(body) - _TOP)
     if extra:
@@ -155,9 +165,7 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     slip = body.get("slippage_points", 0.5)
     if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
         raise RunRequestError("slippage_points must be a number >= 0")
-    option_fill = body.get("option_fill", "minute_open")
-    if option_fill not in ("minute_open", "adverse", "worst"):
-        raise RunRequestError("option_fill must be minute_open, adverse or worst")
+    option_fill = _option_fill(body.get("option_fill", "delta_adjusted"))
     return {
         "strategy": strategy,
         "params": params,

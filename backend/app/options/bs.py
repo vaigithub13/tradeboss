@@ -62,6 +62,28 @@ def bs_forward_price(
     return K * df_r * ncdf(-d2) - S * df_q * ncdf(-d1)
 
 
+def bs_forward_delta(
+    kind: str, S: float, K: float, t_vol: float, t_carry: float, sigma: float, r: float = 0.0, q: float = 0.0
+) -> float:
+    """∂price/∂S for `bs_forward_price`. A call delta is positive, a put delta negative."""
+    if kind not in ("CE", "PE"):
+        raise PricingError(f"kind must be CE or PE, got {kind!r}")
+    _check(S, K, t_vol, sigma)
+    if t_carry < 0:
+        raise PricingError(f"t_carry must be >= 0, got {t_carry}")
+    disc = math.exp(-q * t_carry)
+    if t_vol == 0.0:
+        if kind == "CE":
+            unit = 1.0 if S > K else (0.5 if S == K else 0.0)
+        else:
+            unit = -1.0 if S < K else (-0.5 if S == K else 0.0)
+        return disc * unit
+    vs = sigma * math.sqrt(t_vol)
+    d1 = (math.log(S / K) + (r - q) * t_carry + 0.5 * sigma * sigma * t_vol) / vs
+    unit = ncdf(d1) if kind == "CE" else ncdf(d1) - 1.0
+    return disc * unit
+
+
 def bs_price(kind: str, S: float, K: float, T: float, sigma: float, r: float = 0.0, q: float = 0.0) -> float:
     """Undiscretised Black-Scholes. At T=0 this is exactly the intrinsic value."""
     if kind not in ("CE", "PE"):

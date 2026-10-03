@@ -18,7 +18,7 @@ from app.backtest.metrics import TradeRecord, compute_metrics
 from app.backtest.result import BacktestResult, Trade
 from app.backtest.sources import ist_date
 from app.data.resampler import DAY_S, IST_OFFSET_S
-from app.options.bs import PricingError, bs_forward_price, snap_premium
+from app.options.bs import PricingError, bs_forward_delta, bs_forward_price, snap_premium
 from app.options.contract import OptionContract, choose_contract
 from app.options.events import EventCalendar, load_default_events
 from app.options.history import default_history_store
@@ -35,12 +35,32 @@ HISTORY_START = date(2024, 10, 3)
 MODEL_ONLY_WARNING = "model only: rough check, not proof"
 MODELLED_FILL_WARNING = "more than 20% of fills are modelled"
 DTE_BUCKETS = ("0", "1", "2", "3-4", "5+")
-OPTION_FILLS = ("minute_open", "adverse", "worst")
+OPTION_FILLS = ("delta_adjusted", "optimistic", "adverse", "worst")
+OPTIMISTIC_FILL_WARNING = (
+    "option fill is optimistic: a stop is priced at the minute's option open, before the breakout"
+)
 DEFAULT_MODEL_FILE = Path(__file__).resolve().parent / "data" / "option_model_v1.json"
 
 
 class PremiumTape(Protocol):
     def premium_at(self, expiry: date, strike: float, kind: str, time: int) -> float | None: ...
+
+
+def canonical_option_fill(value: str) -> str:
+    """`minute_open` is the old name of the optimistic fill."""
+    if value == "minute_open":
+        value = "optimistic"
+    if value not in OPTION_FILLS:
+        raise ValueError(f"option_fill must be one of {OPTION_FILLS}")
+    return value
+
+
+def delta_adjusted_premium(
+    option_open: float, delta: float, index_trigger: float, index_open: float, low: float, high: float,
+) -> float:
+    """Option open plus delta times the index move since that open, held inside the minute's range."""
+    raw = float(option_open) + float(delta) * (float(index_trigger) - float(index_open))
+    return min(float(high), max(float(low), raw))
 
 
 def _money(x: Decimal | float) -> float:
@@ -74,9 +94,10 @@ class OptionModelConfig:
     carry_basis: str = "trading"
     real_premiums: bool = False
     vix_scales: tuple[tuple[str, float], ...] = ()
-    option_fill: str = "minute_open"  # minute_open | adverse | worst
+    option_fill: str = "delta_adjusted"  # delta_adjusted | optimistic | adverse | worst
 
     def __post_init__(self) -> None:
+        object.__setattr__(self, "option_fill", canonical_option_fill(self.option_fill))
         if self.strike_offset not in (-1, 0, 1):
             raise ValueError("strike_offset must be -1, 0 or +1")
         if self.time_basis not in ("trading", "calendar"):
@@ -85,8 +106,6 @@ class OptionModelConfig:
             raise ValueError("carry_basis must be 'trading' or 'calendar'")
         if self.slippage_points < 0 or self.vix_scale <= 0:
             raise ValueError("slippage_points must be >= 0 and vix_scale must be > 0")
-        if self.option_fill not in OPTION_FILLS:
-            raise ValueError(f"option_fill must be one of {OPTION_FILLS}")
         names = [name for name, _ in self.vix_scales]
         if names and set(names) != set(DTE_BUCKETS):
             raise ValueError(f"vix_scales must cover {DTE_BUCKETS}")
@@ -204,6 +223,25 @@ def _bar_on(index_bars: Sequence[dict[str, Any]], day: date, hour: int, minute: 
     return last
 
 
+def _index_open(index_bars: Sequence[dict[str, Any]], when: int) -> float | None:
+    for bar in index_bars:
+        if int(bar["time"]) == int(when):
+            return float(bar["open"])
+    return None
+
+
+def _model_delta(
+    kind: str, S: float, K: float, when: int, expiry: date, vix: float, cfg: OptionModelConfig, cal: ExpiryCalendar
+) -> float:
+    """Option-model-v1 delta at the index open of this minute. Call positive, put negative."""
+    day = ist_date(when)
+    dte = _days_to_expiry(day, expiry, cal.is_trading_day)
+    iv = cfg.scale_for(dte) * vix / 100.0
+    t_vol = years_to_expiry(when, expiry, cal.is_trading_day, cfg.time_basis)
+    t_carry = years_to_expiry(when, expiry, cal.is_trading_day, cfg.carry_basis)
+    return bs_forward_delta(kind, S, K, t_vol, t_carry, iv, cfg.r, cfg.q)
+
+
 def _model_premium(
     kind: str, S: float, K: float, when: int, expiry: date, vix: float, cfg: OptionModelConfig, cal: ExpiryCalendar
 ) -> tuple[float, float, float, float, int]:
@@ -218,30 +256,39 @@ def _model_premium(
     return prem, iv, t_vol, t_carry, dte
 
 
-def _quote_price(ohlc: tuple[float, float, float, float], side: str, mode: str, *, at_open: bool) -> float:
+def _quote_price(
+    ohlc: tuple[float, float, float, float], side: str, mode: str, *, at_open: bool,
+    delta: float | None = None, index_trigger: float | None = None, index_open: float | None = None,
+) -> float:
     """Price a real option fill.
 
     A fill at the minute's open (a market order, or a stop gapped through) stays at the
-    open in every mode. A stop that triggers inside the minute is priced from that
-    minute's bar: the open, the worse of open and close, or the high (buy) / low (sell).
+    open in every mode. A stop inside the minute uses the setting: the open (optimistic),
+    the open moved by the model's delta, the worse of open and close, or the extreme.
     """
     open_, high, low, close = ohlc
-    if at_open or mode == "minute_open":
+    if at_open or mode == "optimistic":
         return float(open_)
     if mode == "adverse":
         return float(max(open_, close) if side == "BUY" else min(open_, close))
-    return float(high if side == "BUY" else low)
+    if mode == "worst":
+        return float(high if side == "BUY" else low)
+    if delta is None or index_trigger is None or index_open is None:
+        return float(open_)
+    return delta_adjusted_premium(open_, delta, index_trigger, index_open, low, high)
 
 
 def _taken_premium(
     model: float, *, cfg: OptionModelConfig, tape: PremiumTape | None, expiry: date, strike: float, kind: str,
-    when: int, side: str, at_open: bool,
+    when: int, side: str, at_open: bool, delta: float | None = None,
+    index_trigger: float | None = None, index_open: float | None = None,
 ) -> tuple[float, str]:
     """Real premium for this minute when the tape has it; otherwise the model.
 
-    `minute_open` uses the 1m open. A stop that fires inside the minute therefore
-    buys the option at the price from before the breakout. `adverse` and `worst`
-    move that fill through the minute. Market fills stay at the open.
+    `optimistic` uses the 1m open, so a stop that fires inside the minute buys the
+    option at the price from before the breakout. `delta_adjusted` moves that open by
+    the model delta times the index move, and holds the result inside the minute.
+    Market fills stay at the open.
     """
     if cfg.real_premiums and tape is not None:
         ohlc = None
@@ -253,7 +300,10 @@ def _taken_premium(
             if real is not None:
                 ohlc = (float(real), float(real), float(real), float(real))
         if ohlc is not None:
-            return _quote_price(ohlc, side, cfg.option_fill, at_open=at_open), "real"
+            return _quote_price(
+                ohlc, side, cfg.option_fill, at_open=at_open, delta=delta,
+                index_trigger=index_trigger, index_open=index_open,
+            ), "real"
         return model, "modelled"
     return model, "model"
 
@@ -337,6 +387,8 @@ def overlay_options(
     if before_history:
         warnings.append(MODEL_ONLY_WARNING)
     premium_source, fill_counts = _premium_split(priced, cfg.real_premiums)
+    if cfg.option_fill == "optimistic":
+        warnings.append(OPTIMISTIC_FILL_WARNING)
     if cfg.real_premiums:
         total_fills = fill_counts["real"] + fill_counts["modelled"]
         if total_fills and fill_counts["modelled"] / total_fills > 0.20:
@@ -476,13 +528,21 @@ def _one_trade(
             "contract": contract.to_dict(),
         }
 
+    entry_index_open = _index_open(index_bars, trade.entry_time)
+    exit_index_open = _index_open(index_bars, exit_time)
     try:
         entry_model, iv_in, t_in, t_carry_in, _dte_in = _model_premium(
             contract.kind, float(trade.entry_price), contract.strike, trade.entry_time, contract.expiry, q_in.value, cfg, cal,
         )
+        entry_delta = None
+        if entry_index_open is not None:
+            entry_delta = _model_delta(
+                contract.kind, entry_index_open, contract.strike, trade.entry_time, contract.expiry, q_in.value, cfg, cal,
+            )
         entry_prem, entry_source = _taken_premium(
             entry_model, cfg=cfg, tape=tape, expiry=contract.expiry, strike=contract.strike,
             kind=contract.kind, when=trade.entry_time, side="BUY", at_open=trade.entry_at_open,
+            delta=entry_delta, index_trigger=float(trade.entry_price), index_open=entry_index_open,
         )
         if held_past:
             intrinsic = max(exit_spot - contract.strike, 0.0) if contract.kind == "CE" else max(contract.strike - exit_spot, 0.0)
@@ -495,9 +555,15 @@ def _one_trade(
             exit_model, iv_out, t_out, t_carry_out, _dte_out = _model_premium(
                 contract.kind, exit_spot, contract.strike, exit_time, contract.expiry, q_out.value, cfg, cal,  # type: ignore[union-attr]
             )
+            exit_delta = None
+            if exit_index_open is not None:
+                exit_delta = _model_delta(
+                    contract.kind, exit_index_open, contract.strike, exit_time, contract.expiry, q_out.value, cfg, cal,  # type: ignore[union-attr]
+                )
             exit_prem, exit_source = _taken_premium(
                 exit_model, cfg=cfg, tape=tape, expiry=contract.expiry, strike=contract.strike,
                 kind=contract.kind, when=exit_time, side="SELL", at_open=trade.exit_at_open,
+                delta=exit_delta, index_trigger=float(exit_spot), index_open=exit_index_open,
             )
     except PricingError as exc:
         return {
