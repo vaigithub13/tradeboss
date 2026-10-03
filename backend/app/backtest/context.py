@@ -9,7 +9,7 @@ the exception still fails the run).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -210,6 +210,68 @@ class PositionView:
         return self.lots == 0
 
 
+# The engine Ctx and the worker context both expose exactly these names.
+STRATEGY_CONTEXT_ATTRS = (
+    "symbol",
+    "timeframe",
+    "base_minutes",
+    "bars",
+    "time",
+    "position",
+    "cash",
+    "lot_size",
+    "open_orders",
+    "indicator",
+    "cancel_working",
+)
+BARS_ATTRS = ("times", "open", "high", "low", "close", "volume", "at_time")
+POSITION_ATTRS = ("side", "lots", "units", "avg_price", "is_flat")
+
+
+class StrategyContext(Protocol):
+    """What on_bar may read. The engine and the worker both provide every name.
+
+    `timeframe` is the chart string ("5m", "15m"). Minutes come from
+    timeframe_minutes(ctx.timeframe). `bars` is the closed bars only: len,
+    an index or a slice, at_time, and the columns times, open, high, low,
+    close, volume. `position` has side, lots, units, avg_price, and is_flat.
+    """
+
+    symbol: str
+    timeframe: str
+    base_minutes: int
+    bars: Any
+    time: int
+
+    @property
+    def position(self) -> PositionView: ...
+
+    @property
+    def cash(self) -> float: ...
+
+    @property
+    def lot_size(self) -> int: ...
+
+    @property
+    def open_orders(self) -> list[dict[str, Any]]: ...
+
+    def indicator(self, itype: str, **params: Any) -> Any: ...
+
+    def cancel_working(self, tag: str | None = None) -> int: ...
+
+
+def missing_context_attributes(obj: Any) -> list[str]:
+    """Names from the strategy context that this object does not provide."""
+    missing = [name for name in STRATEGY_CONTEXT_ATTRS if not hasattr(obj, name)]
+    bars = getattr(obj, "bars", None)
+    if bars is not None:
+        missing.extend(f"bars.{name}" for name in BARS_ATTRS if not hasattr(bars, name))
+    position = getattr(obj, "position", None)
+    if position is not None:
+        missing.extend(f"position.{name}" for name in POSITION_ATTRS if not hasattr(position, name))
+    return missing
+
+
 class Ctx:
     """Passed to every strategy callback. Everything public here is about the past or the present."""
 
@@ -254,12 +316,17 @@ class Ctx:
 
 
 __all__ = [
+    "BARS_ATTRS",
     "Ctx",
     "History",
     "IndicatorHub",
     "IndicatorView",
     "LookAheadError",
+    "POSITION_ATTRS",
     "PastBars",
     "PastSeries",
     "PositionView",
+    "STRATEGY_CONTEXT_ATTRS",
+    "StrategyContext",
+    "missing_context_attributes",
 ]

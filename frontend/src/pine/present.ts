@@ -17,6 +17,11 @@ export function approveEnabled(ready: boolean): boolean {
   return ready;
 }
 
+/** A second Approve of a saved name asks before replacing the file. */
+export function replaceAsked(status: number): boolean {
+  return status === 409;
+}
+
 export function showBacktestCard(kind: "strategy" | "indicator"): boolean {
   return kind === "strategy";
 }

@@ -7,6 +7,7 @@ that do not run are dropped. The diff is what remains after that loop.
 
 from __future__ import annotations
 
+import inspect
 import json
 import subprocess
 import sys
@@ -15,11 +16,14 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.backtest.context import StrategyContext
 from app.backtest.contracts import LookAheadError
 from app.backtest.engine import BacktestConfig, run_backtest
 from app.backtest.sources import ListSource
 from app.pine.isolated import IsolatedStrategy, WorkerError, WorkerTimeout
 from app.pine.sandbox import SandboxError, check_source
+from app.pine.smoke import smoke_strategy
+from app.strategies.pine_common import entry_window, minute_of, timeframe_minutes
 
 BACKEND = Path(__file__).resolve().parents[2]
 MAX_RETRIES = 2
@@ -43,6 +47,13 @@ def conversion_prompt(source: str, report: dict[str, Any]) -> str:
         "pine_common helpers. Session closes on a window no chart bar fits inside do not fire. "
         "Subclass PinePort when the script is a session strategy, or Strategy directly.\n"
         f"{helpers}\n\n"
+        "Strategy context. Use only these attributes. timeframe is the chart string, such as 5m. "
+        "Bar length in minutes is timeframe_minutes(ctx.timeframe). There is no timeframe_minutes attribute.\n"
+        f"{inspect.getsource(StrategyContext)}\n"
+        "pine_common signatures:\n"
+        f"{inspect.getsource(minute_of)}\n"
+        f"{inspect.getsource(timeframe_minutes)}\n"
+        f"{inspect.getsource(entry_window)}\n\n"
         "Example, the EMA crossover. Match this shape: one Strategy subclass, on_bar returns Signal values.\n"
         f"{example}\n\n"
         "Accepted semantics report:\n"
@@ -148,7 +159,11 @@ def _problems(python: str, directory: Path) -> tuple[list[str], Path | None]:
         return [f"compile: {exc.msg}"], None
     path = directory / "draft_strategy.py"
     path.write_text(python)
-    return _automatic(path), path
+    errors = _automatic(path)
+    smoked = smoke_strategy(path)
+    if smoked:
+        errors.append(smoked)
+    return errors, path
 
 
 def convert_draft(source: str, *, client: DraftClient, report: dict[str, Any]) -> dict[str, Any]:

@@ -53,6 +53,6 @@ def save_user_strategy(name: str, source: str, *, directory: Path | None = None,
     folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{name}.py"
     if path.exists() and not replace:
-        raise FileExistsError(name)
+        raise FileExistsError(f"{name} already exists. Approve again to replace it.")
     path.write_text(source)
     return path

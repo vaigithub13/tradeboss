@@ -23,7 +23,7 @@ class PanelBoundary extends Component<{ children: ReactNode }, { message: string
 
 import { ApiError } from "../api/client";
 import { acceptReport, approveDraft, convertPine, reportPine, scanPine, type PineReport, type PineScan } from "../api/pine";
-import { approveEnabled, cardLines, convertEnabled, showBacktestCard, type PineCard } from "../pine/present";
+import { approveEnabled, cardLines, convertEnabled, replaceAsked, showBacktestCard, type PineCard } from "../pine/present";
 
 const TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h"] as const;
 
@@ -76,6 +76,7 @@ function PineEditor() {
   const [draftApproved, setDraftApproved] = useState(false);
   const [savedPath, setSavedPath] = useState<string | null>(null);
   const [draftErrors, setDraftErrors] = useState<string[]>([]);
+  const [replaceOffer, setReplaceOffer] = useState(false);
   const [issued, setIssued] = useState<PineReport | null>(null);
   const [plotNote, setPlotNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -94,6 +95,7 @@ function PineEditor() {
     setDraftApproved(false);
     setSavedPath(null);
     setDraftErrors([]);
+    setReplaceOffer(false);
     setIssued(null);
     setCard(null);
     try {
@@ -148,16 +150,18 @@ function PineEditor() {
     }
   }
 
-  async function onApprove(): Promise<void> {
+  async function onApprove(replace = false): Promise<void> {
     if (!draftId || !draftHash) return;
     setBusy(true);
     setError(null);
     try {
-      const saved = await approveDraft(draftId, draftHash);
+      const saved = await approveDraft(draftId, draftHash, replace);
       setDraftApproved(true);
+      setReplaceOffer(false);
       setSavedPath(saved.path);
     } catch (err) {
       setDraftApproved(false);
+      setReplaceOffer(err instanceof ApiError && replaceAsked(err.status));
       setError(err instanceof ApiError ? err.message : "the diff was not approved");
     } finally {
       setBusy(false);
@@ -263,6 +267,16 @@ function PineEditor() {
           >
             {draftApproved ? "Saved" : "Approve diff"}
           </button>
+          {replaceOffer && (
+            <button
+              type="button"
+              className="mt-2 rounded border border-white/15 px-2 py-1"
+              disabled={busy}
+              onClick={() => void onApprove(true)}
+            >
+              Replace existing file
+            </button>
+          )}
           {savedPath && <p className="mt-1 break-all">Saved {savedPath}</p>}
         </section>
       )}

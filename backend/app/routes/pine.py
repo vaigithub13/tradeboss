@@ -17,6 +17,7 @@ from app.pine.openai_client import OpenAIError, OpenAIPineClient, openai_key
 from app.pine.report import MissingKeyError, ReportError, build_report
 from app.pine.sandbox import SandboxError, check_source
 from app.pine.save import module_name, save_user_strategy
+from app.pine.smoke import smoke_strategy
 from app.pine.scanner import scan
 
 router = APIRouter(prefix="/api/pine", tags=["pine"])
@@ -110,6 +111,12 @@ def approve_script(body: dict[str, Any]) -> dict[str, Any]:
             raise GateError("this diff was not issued")
         check_source(python)
         chosen = str(body.get("name") or "").strip() or module_name(python)
+        from app.pine.save import USER_DIR
+        if (USER_DIR / f"{chosen}.py").exists() and not bool(body.get("replace")):
+            raise FileExistsError(f"{chosen} already exists. Approve again to replace it.")
+        problem = _smoke_draft(chosen, python)
+        if problem:
+            raise SandboxError(problem)
         path = save_user_strategy(chosen, python, replace=bool(body.get("replace")))
         shown = _repo_path(path)
         remember_written(draft_id, digest, path=shown, name=chosen)
@@ -118,7 +125,7 @@ def approve_script(body: dict[str, Any]) -> dict[str, Any]:
     except SandboxError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=f"{exc} already exists") from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"approved": True, "path": _repo_path(path), "strategy": f"user:{chosen}"}
@@ -137,7 +144,7 @@ def save_script(body: dict[str, Any]) -> dict[str, Any]:
     except SandboxError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except FileExistsError as exc:
-        raise HTTPException(status_code=409, detail=f"{name} already exists") from exc
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     found = scan(str(body.get("pine") or ""))
@@ -150,6 +157,16 @@ def save_script(body: dict[str, Any]) -> dict[str, Any]:
         include_walk_forward=bool(body.get("walk_forward")),
     )
     return {"path": str(path), "strategy": f"user:{name}", "card": card}
+
+
+def _smoke_draft(name: str, python: str) -> str | None:
+    """Run the draft in the worker before it is saved. A failure is not written."""
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        path = Path(tmp) / f"{name}.py"
+        path.write_text(python)
+        return smoke_strategy(path)
 
 
 def _repo_path(path: Path) -> str:

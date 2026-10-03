@@ -28,6 +28,8 @@ import numpy as np
 from app.backtest.broker import BacktestBroker
 from app.backtest.context import Ctx, History, IndicatorHub
 from app.backtest.contracts import LookAheadError, Signal, Strategy
+
+ZERO_TRADES_WARNING = "this run produced 0 trades"
 from app.backtest.costs import CostModel, Slippage
 from app.backtest.lots import LotSizeTable
 from app.backtest.metrics import TradeRecord, compute_metrics
@@ -370,6 +372,8 @@ def run_backtest(
     metrics = compute_metrics([TradeRecord(t.entry_time, t.exit_time, t.net_pnl) for t in trades])
     days = {ist_date(t.entry_time) for t in trades} | {ist_date(t.exit_time) for t in trades}
     warnings.extend(cfg.cost_model.unverified_warnings(days))
+    if not trades:
+        warnings.append(ZERO_TRADES_WARNING)
     metrics["gross_pnl"] = float(sum((Decimal(str(t.gross_pnl)) for t in trades), Decimal("0")))
     metrics["total_charges"] = float(sum((Decimal(str(t.charges_total)) for t in trades), Decimal("0")))
     metrics["total_slippage"] = float(sum((Decimal(str(t.slippage_cost)) for t in trades), Decimal("0")))

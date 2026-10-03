@@ -416,6 +416,12 @@ def test_the_conversion_prompt_includes_the_contract_and_frames_pine_as_data() -
     assert prompt.index("data to analyse") < prompt.index("--- PINE DATA ---")
     assert "class Signal" in prompt and "class Strategy" in prompt
     assert "def entry_window" in prompt and "class PinePort" in prompt
+    assert "class StrategyContext" in prompt
+    assert "def timeframe_minutes" in prompt
+    assert "timeframe_minutes(ctx.timeframe)" in prompt
+    from app.backtest.context import STRATEGY_CONTEXT_ATTRS
+    for name in STRATEGY_CONTEXT_ATTRS:
+        assert name in prompt
     assert "class EmaCrossover" in prompt
     assert "1515-1520" in prompt
 
@@ -523,6 +529,132 @@ def test_a_draft_that_fails_the_check_is_not_ready_and_approve_refuses_it(tmp_pa
         refused = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
     assert refused.status_code == 400
     assert list((tmp_path / "user").glob("*.py")) == []
+
+
+def test_the_engine_and_the_worker_provide_the_same_context() -> None:
+    from app.backtest.context import Ctx, History, PositionView, missing_context_attributes
+    from app.pine.worker import make_worker_context
+
+    class _Broker:
+        def position_view(self) -> PositionView:
+            return PositionView(0, 0, 0, 0.0)
+
+        def realized_net(self) -> float:
+            return 0.0
+
+        def open_orders(self) -> list:
+            return []
+
+        def cancel_matching(self, tag: str | None, t: int) -> int:
+            return 0
+
+    history = History()
+    history.append({"time": 1, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 3.0, "oi": None})
+    engine = Ctx(
+        history, object(), _Broker(), symbol="NIFTY50", timeframe="5m", base_minutes=1,
+        lot_for_bar=lambda: 65, initial_capital=1000.0,
+    )
+    worker = make_worker_context([{
+        "time": 1, "open": 1.0, "high": 2.0, "low": 0.5, "close": 1.5, "volume": 3.0,
+    }], timeframe="5m")
+    assert missing_context_attributes(engine) == []
+    assert missing_context_attributes(worker) == []
+    assert float(engine.bars.high[-1:].max()) == float(worker.bars.high[-1:].max()) == 2.0
+    assert engine.timeframe == worker.timeframe == "5m"
+
+
+def test_a_worker_error_fails_the_backtest_and_zero_trades_warns(tmp_path: Path) -> None:
+    from app.backtest.engine import ZERO_TRADES_WARNING
+
+    boom = '''from app.backtest.contracts import Signal, Strategy
+
+class Boom(Strategy):
+    name = "boom"
+
+    def on_bar(self, bar, ctx):
+        ctx.timeframe_minutes
+        return []
+'''
+    from app.pine.isolated import WorkerError
+
+    path = save_user_strategy("boom", boom, directory=tmp_path)
+    strategy = IsolatedStrategy(path)
+    with pytest.raises(WorkerError, match="timeframe_minutes"):
+        _run(strategy)
+    strategy.close()
+
+    quiet = '''from app.backtest.contracts import Signal, Strategy
+
+class Quiet(Strategy):
+    name = "quiet"
+
+    def on_bar(self, bar, ctx):
+        return []
+'''
+    quiet_path = save_user_strategy("quiet", quiet, directory=tmp_path)
+    flat = _run(IsolatedStrategy(quiet_path))
+    assert flat.trades == []
+    assert ZERO_TRADES_WARNING in flat.warnings
+
+
+def test_approve_runs_a_smoke_backtest_and_a_failure_is_not_saved(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine import gates
+    from app.pine.gates import clear_gates, issue_draft
+
+    boom = '''from app.backtest.contracts import Signal, Strategy
+
+class Boom(Strategy):
+    name = "boom"
+
+    def on_bar(self, bar, ctx):
+        ctx.timeframe_minutes
+        return []
+'''
+    fixed = json.dumps({"python": GOOD, "tests": ""})
+    fake = _Script([json.dumps({"python": boom, "tests": ""}), fixed])
+    result = convert_draft(SESSION_CLOSE, client=fake, report={"scan": scan(SESSION_CLOSE)})
+    assert result["ready"] is True
+    assert result["attempts"] == 2
+    assert any("timeframe_minutes" in prompt for prompt in fake.prompts[1:])
+
+    monkeypatch.setattr(gates, "_STORE", tmp_path / "pine")
+    monkeypatch.setattr("app.pine.save.USER_DIR", tmp_path / "user")
+    clear_gates()
+    draft_id, digest = issue_draft(boom)
+    with TestClient(app) as client:
+        refused = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
+    assert refused.status_code == 400
+    assert "timeframe_minutes" in refused.json()["detail"]
+    assert list((tmp_path / "user").glob("*.py")) == []
+
+
+def test_approving_an_existing_name_asks_before_replacing(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine import gates
+    from app.pine.gates import clear_gates, issue_draft
+
+    monkeypatch.setattr(gates, "_STORE", tmp_path / "pine")
+    user = tmp_path / "user"
+    monkeypatch.setattr("app.pine.save.USER_DIR", user)
+    clear_gates()
+    draft_id, digest = issue_draft(GOOD)
+    with TestClient(app) as client:
+        first = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
+        assert first.status_code == 200
+        again = client.post("/api/pine/approve", json={"draft_id": draft_id, "draft_hash": digest})
+        assert again.status_code == 409
+        assert "replace" in again.json()["detail"]
+        assert (user / "always_buy.py").read_text() == GOOD
+        replaced = client.post("/api/pine/approve", json={
+            "draft_id": draft_id, "draft_hash": digest, "replace": True,
+        })
+    assert replaced.status_code == 200
+    assert (user / "always_buy.py").read_text() == GOOD
 
 
 def test_future_annotations_is_allowed_and_nothing_else_from_future() -> None:

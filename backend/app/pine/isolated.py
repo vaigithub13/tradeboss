@@ -93,6 +93,15 @@ class IsolatedStrategy(Strategy):
                 "side": position.side, "lots": position.lots,
                 "units": position.units, "avg_price": position.avg_price,
             },
+            "context": {
+                "symbol": ctx.symbol,
+                "timeframe": ctx.timeframe,
+                "base_minutes": ctx.base_minutes,
+                "time": int(ctx.time),
+                "cash": ctx.cash,
+                "lot_size": ctx.lot_size,
+                "open_orders": ctx.open_orders,
+            },
         }, self.call_timeout)
         for tag in reply.get("cancel") or []:
             ctx.cancel_working(None if tag is None else str(tag))
