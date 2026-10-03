@@ -5,8 +5,8 @@ from __future__ import annotations
 import ast
 
 ALLOWED = {
-    "app.backtest.contracts": {"Signal", "Strategy"},
-    "app.strategies.pine_common": {"PinePort", "entry_window", "minute_of", "TICK"},
+    "app.backtest.contracts": ("Signal", "Strategy"),
+    "app.strategies.pine_common": ("PinePort", "entry_window", "minute_of", "TICK", "timeframe_minutes"),
 }
 _BANNED_CALLS = {
     "open", "exec", "eval", "__import__", "compile", "getattr", "setattr",
@@ -30,6 +30,17 @@ def _text(source: str, lineno: int | None) -> str:
 
 def _remove(source: str, node: ast.AST) -> str:
     return f"remove line {node.lineno}: {_text(source, node.lineno)}"
+
+
+def allowed_import_lines() -> list[str]:
+    """The only imports a generated strategy may use, in prompt order."""
+    lines = [
+        "from __future__ import annotations",
+        "from typing import <any names, not *>",
+    ]
+    for module, names in ALLOWED.items():
+        lines.append(f"from {module} import {', '.join(names)}")
+    return lines
 
 
 def _super_init_call(node: ast.Attribute) -> bool:
@@ -92,6 +103,10 @@ class _Gate(ast.NodeVisitor):
                     f"line {node.lineno}: change {text!r} to 'from __future__ import annotations'"
                 )
             raise SandboxError(f"remove line {node.lineno}: {text}")
+        if module == "typing":
+            if names and all(alias.name != "*" and alias.name.isidentifier() for alias in node.names):
+                return
+            raise SandboxError(_remove(self.source, node))
         allowed = ALLOWED.get(module)
         if allowed is None or any(alias.name == "*" or alias.name not in allowed for alias in node.names):
             raise SandboxError(_remove(self.source, node))

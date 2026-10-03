@@ -420,8 +420,11 @@ def test_the_conversion_prompt_includes_the_contract_and_frames_pine_as_data() -
     assert "def timeframe_minutes" in prompt
     assert "timeframe_minutes(ctx.timeframe)" in prompt
     from app.backtest.context import STRATEGY_CONTEXT_ATTRS
+    from app.pine.sandbox import allowed_import_lines
     for name in STRATEGY_CONTEXT_ATTRS:
         assert name in prompt
+    for line in allowed_import_lines():
+        assert line in prompt
     assert "class EmaCrossover" in prompt
     assert "1515-1520" in prompt
 
@@ -655,6 +658,49 @@ def test_approving_an_existing_name_asks_before_replacing(tmp_path: Path, monkey
         })
     assert replaced.status_code == 200
     assert (user / "always_buy.py").read_text() == GOOD
+
+
+def test_typing_imports_are_allowed_and_other_modules_stay_banned() -> None:
+    check_source("from typing import Any\n" + GOOD)
+    check_source("from typing import Any, Optional\n" + GOOD)
+    check_source("from app.strategies.pine_common import timeframe_minutes\n" + GOOD)
+    with pytest.raises(SandboxError, match=r"remove line 1: import typing"):
+        check_source("import typing\n" + GOOD)
+    with pytest.raises(SandboxError, match=r"remove line 1: from typing import \*"):
+        check_source("from typing import *\n" + GOOD)
+    with pytest.raises(SandboxError, match=r"remove line 1: from os import path"):
+        check_source("from os import path\n" + GOOD)
+    with pytest.raises(SandboxError, match=r"remove line 1: import os"):
+        check_source("import os\n" + GOOD)
+
+
+def test_a_banned_import_is_sent_back_until_the_retries_are_exhausted() -> None:
+    """The typing import survived both repairs: the error was sent, and the prompt also pasted it."""
+    banned = "import os\n" + GOOD
+    fake = _Fake(json.dumps({"python": banned, "tests": ""}))
+    result = convert_draft(SESSION_CLOSE, client=fake, report={"scan": scan(SESSION_CLOSE)})
+    assert result["ready"] is False
+    assert result["attempts"] == 3
+    assert any("import os" in error for error in result["errors"])
+    assert len(fake.prompts) == 3
+    for repair in fake.prompts[1:]:
+        assert "remove line 1: import os" in repair
+        assert "from typing import <any names, not *>" in repair
+        assert "from app.backtest.contracts import Signal, Strategy" in repair
+
+
+def test_a_retry_removes_a_banned_import_when_the_error_is_sent_back() -> None:
+    banned = "import os\n" + GOOD
+    fake = _Script([
+        json.dumps({"python": banned, "tests": ""}),
+        json.dumps({"python": "from typing import Any\n" + GOOD, "tests": ""}),
+    ])
+    result = convert_draft(SESSION_CLOSE, client=fake, report={"scan": scan(SESSION_CLOSE)})
+    assert result["ready"] is True
+    assert result["attempts"] == 2
+    assert result["python"].startswith("from typing import Any\n")
+    assert "remove line 1: import os" in fake.prompts[1]
+    assert "Use only these imports:" in fake.prompts[1]
 
 
 def test_future_annotations_is_allowed_and_nothing_else_from_future() -> None:

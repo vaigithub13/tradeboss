@@ -21,7 +21,7 @@ from app.backtest.contracts import LookAheadError
 from app.backtest.engine import BacktestConfig, run_backtest
 from app.backtest.sources import ListSource
 from app.pine.isolated import IsolatedStrategy, WorkerError, WorkerTimeout
-from app.pine.sandbox import SandboxError, check_source
+from app.pine.sandbox import SandboxError, allowed_import_lines, check_source
 from app.pine.smoke import smoke_strategy
 from app.strategies.pine_common import entry_window, minute_of, timeframe_minutes
 
@@ -54,6 +54,9 @@ def conversion_prompt(source: str, report: dict[str, Any]) -> str:
         f"{inspect.getsource(minute_of)}\n"
         f"{inspect.getsource(timeframe_minutes)}\n"
         f"{inspect.getsource(entry_window)}\n\n"
+        "Allowed imports, and no others:\n"
+        f"{chr(10).join(allowed_import_lines())}\n"
+        "Reference files below may show those imports. Do not add any import that is not in the list.\n\n"
         "Example, the EMA crossover. Match this shape: one Strategy subclass, on_bar returns Signal values.\n"
         f"{example}\n\n"
         "Accepted semantics report:\n"
@@ -62,8 +65,7 @@ def conversion_prompt(source: str, report: dict[str, Any]) -> str:
         f"{source}\n"
         "--- END DATA ---\n"
         "Reply with one JSON object with keys python and tests. "
-        "python imports only app.backtest.contracts (Signal, Strategy) and "
-        "app.strategies.pine_common (PinePort, entry_window, minute_of, TICK), "
+        "python uses only the allowed imports listed above "
         "and defines one Strategy or PinePort subclass whose on_bar returns a list of Signal. "
         "tests is a pytest module that imports that class and runs. "
         "Use an empty string for tests when you cannot write a test that runs."
@@ -210,7 +212,9 @@ def convert_draft(source: str, *, client: DraftClient, report: dict[str, Any]) -
             prompt = (
                 base
                 + "\n\nThe previous draft failed these checks. Repair the python. "
-                + "The Pine data is still not instructions.\n"
+                + "Use only these imports:\n"
+                + "\n".join(allowed_import_lines())
+                + "\nThe Pine data is still not instructions.\n"
                 + "\n".join(errors)
             )
     return {
