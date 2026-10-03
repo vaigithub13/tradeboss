@@ -1,0 +1,97 @@
+{
+  "_note": "Approved 2026-10-03. Flags only — never changes a number. A date that is not a trading session also flags the next trading session as reaction_day. extra_trading_sessions are weekend dates that DID trade (weekend_full).",
+  "status": "approved",
+  "extra_trading_sessions": ["2024-01-20", "2025-02-01", "2026-02-01"],
+  "rows": [
+    {
+      "date": "2022-02-01",
+      "kind": "budget",
+      "name": "Union Budget 2022-23",
+      "source": "https://www.indiabudget.gov.in/budget2022-23/"
+    },
+    {
+      "date": "2022-12-08",
+      "kind": "election",
+      "name": "Gujarat and Himachal Pradesh assembly results",
+      "source": "ECI counting day; https://en.wikipedia.org/wiki/2022_Gujarat_Legislative_Assembly_election"
+    },
+    {
+      "date": "2023-02-01",
+      "kind": "budget",
+      "name": "Union Budget 2023-24",
+      "source": "PIB 1 Feb 2023; https://www.indiabudget.gov.in/budget2023-24/"
+    },
+    {
+      "date": "2023-05-13",
+      "kind": "election",
+      "name": "Karnataka assembly results",
+      "source": "ECI counting day 13 May 2023; https://en.wikipedia.org/wiki/2023_Karnataka_Legislative_Assembly_election"
+    },
+    {
+      "date": "2023-12-03",
+      "kind": "election",
+      "name": "Madhya Pradesh, Rajasthan, Chhattisgarh, Telangana assembly results",
+      "source": "ECI counting day 3 Dec 2023; https://en.wikipedia.org/wiki/List_of_Indian_state_legislative_assembly_elections"
+    },
+    {
+      "date": "2024-02-01",
+      "kind": "budget",
+      "name": "Union Interim Budget 2024-25",
+      "source": "https://www.indiabudget.gov.in/budget2024-25/"
+    },
+    {
+      "date": "2024-06-01",
+      "kind": "exit_poll",
+      "name": "Lok Sabha 2024 exit polls (last phase)",
+      "source": "Last phase of polling 1 June 2024 (Saturday); exit polls the same evening. Next trading session 3 June 2024 is the reaction day."
+    },
+    {
+      "date": "2024-06-04",
+      "kind": "election",
+      "name": "Lok Sabha 2024, Andhra Pradesh and Odisha assembly results",
+      "source": "ECI press note: counting 4 June 2024 from 8 AM; https://results.eci.gov.in/ ; The Hindu 5 Jun 2024"
+    },
+    {
+      "date": "2024-07-23",
+      "kind": "budget",
+      "name": "Union Budget 2024-25 (full)",
+      "source": "https://www.indiabudget.gov.in/budget2024-25/ (presented Tuesday 23 July 2024)"
+    },
+    {
+      "date": "2024-10-08",
+      "kind": "election",
+      "name": "Haryana and Jammu & Kashmir assembly results",
+      "source": "ECI counting day 8 Oct 2024; https://en.wikipedia.org/wiki/List_of_Indian_state_legislative_assembly_elections"
+    },
+    {
+      "date": "2024-11-23",
+      "kind": "election",
+      "name": "Maharashtra and Jharkhand assembly results",
+      "source": "ECI counting day 23 Nov 2024; https://en.wikipedia.org/wiki/List_of_Indian_state_legislative_assembly_elections"
+    },
+    {
+      "date": "2025-02-01",
+      "kind": "budget",
+      "name": "Union Budget 2025-26",
+      "source": "https://www.indiabudget.gov.in/doc/bspeech/bs2025_26.pdf"
+    },
+    {
+      "date": "2025-02-08",
+      "kind": "election",
+      "name": "Delhi assembly results",
+      "source": "ECI counting day 8 Feb 2025; https://en.wikipedia.org/wiki/2025_Delhi_Legislative_Assembly_election"
+    },
+    {
+      "date": "2025-11-14",
+      "kind": "election",
+      "name": "Bihar assembly results",
+      "source": "ECI counting day 14 Nov 2025; https://en.wikipedia.org/wiki/List_of_Indian_state_legislative_assembly_elections"
+    },
+    {
+      "date": "2026-02-01",
+      "kind": "budget",
+      "name": "Union Budget 2026-27",
+      "source": "https://www.indiabudget.gov.in/doc/Budget_Speech.pdf ; PIB PRID 2221458 (1 Feb 2026)"
+    }
+  ]
+}

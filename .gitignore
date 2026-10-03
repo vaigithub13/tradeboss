@@ -1,0 +1,21 @@
+.env
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.mypy_cache/
+
+# Node
+node_modules/
+dist/
+
+# Local data
+/data/
+/backend/data/
+*.duckdb
+*.parquet
+*.sqlite
+*.db

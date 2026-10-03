@@ -1,0 +1,29 @@
+{
+  "_status": "Approved by the user (follow-up B). Nifty 50 index options only.",
+  "underlying": "NIFTY",
+  "holiday_rule": "If the day a rule names is not a trading day, the expiry is the PREVIOUS trading day. Source: NSE contract specifications (https://www.nseindia.com/static/products-services/equity-derivatives-contract-specifications: 'If the Tuesday is a trading holiday, then the expiry day is the previous trading day'); NSE/FAOP/68685 Annexure (Oct 2025 weekly moved to 1-Oct 'since 02-Oct-25 is holiday'); confirmed by every holiday-shifted expiry in the real expiry list 2024-10..2026-09 (tests/test_bt_expiry.py).",
+  "rules": [
+    {
+      "weekday": "Thursday",
+      "first_expiry_on_or_after": null,
+      "applies_to": "weekly: Thursday of the week; monthly / quarterly / half-yearly: last Thursday of the month",
+      "source": "Weekly Nifty options were already on Thursdays before 2022. No circular changed the day between 2022-01-01 and 2025-08-31: NSE/FAOP/66938 (4 Mar 2025, table 'current expiry day': Thursday / last Thursday) https://nsearchives.nseindia.com/content/circulars/FAOP66938.pdf ; NSE/FAOP/68685 (23 Jun 2025, 'existing': Thursday) https://nsearchives.nseindia.com/content/circulars/FAOP68685.pdf . Real expiries 2024-10-03..2025-08-28 (Upstox Get Expiries) are all Thursdays except holiday shifts. NOT independently verified for 2022-01..2024-09 (Upstox keeps no expired contracts before 2024-10-03): rule-based there."
+    },
+    {
+      "weekday": "Tuesday",
+      "first_expiry_on_or_after": "2025-09-01",
+      "applies_to": "weekly: Tuesday of the week; monthly / quarterly / half-yearly: last Tuesday of the month",
+      "source": "SEBI/HO/MRD/TPD-1/P/CIR/2025/76 (26 May 2025) https://www.sebi.gov.in/sebi_data/attachdocs/may-2025/1748266377271.pdf ; NSE/FAOP/68589 (17 Jun 2025: expiries on/before 31 Aug 2025 stay Thursday, on/after 1 Sep 2025 Tuesday) https://nsearchives.nseindia.com/content/circulars/FAOP68589.pdf ; NSE/FAOP/68685 (23 Jun 2025) https://nsearchives.nseindia.com/content/circulars/FAOP68685.pdf ; NSE/FAOP/68747 (update) https://nsearchives.nseindia.com/content/circulars/FAOP68747.pdf . Real expiries: last Thursday weekly 2025-08-28, first Tuesday weekly 2025-09-02, monthly 2025-09-30."
+    }
+  ],
+  "considered_and_not_a_rule": [
+    {
+      "what": "NSE plan to move Nifty weekly/monthly expiry to MONDAY from 2025-04-04",
+      "why": "Announced in NSE/FAOP/66938 (4 Mar 2025), deferred 'until further notice' by NSE/FAOP/67338 (27 Mar 2025, https://www.steelcitynettrade.com/Circulars/Revision%20in%20Expiry%20Day%20of%20Index%20and%20Stock%20Derivatives%20Contracts%20%E2%80%93%20Update.pdf) after SEBI's consultation paper of 27 Mar 2025. Never in force: the real expiries in Apr-Aug 2025 are Thursdays."
+    },
+    {
+      "what": "Weekly options on BANKNIFTY / MIDCPNIFTY / FINNIFTY discontinued from 2024-11-20",
+      "why": "NSE/FAOP/64506 (10 Oct 2024) https://nsearchives.nseindia.com/content/circulars/FAOP64506.pdf keeps Nifty 50 as the only weekly index: no change for Nifty's own expiry days."
+    }
+  ]
+}

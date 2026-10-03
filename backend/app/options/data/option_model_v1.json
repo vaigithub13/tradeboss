@@ -1,0 +1,19 @@
+{
+  "model_version": "option model v1",
+  "as_of": "2026-10-03",
+  "calibration_ref": "data/validation/option_model_carry_2026-10-03.json",
+  "r": 0.072,
+  "q": 0.0,
+  "carry_basis": "calendar",
+  "time_basis": "trading",
+  "vix_scales": {
+    "0": 0.6489,
+    "1": 0.8519,
+    "2": 0.9014,
+    "3-4": 0.9064,
+    "5+": 0.9022
+  },
+  "real_premiums": true,
+  "slippage_points": 0.5,
+  "note": "option model v1 (2026-10-03): net carry 7.2% on calendar time (forward), VIX scale by DTE bucket, trading-minute T. Ref: data/validation/option_model_carry_2026-10-03.json"
+}

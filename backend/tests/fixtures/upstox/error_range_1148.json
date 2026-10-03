@@ -1,0 +1,11 @@
+{
+ "status": "error",
+ "errors": [
+  {
+   "errorCode": "UDAPI1148",
+   "message": "Invalid date range. For 1-15 minute intervals the maximum range is 1 month",
+   "propertyPath": null,
+   "invalidValue": null
+  }
+ ]
+}

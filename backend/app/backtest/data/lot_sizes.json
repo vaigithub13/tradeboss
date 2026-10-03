@@ -1,0 +1,35 @@
+{
+  "_note": "Nifty 50 derivative lot sizes from NSE circulars. A contract's lot depends on its (cycle, expiry date): first_weekly_expiry / first_monthly_expiry are the first expiries WITH that lot (taken from each circular). effective_from is the first trade date of the new lot (date-only lookups inside the transition window are ambiguous on purpose). Approved by the user after checking NSE/FAOP/61415 on nseindia.com. Not modelled: quarterly/half-yearly contracts already listed at a changeover switch on their own EOD date (26 Dec 2024, 30 Dec 2025).",
+  "rows": [
+    {
+      "underlying": "NIFTY",
+      "lot_size": 50,
+      "effective_from": "2021-04-30",
+      "source": "NSE/FAOP/47854, Circular Ref. 28/2021, 31 Mar 2021 (75 -> 50): https://archives.nseindia.com/content/circulars/FAOP47854.pdf. Unchanged by NSE/FAOP/56233 (Circular 62/2023, 31 Mar 2023, NIFTY 50 -> 50)."
+    },
+    {
+      "underlying": "NIFTY",
+      "lot_size": 25,
+      "effective_from": "2024-04-26",
+      "first_weekly_expiry": "2024-05-02",
+      "first_monthly_expiry": "2024-05-30",
+      "source": "NSE/FAOP/61415, Circular Ref. 37/2024, 2 Apr 2024 (50 -> 25; the 25 Apr 2024 monthly keeps 50): https://nsearchives.nseindia.com/content/circulars/FAOP61415.pdf"
+    },
+    {
+      "underlying": "NIFTY",
+      "lot_size": 75,
+      "effective_from": "2024-11-20",
+      "first_weekly_expiry": "2025-01-02",
+      "first_monthly_expiry": "2025-02-27",
+      "source": "NSE/FAOP/64625, Circular Ref. 128/2024, 18 Oct 2024 (25 -> 75; last 25: weekly 19 Dec 2024, monthly 30 Jan 2025): https://nsearchives.nseindia.com/content/circulars/FAOP64625.pdf"
+    },
+    {
+      "underlying": "NIFTY",
+      "lot_size": 65,
+      "effective_from": "2025-10-29",
+      "first_weekly_expiry": "2026-01-06",
+      "first_monthly_expiry": "2026-01-27",
+      "source": "NSE/FAOP/70616, Circular Ref. 176/2025, 3 Oct 2025 (75 -> 65; circular effective 28 Oct 2025 EOD, so effective_from is the next trade date; last 75: weekly 23 Dec 2025, monthly 30 Dec 2025): https://nsearchives.nseindia.com/content/circulars/FAOP70616.pdf"
+    }
+  ]
+}

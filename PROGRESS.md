@@ -1,0 +1,310 @@
+# Progress
+
+## Phase 0 — Skeleton ✅
+
+- Folder structure per PROJECT_PLAN.md, FastAPI app (`GET /api/health`), Vite + React 19 + strict TS + Tailwind v4 (dark) + Zustand, `.env.example`, root `package.json` + `Makefile`.
+- One command to start both: `npm run dev` (or `make dev`). Frontend shows "backend connected".
+
+## Phase 1a — Chart core with sample data ✅
+
+**Sample data** (imported read-only from `My Trading Desk`, which was not modified)
+- Only **5m** Nifty 50 history exists there (no 1m). Two Upstox datasets merged: 2022-01-03 → 2026-09-30.
+- 88,093 raw bars → 87,915 kept → `data/candles/NIFTY50/5m.parquet` (gitignored), read via DuckDB. Index volume is 0 everywhere.
+- Re-create with: `cd backend && uv run python -m scripts.import_nifty_sample`
+- Cleaning (`app/data/importer.py`): bars must START in 09:15–15:30 IST, except Muhurat sessions which are kept whole. Dropped 178 stray prints (84× 09:10 pre-open, 84× 15:30, 5× 15:35, 5× 15:55).
+- No missing 5m bars inside normal sessions; 67 weekdays have no data (holidays).
+
+**Session labels** (`app/data/sessions.py`, stored per bar in the Parquet `session_type` column)
+- Labels are by session TYPE, not weekday (follow-up A, applied after 1a approval):
+  - `normal` — full-length Mon–Fri session (included by default)
+  - `weekend_full` — FULL-length Saturday/Sunday session, e.g. 2024-01-20, 2025-02-01, 2026-02-01 (included by default)
+  - `special_short` — short/broken session on any day, e.g. 2024-03-02, 2024-05-18 (excluded by default)
+  - `muhurat` — Diwali Muhurat, any shape, from the calendar list (excluded by default)
+  - Precedence: muhurat > not-full-length → special_short > weekend → weekend_full > normal. "Full-length" = first bar ≤ 09:15, last bar ends ≥ 15:30, ≥ 90% of expected bars.
+- Muhurat dates are a hard-coded list `MUHURAT_DATES` (2022-10-24, 2023-11-12 [a Sunday], 2024-11-01, 2025-10-21) — **to be replaced in Phase 2 (see below)**.
+- Sample data counts: 1,168 normal sessions · 3 weekend_full · 2 special_short · 4 muhurat.
+- Which types are shown: `INCLUDE_SESSION_TYPES` in `.env` (default `normal,weekend_full`); API param `sessions=normal,muhurat,…` overrides; UI has a "Sessions" menu (regular sessions are always on).
+- Muhurat days (when included) bypass the 09:15–15:30 clip and anchor intraday candles to their own first bar (they run 18:00 or 13:45, not 09:15). special_short sessions keep the 09:15 anchor.
+
+**Resampler** (`app/data/resampler.py`, tests written first and approved)
+- 1m/3m/5m/15m/30m/1h/1D/1W, IST, anchored to 09:15 (1h = 09:15…15:15–15:30 partial), weeks Mon–Sun starting on the first trading day, no fake candles, OHLCV rules.
+- Sunday Budget session 2026-02-01 joins the week of Mon 2026-01-26 (**rule pending your TradingView check**).
+- A timeframe finer than the stored data raises `ValueError`; 1m/3m logic + tests are kept for when 1m data exists.
+
+**API**
+- `GET /api/candles?symbol=&timeframe=&from=&to=[&sessions=]` — `from`/`to` are unix seconds (inclusive, on candle START time); source bars are loaded for whole IST days/weeks around the range so edge candles are complete. 404 unknown symbol, 422 unknown/unavailable timeframe (message says what the stored data is).
+- `GET /api/symbols` — symbols, base timeframe, available timeframes, data range, default session types.
+- Gzip enabled (5m full history ≈ 9 MB raw).
+
+**Frontend**
+- Lightweight Charts v5 candlestick chart, dark theme, full screen; wheel zoom, drag pan; crosshair + OHLC/change legend top-left; time axis and crosshair label in IST (`Intl`, Asia/Kolkata).
+- Timeframe buttons 1m 3m 5m 15m 30m 1h 1D 1W. **1m/3m disabled with tooltip** ("Needs 1m data … available after Phase 2") — never fabricated.
+- Volume pane appears only if the loaded range has volume > 0 (hidden for index data).
+- Zustand `chartStore` (session-type selection included) with stale-response protection; default timeframe 15m, last 150 bars visible initially.
+
+**Tests** at the end of 1a: pytest 86 · Vitest 34 (current totals are in the Phase 1b section). `npm run typecheck` clean, `vite build` OK.
+
+**Visually checked in a browser:** chart renders, 15m/1D switching, crosshair + IST date label, legend, disabled 1m/3m, Muhurat toggle, volume pane (using a temporary symbol with volume, since deleted). Not exercised in a browser: removing the volume pane when switching from a symbol with volume to one without (no symbol selector yet; Phase 2).
+
+Known / deferred (by design):
+- (Lazy loading / 100k+ performance were done in Phase 1c below.)
+- `npm audit` flags a moderate dev-only issue in Vitest's mocker (fix needs a major Vitest bump); not touched.
+
+Run:
+```
+npm install && npm run setup   # first time only
+npm run dev                    # backend :8000 + frontend :5173 -> open http://localhost:5173
+npm test                       # pytest + Vitest
+npm run typecheck
+```
+
+## Phase 1b — Indicators ✅
+
+**Backend math** — `backend/app/indicators/` (pandas/numpy). The chart API and, in Phase 3, backtests both go through `registry.compute()`, so they always agree.
+- `basic.py` (sources, SMA, EMA, RMA, stdev, Bollinger) · `momentum.py` (RSI, MACD) · `volatility.py` (true range, ATR, Supertrend) · `volume.py` (VWAP) · `registry.py` (types, params + defaults, validation, warm-up, `compute`) · `service.py` (`compute_indicators`) · `frame.py`.
+- Formulas follow TradingView / Pine v5 (approved before implementing): EMA seeded with the first source value; RMA/RSI/ATR Wilder, seeded with an SMA (NaN until bar n-1; first RSI at bar n); population stdev; Supertrend per Pine's `ta.supertrend` (direction **-1 = up**, +1 = down, first value at bar atr_length-1 with direction +1); flat-series RSI = 100; VWAP resets at each IST midnight, NaN until the day has volume, raises `VolumeRequired` on all-zero volume and is intraday-only.
+- **Warm-up** = `max(rule, 500)` bars before the first visible bar; Supertrend `max(10 × atr_length, 1000)`. Rules: SMA/BB n · EMA 8(n+1) · RSI 10n · MACD 8(slow+1)+8(signal+1) · VWAP 24 h of bars. `compute_indicators` loads that much earlier history (as much as exists) and discards it.
+- **Same series as the chart:** indicators are computed from `get_candles(...)` with the same symbol, timeframe and session filter, so hidden sessions (muhurat, special_short) never leak into values (tested).
+- `POST /api/indicators` `{symbol, timeframe, from?, to?, sessions?, indicators:[{id,type,params?}]}` → `{times, indicators:[{id,type,params(normalised),outputs:{name:[value|null]}}]}`. 404 unknown symbol; 422 for bad params/types/duplicate ids, VWAP on zero-volume or on 1D/1W, unavailable timeframe.
+- Measured on real Nifty 5m (all 88k bars, 5 indicators): ~0.25 s, ~15 MB raw JSON (gzipped on the wire). Lazy loading / smaller payloads are Phase 1c.
+
+**Warm-up proof test** (`test_indicators_registry.py`): computing from `visible_start − warm-up` equals full-history values to **0.01 absolute (price units)** for every visible bar, for SMA, EMA 20/50/200, BB, Supertrend (10,3) and (7,2), RSI, MACD, VWAP. Run on a seeded random walk AND on the real NIFTY50 5m and 15m series at 6 start points each (skipped automatically if the gitignored Parquet is absent). Measured: with only 100 bars of warm-up Supertrend is still off by 0.03, RSI by 0.13, MACD by 0.07; at 200+ bars all are exact — so 500/1000 has a wide margin.
+- VWAP on real data uses synthetic volume (Nifty has none) — it checks the math/warm-up only.
+
+**Frontend**
+- **Indicators** menu: add SMA, EMA, Bollinger, Supertrend (price pane), RSI, MACD (own panes), VWAP; per-row show/hide, settings (length / source / multiplier / fast-slow-signal, colours), duplicate, remove; any number of copies (EMA 20 + EMA 50). Invalid input is flagged and never applied (e.g. MACD fast ≥ slow).
+- **VWAP disabled with a tooltip + inline note** on zero-volume symbols (Nifty) and on 1D/1W; a saved VWAP shows "unavailable" in the legend instead of failing, and is never requested.
+- Legend under the OHLC line: every visible indicator with its value at the crosshair (latest bar when not hovering); Supertrend coloured/labelled up/down; MACD macd/signal/hist.
+- Settings persist in `localStorage` (`chart-analyser.indicators.v1`); corrupted/outdated data is repaired or dropped, never thrown.
+- Results are cached per symbol/timeframe/sessions and per indicator type+parameters, so stale values are never drawn; 200 ms debounce on parameter edits; colour changes never refetch (reworked in 1c).
+- Supertrend is drawn as two lines (up/down colour) that break at flips (see 1b-polish for how). Bollinger has no fill (later: series-primitive plugin).
+
+**Tests** (all pass): pytest **232** (indicators: math 20, registry 67, service 27, API 13; plus the earlier 105) · Vitest **98** (new: catalog 23, request 10, legend 7, seriesData 5, persistence 4, indicatorStore 14). `npm run typecheck` clean.
+
+**Visually checked in a browser** (via a temporary symbol with volume, since deleted): all 7 indicators together, duplicate EMA with a changed length, volume + RSI + MACD pane stacking, settings surviving a reload, VWAP "unavailable" on 1D, and on Nifty (no volume) the VWAP button disabled with its explanation and no volume pane. Not exercised in a browser: switching between a symbol with and without volume (no symbol selector yet; see Phase 2).
+
+Follow-up applied before 1b: session label `budget_weekend` renamed to **`weekend_full`** (2024-01-20 was not a Budget day) in code, tests, `.env.example`/config defaults and the Sessions menu; sample Parquet re-imported.
+
+## Phase 4 — notes for Pine conversion
+- Pine `ta.tr` (no arguments) is **NaN on bar 0**, whereas `ta.atr` (and `ta.tr(true)`) uses `high − low` on bar 0. Our `true_range()` follows the `ta.atr` convention (bar 0 = high − low). Converted strategies that use a bare `ta.tr` in their own formulas must respect the NaN first bar; ATR/Supertrend conversions can use our functions unchanged.
+- Pine direction convention is kept for Supertrend (`-1` = uptrend, `+1` = downtrend).
+- RSI keeps TradingView's order of checks (`down == 0 → 100`, then `up == 0 → 0`), so a flat series is 100.
+
+## Phase 2 — TODO notes carried over from earlier phases
+- Replace the hard-coded `MUHURAT_DATES` list (`backend/app/data/sessions.py`) with Upstox market timings / holidays data (and use it to detect special/short sessions instead of inferring from bar counts). **Still open** (2a labels sessions from the bars themselves, see below).
+- ~~Browser-test the volume pane hide/show~~ ✅ done in 2a (RELIANCE ↔ NIFTY, both directions).
+- ~~Provide 1m data so the 1m and 3m buttons become available~~ ✅ done in 2a.
+- Add the Diwali-2026 Muhurat date once published (until the list is replaced). **Still open.**
+
+## Phase 1b-polish ✅ (visual fixes after the 1b review)
+- **All indicator lines are straight** (`lineType: LineType.Simple` set explicitly). Pixel-checked on the real chart: every Bollinger segment sits exactly on the straight chord between its two points (149/149 per band).
+- **Supertrend breaks at flips.** `up` has a value only on bars with direction −1, `down` only on +1 (tested on a sequence with 1-bar runs and a warm-up gap). Pixel-checked on the real chart: 15/15 sampled points on the former "diagonals" are now empty.
+  - ⚠ Correction to the 1b notes: whitespace points do **not** break a Lightweight Charts line (they are dropped and the neighbours are joined), and a point's colour is used for the segment that **leaves** it (not the one that ends at it — my first attempt had it the wrong way round and the diagonals stayed). So the *last* bar of every run carries the transparent colour `rgba(0,0,0,0)`, which hides the segment to the next run. Same mechanism: VWAP no longer joins yesterday's last value to today's first, and any null gap inside a line breaks it.
+- **Legend**: compact box with a semi-transparent background (`bg-black/45`), the hovered bar's date/time in IST (`Tue 29 Sep '26 10:45`; 3-letter month forced because newer ICU prints "Sept"), and a ▾/▸ collapse toggle (remembered in `localStorage`). Collapsed = one line (symbol, timeframe, time).
+- **RSI pane**: dashed 30 / 70 lines in a brighter grey (50 line removed). **MACD pane**: solid 0 line. Pixel-checked (dashed rows found at the 70/30 prices, solid row at 0).
+
+**Later (not now):** Bollinger band **fill** (shaded area between upper and lower) using a Lightweight Charts *series primitive* plugin.
+
+## Phase 1c — Lazy loading + performance ✅
+
+**Backend**
+- `GET /api/candles` takes `limit` (newest N) and `before` (candles that start before this unix time, exclusive); the response has `has_more`. `limit` together with `from`/`to` → 422. Pages stitch exactly into the full series (tested on real data, incl. the session filter). `data/service.get_candle_page`.
+- Indicators for a chunk use the same warm-up rules as always (`POST /api/indicators` with `from`/`to` loads the warm-up history before `from` itself). **Chunk test** (`test_indicators_chunks.py`): values computed chunk-by-chunk equal full-history values within **0.01** for every indicator, on real NIFTY 5m/15m and on a synthetic series with volume (incl. VWAP), incl. the bars right at chunk boundaries and a tiny chunk size.
+
+**Frontend**
+- **Open** = newest `INITIAL_BARS = 2000` candles. **Scroll near the left edge** (less than one screen — at least 300 bars — left of the view) → the next older chunk is fetched and prepended. Chunk size grows with what is loaded (min 4k, max 20k) because handing data to the chart costs O(bars already loaded) per prepend.
+- **No jump, no flicker**: the candle `setData` and the restore of the visible range (`shiftRange`) run in the same tick, so no intermediate frame is painted. Measured in the browser: the visible *time* range before and after a 4000-bar prepend is identical (bars 250–400 → 4250–4400), and the range-change callback fired exactly twice (no intermediate state).
+- **Caches** (all in memory, LRU):
+  - candles per `symbol|timeframe|sessions` (10 scopes) — switching timeframe back and forth never refetches (tested; also an older chunk that arrives after you switched away is cached for its own scope);
+  - indicator values per scope and per **indicator key = type + parameters** (12 scopes). Colour / visibility / id are not part of the key, so recolouring or hiding+showing never refetches; changing parameters fetches only that indicator; two copies with identical parameters share one computation; going back to earlier parameters is a cache hit. A prepended chunk fetches only the missing older range (`missingRanges`), merged in order (`mergeEntry`, overlap-safe). Identical in-flight requests are de-duplicated; a slow response for a scope you left still lands in that scope's cache.
+  - Indicator fetches start immediately for new candles (only settings edits keep the 200 ms debounce).
+- Heavy updates are sliced: when an indicator has > 20 000 points its series are handed to the chart one per macrotask, so the page stays responsive.
+- Dev-only: `window.__chart` (`{chart, candleSeries}`) and `window.__stores` for console checks; `performance.mark("chart:data-set")`.
+
+**Performance (measured in the IDE browser, 120 Hz display, dev server, 7 indicators)**
+
+| What | Result |
+|---|---|
+| `GET /api/candles?limit=2000` (15m, via the Vite proxy) | 20–40 ms, 210 KB (35 KB gzipped) |
+| `POST /api/indicators`, 5 indicators × 2000 bars | ~30 ms, 356 KB |
+| **First chart** (page load → candles on screen, 15m) | **~120 ms** (fetch starts at ~70 ms, data set at ~117 ms); indicators on screen ~175 ms. Target < 1 s ✔ |
+| Scroll-to-edge → older 4000 bars on screen (6 000 loaded) | ~90 ms (fetch ~60 ms) |
+| Pan, 60 bars/frame across **263 475 bars** (3 × Nifty 5m history, temporary symbol) | 120 fps, p95 9.2 ms, max 9.3 ms |
+| Zoom 50 ↔ 50 000 bars, and zoom-to-fit all 263k bars | 120 fps, p99 9.3 ms (one ~1 s stall at the very start of the first run, not reproducible in 5 other runs; I attribute it to the IDE tab waking from throttling) |
+| Longest single main-thread block while prepending, with N bars already loaded | N = 24k ≈ 0.1 s · 44k ≈ 0.1 s · 104k ≈ 0.3 s · 264k ≈ 0.9–1.2 s |
+| Loading the whole 263k history in 15 prepends | 32 s of wall time in my script (it waits ~1 s after each step; the page stays interactive) |
+
+Scrolling and zooming are cheap at any size (Lightweight Charts only draws what is visible). **The cost that grows is a prepend**: `setData` is O(total bars) per series (~1 µs/point), so each prepend at 100k bars blocks ~0.3 s at worst (Nifty 5m's whole history is 88k bars, so ≤ ~0.25 s in practice), and ~1 s at 264k. Known limit; ideas if it matters (Phase 2, when 1m data makes 1M+ bars possible): keep only a window of bars resident in the chart, or down-sample the far-left part.
+- The browser's JS heap reached ~1.4 GB after loading 264k bars × 14 series (mostly garbage waiting for GC; not a leak check).
+
+**Tests**: pytest **276** (+44: candle pages 38, chunk equality 6) · Vitest **149** (+51: cache 15, request 10, chartStore 23, indicatorStore 21, legend 8, seriesData 13, view helpers 8, format 8, …). `npm run typecheck` clean, `vite build` OK.
+
+**Visually checked in a browser**: legend (time, collapse + persistence, size), RSI/MACD guide lines, straight Bollinger, Supertrend/VWAP breaks (pixel scans), prepend without jump (time range identical before/after), full-history load on a temporary 264k-bar symbol (deleted again; `frontend/scratch.html` also deleted).
+
+## Phase 2a — Upstox data token, instruments, symbol selector, 1m history ✅
+
+**Scope**: market data only. No live feed (that is 2b), no OAuth (Phase 7), **no order code at all**: the client has only `GET` methods and a test scans `backend/app` for order endpoints/strings.
+
+**Auth / safety**
+- `UPSTOX_ANALYTICS_TOKEN` in `.env` (read-only, ~1 year). Never logged; redacted (token, `Bearer …`, JWT-shaped strings, `Authorization`) from every error/job message. It is only sent to Upstox (instrument download sends no auth header; redirects are not followed).
+- Expiry: if the token is a JWT, `exp` is decoded **locally** (yours: valid until 2027-09-30). A token past `exp` is reported `expired` without any network call.
+- Header badge **"data token valid / invalid / expired / missing / unverified"** (click = re-check; "N d left" when < 14 days). The check is a cheap data call (`GET /v2/market/status/NSE`), not `/user/profile`, cached 5 min server-side. A bad token never crashes the UI: the selector shows the reason, disables only the *fetch* of new history, and stored symbols still open.
+- Rate limiting: one shared sliding-window limiter, **20/s · 300/min · 1200 per 30 min** (our own cap; Upstox allows 50/500/2000 but the budget is shared with My Trading Desk). Own backoff on 429/5xx/network errors (exponential + jitter, honours `Retry-After`); no retry on 401/403/other 4xx.
+
+**Data model**: 1m is the single source of truth; every other timeframe comes from our resampler (measured on the real 440k-bar history, limit 2000: 1m 12 ms · 3m 14 · 5m 16 · 15m 31 · 1h 97 · 1D 284 · 1W 261 ms, so no resample cache was needed).
+- Storage: `data/candles/<dir>/1m.parquet` + `meta.json` (instrument info + covered 1m date ranges). `NIFTY50` keeps its old folder name (alias); others use the file-name-safe instrument key (`NSE_INDEX_India_VIX`, `NSE_FO_48704`, `NSE_EQ_INE002A01018`).
+- Sync: ≤ 28-day windows (Upstox allows 1 month per 1m request), newest first, only the *missing* ranges, coverage saved after each window (resumable, idempotent). History starts 2022-01-01. **Today** is never marked covered: history endpoint up to yesterday, intraday endpoint for today (it returns nothing on a closed day).
+- Importer: drops post-close prints (futures show 15:30–15:39 ticks), keeps OI only for futures/options, labels a partly-fetched day by weekday so a Saturday session is not mistaken for a normal day.
+- Defaults: **Nifty 50 full 1m from 2022-01-03** (439,943 bars to 2026-10-01), **India VIX** 1m, **current Nifty future** (NIFTY FUT 27 OCT 26, ~120 days). Other symbols on first selection: stocks ~90 days, futures ~120 days; "Load 3 more months" goes 90 days further back.
+- Sessions found in the Nifty 1m: 1169 normal, 3 weekend_full, 4 muhurat, 2 special_short (2024-03-02 and 2024-05-18 are 105-bar special sessions; 2024-01-20, 2025-02-01, 2026-02-01 are full-length).
+
+**Validation (one-time, `scripts.validate_5m`)** → `data/validation/5m_vs_upstox_2026-10-03.md`: our 5m built from 1m vs Upstox's own 5m for Mar 2022, Mar 2024 (special Saturday 2024-03-02), Feb 2025 (Budget Saturday 2025-02-01), Sep 2026, incl. every 09:15 bar. **0 mismatches** in all three comparisons (ours↔Upstox, ours↔saved 5m sample, sample↔Upstox). `data/candles/NIFTY50/5m.parquet` stays as a fixture / cross-check.
+
+**Instruments**
+- The public NSE instrument file is snapshotted daily to `data/instruments/YYYY-MM-DD/NSE.json.gz` (atomic write, validated: gzip/JSON, ≥ 1000 rows, contains Nifty 50) so old lot sizes / expired contracts stay on disk.
+- **launchd job** `com.tradeboss.instruments-snapshot`, **daily 08:30 IST**, installed. Plus a startup fallback (snapshot taken in a background thread if today's is missing and it is past 06:30 IST).
+- Search covers indices, NSE stocks (EQ), Nifty futures / CE / PE only, expired contracts never offered; an empty query lists stored symbols first.
+
+**UI**
+- **Symbol selector** (header): debounced search, All / Indices / Stocks / Futures / Options chips, per-row badge (`1m` stored · `no 1m` coarser data only · `fetch`), live sync progress ("fetching 1m history 3/4…"), "Sync latest 1m" and "Load 3 more months" for the current symbol. The legend shows the display name (`NIFTY`, `RELIANCE`, `NIFTY FUT 27 OCT 26`) + timeframe. The 1m / 3m buttons enable when 1m data exists.
+- **Bounded window**: at most `MAX_WINDOW_BARS = 60 000` candles in the chart. Scrolling left past the cap drops the newest bars and scrolling right fetches them again (`GET /api/candles?after=…`, `has_more_newer`). The indicator cache is trimmed to the same window and refetches only the dropped ranges. Browser check on the real 1m data: 13 older pages kept it at exactly 60 000 bars, strictly ascending, no errors.
+- **Volume pane**, browser-tested: RELIANCE (volume) → NIFTY (none) → RELIANCE again. Pane stack went `price·volume·RSI·MACD` → `price·RSI·MACD` → `price·volume·RSI·MACD`, clean both ways. (RELIANCE was fetched live from the selector: 23,625 1m bars.)
+
+**API added**: `GET /api/upstox/status`, `GET /api/instruments/search`, `POST /api/instruments/snapshot`, `POST /api/history/sync`, `GET /api/history/jobs/{id}`, `GET /api/history/coverage`; `/api/candles` got `after` + `has_more_newer`; `/api/symbols` got `display_name`, `instrument_key`, `kind`.
+
+**CLI** (from `backend/`): `uv run python -m scripts.snapshot_instruments [--force]` · `scripts.backfill --defaults | --symbol NIFTY50 --update | --key "NSE_EQ|INE002A01018" --days 90 | --from 2022-01-01` · `scripts.validate_5m`. launchd: `scripts/launchd/install.sh [--run-now]`, `check.sh`, `uninstall.sh`.
+
+**Tests**: pytest **401** (+125: redaction, rate limiter, client incl. no-order-code scan, token status, instruments/snapshots/search, history windows/coverage/resume, `after` pages, API, real recorded Upstox responses, validation) · Vitest **201** (+52: bounded window, view shift, indicator trim, upstox store, UI helpers). All Upstox calls in tests are mocked with saved responses (two of them recorded from the real API). Typecheck clean, `vite build` OK.
+
+**Facts observed from the real API** (worth knowing for 2b): candles come **newest-first**; index rows carry volume 0; 375 bars per index session, 385 for a future (incl. post-close prints, dropped); the intraday endpoint is empty on a closed day.
+
+**Out of scope / notes**
+- **Expired contracts** (expired futures/options history) need Upstox Plus: not supported.
+- **For 2b (live feed)**: a normal Upstox account gets **2 websocket feed connections**, and My Trading Desk may already use one. 2b must use at most one and fail gracefully when the limit is hit.
+- OAuth (`UPSTOX_API_KEY/SECRET`) moved to Phase 7; `.env.example` marks it as unused.
+- Session labels for special days are still inferred from the bars (see the Phase 2 TODO about `MUHURAT_DATES`).
+
+### Phase 2a follow-ups (after approval)
+- **Snapshot job skips identical files.** If today's download equals the most recent earlier snapshot (weekends / holidays) it is **not saved again**; the log says `snapshot 2026-10-04 unchanged (identical to 2026-10-02, not saved again)`. A tiny `data/instruments/<day>/UNCHANGED` note (text: the date it equals) stands in for the file, so the startup fallback does not retry all day and `check.sh` can still say "today's job ran". "Identical" = same bytes **or** same bytes after un-gzipping (a gzip header timestamp must not defeat it). `--force` always writes the file. Real snapshots (`list_snapshots`, search, backtests) only ever see files, never notes. Tests: +6 (identical, different gzip header, change-then-compare-with-latest, no re-download on the same day, force, bad download).
+- **`validate_5m --key`** now works for any stored symbol (only comparison A runs when there is no saved 5m sample) and adds **per-day volume sums** (ours vs Upstox). **RELIANCE (NSE_EQ|INE002A01018), 2026-09: 1575 5m bars each side (21 days x 75), 0 missing, 0 field mismatches (incl. exact volume), 21/21 days with identical volume sum and bar count, total volume 255,687,056 both sides.** Report: `data/validation/5m_vs_upstox_NSE_EQ_INE002A01018_2026-10-03.md`.
+
+## Phase 2b — Live feed ✅ (built against the documented format; NOT yet seen live: first live session is Monday)
+
+### Groundwork: protobuf + feed probe
+- **Protobuf**: `protobuf==7.36.2` and `websockets==17.1` pinned in `backend/pyproject.toml`. `app/upstox/feed/MarketDataFeedV3.proto` (unchanged copy of Upstox's schema, source in the header) and the generated `MarketDataFeedV3_pb2.py(.pyi)` are committed; regenerate with `backend/scripts/gen_feed_proto.sh` (grpcio-tools only in an ephemeral env; gencode 7.35.1 <= runtime 7.36.2).
+- **Probe** (`uv run python -m scripts.feed_probe`, Sat 2026-10-03 04:51 IST): authorize -> ONE connection for 10 s -> clean close. **The Analytics Token works for the v3 feed.** Raw frames saved as `backend/tests/fixtures/upstox/feed_probe_2026-10-03.json` (no token, no authorized URL; a test checks). Exactly 2 frames arrived, then nothing (market closed): `market_info` (126 B) and the snapshot (909 B, `type` = initial_feed, which proto3 omits on the wire). No ping seen in 10 s.
+- **Findings from the snapshot** (all four keys, mode full = `full_d5`):
+  - Indices (Nifty, VIX) arrive as `indexFF` = ltpc + marketOHLC only (no volume, no ltq). Stocks / futures as `marketFF` (+ 5-level depth, atp, vtt, oi, I1 and 1d OHLC). Absent proto3 scalars are 0 (e.g. depth levels with no quote are `{}`).
+  - **Post-close ticks are real**: ltt of the Nifty/VIX snapshot is 16:00:00 IST, RELIANCE 15:59:53, the Nifty future 15:39:59 (closing-auction era). So the 09:15-15:30 gate is essential, and `I1` entries with ts >= 15:30 exist (Nifty/VIX I1 = 15:30 flat bar, future I1 = 15:39) and are NOT bars.
+  - **RELIANCE I1 (15:29) equals the official 1m bar for 15:29 exactly** (1167.7 x4, volume 1,101,100) although ticks continued until 15:59:53, i.e. I1 did not advance past 15:29 after the close.
+  - Official history fills no-trade minutes with a flat bar at the previous close and volume 0 (RELIANCE: 602/602 zero-volume bars are flat at previous close; every day has exactly 375 bars; the future: 2621/2621 flat, one day has 374 bars).
+
+### What was built
+- **Backend (`backend/app/live/`)**: `model` (Tick/I1Bar/Bar/Diff), `builder` (candle builder, per instrument and day), `frames` (protobuf -> ticks/I1), `engine` (trading day from `currentTs`/`market_info` only, F6 hold queue, session-end evidence, gap/cold-start logic), `recorder` (+ replayer in `scripts/replay_feed.py`), `connection` (one connection, backoff+jitter, flock, re-authorize on every reconnect), `backfill`, `reconcile` (15:45 and missed days), `overlay` + `persist` (live bars appear in `CandleStore` reads; at session end upserted into `1m.parquet`), `minutelog`, `hub` (browser WebSocket), `service` (wiring, badge state). Routes: `WS /api/live/ws`, `GET /api/live/status`, `POST /api/live/reconcile`.
+- **Builder rules** (as approved): bar precedence `filled < tick < i1 < backfill < official`, every overwrite logged as a diff; I1(M) final when an I1 with a later ts arrives or on session-end evidence; flat fills only while connected; late ticks accepted for any non-final bar; a tick whose ltt is >5 s ahead of the same frame's `currentTs` is held, released if a later frame's `currentTs` catches up, else dropped and logged (an illiquid option with a real 25-minute gap is NOT held); recording 09:00-16:05 IST gated by `market_info` (holidays not recorded, special sessions recorded); cold start mid-session backfills 09:15 -> now before live bars; on startup any past day still marked unreconciled is reconciled from the historical API.
+- **Frontend**: `live/client.ts` (WebSocket, reconnect 1-10 s, resends the view, 6 s silence watchdog, bar pushes throttled to <=5/s per symbol/timeframe, newest wins), `live/merge.ts`, `live/badge.ts` + `panels/LiveBadge.tsx` (live / stale (Ns since last tick) / reconnecting... / market closed / feed auth failed / feed in use elsewhere / live feed off), `store/liveStore.ts`, `chartStore.applyLive` (ignored while scrolled back), `indicatorStore.applyLiveTail`, ChartView tail path (`series.update`, never `setData` for a live tick) and `IndicatorLayer` tail path (last points only). Higher timeframes and indicators come from the same backend modules as the REST API (`get_candle_page`, `compute_indicators`), so live and REST cannot drift.
+- Vite `/api` proxy now has `ws: true`. When the live feed is disabled the WebSocket stays open and reports "live feed off" (no reconnect loop).
+- Settings (`.env`): `LIVE_FEED_ENABLED` (default true), `LIVE_OPEN_VOLUME_BASELINE` (`first_tick` default | `pre_open_inclusive`), `LIVE_CONNECT_START/END` (08:55-16:10), `LIVE_RECORD_START/END` (09:00-16:05), `LIVE_RECONCILE_AT/UNTIL` (15:45/16:30).
+
+### Verification
+- Backend: **572 tests pass** (builder, engine, recorder/replayer, reconcile, connection, hub, end-to-end service with a fake socket). Frontend: **243 tests pass**, `npm run typecheck` clean, `vite build` OK. No test touches the network.
+- Browser smoke test (market closed): badge shows "market closed"; simulated `bar` messages updated the last candle, appended a new one and extended the EMA series by one point (`series.update`, no full redraw).
+
+### Open items for Monday (unknown until we see real frames)
+1. Is the feed's I1 the **forming** or the **last completed** bar? (minute log `i1_timing`; the builder works either way.)
+2. 09:15 volume baseline: compare `open_bar_volume` candidates against the official bar and set `LIVE_OPEN_VOLUME_BASELINE`.
+3. Real latency (`currentTs` vs receive time) and the size of the tick-bar vs I1 vs official differences.
+4. Cold start first-tick minute stays `partial` (unknown volume) until I1/official; it is not part of the backfill range.
+
+
+## Phase 3a — Backtest engine + cost model (engine done; two inputs still open)
+
+### What was built (`backend/app/backtest/`, `backend/app/strategies/`)
+- `contracts.py` (Strategy / Signal / Broker; `Signal` got optional `stop`, `target` (OCO bracket at fill) and `oco`), `context.py` (`ctx`: past bars and indicators only; any read past "now" raises `LookAheadError` and is also recorded, so a strategy that swallows it still fails the run), `broker.py` (`BacktestBroker`: orders, intrabar matching, positions, trades), `engine.py` (`run_backtest`, `BacktestConfig`), `costs.py`, `lots.py`, `metrics.py`, `result.py` (canonical JSON, `run_id` = hash of config + strategy + data), `sources.py` (candle store / in-memory).
+- Candles: the store's 1m (finest) bars, resampled by the chart's `resample()`; session filter as the chart. Indicators: `app.indicators.registry.compute` (chart code), computed once and revealed one value per bar.
+- Rules as approved: fill at the NEXT bar open (or `fill_mode="same_bar_close"`, flagged optimistic); stops fill on touch, at the open when gapped through; limits only when price trades strictly through (better open on a gap); 1m bars inside a higher-timeframe bar decide SL vs target, both in one 1m bar (or no 1m data / missing minutes) = SL first and counted `ambiguous`; square-off default 15:15, no carry unless `allow_overnight`; signal on a session's last bar = `unfilled: no_next_bar`; lot size by trade date from a dated table (`LotSizeAmbiguous` inside a transition window unless the contract's expiry is given, `LotSizeUnknown` before the table starts); costs from a dated, editable JSON table (`UnknownRate` for any rate not on a note); metrics after costs.
+- Samples: `EmaCrossover`, `SupertrendFlip`, `OpeningRangeBreakout` (stop-entry OCO pair with bracket stop, one trade per day).
+- Real-data smoke run (Nifty 5m, since 2026-07-01, zero costs, 0.08 s each) works; results are index points x lot, not option P&L (that is 3b).
+
+### Tests: `tests/test_bt_*.py` (114 passed, 1 skipped)
+- Backend total: **686 passed, 1 skipped**. `uvx mypy app/backtest app/strategies`: clean. Frontend unchanged (243 passed, typecheck clean).
+- 1 (no look-ahead: scrambling every bar after T changes nothing before T for 4 strategies x 5m/15m, canary with a leaky indicator is caught, future reads raise, `ctx` indicator values == chart code on the past only), 2 fill timing, 3 intrabar, 4 gaps, 5 sessions, 6 golden (your hand-checked 30 bars), 8 lot sizes, 9 metrics, 10 determinism (byte-identical, PYTHONHASHSEED-independent, run_id), 11 samples.
+
+### Found and fixed while testing
+- **Look-ahead in the chart's own indicator code**: `stdev()` (Bollinger) shifted the series by its WHOLE-series mean, so a value changed by ~1 ulp (3.6e-12) when later bars arrived. Now shifted by the first bar (a constant that does not depend on the future). Chart values change by float noise only; all indicator tests still pass.
+- `ctx.cancel_orders` renamed `ctx.cancel_working` (the standing "no order code in the backend" test matches the substring `cancel_order`).
+
+### Seeded after approval
+- **Lot sizes** (`data/lot_sizes.json`, approved after checking NSE/FAOP/61415 on nseindia.com): Nifty 50 = 50 (from 2021-04-30, NSE/FAOP/47854), 25 (NSE/FAOP/61415: new lot from 2024-04-26, first weekly 2024-05-02, first monthly 2024-05-30), 75 (NSE/FAOP/64625: from 2024-11-20, first weekly 2025-01-02, first monthly 2025-02-27), 65 (NSE/FAOP/70616: circular effective 2025-10-28 EOD -> effective_from 2025-10-29, first weekly 2026-01-06, first monthly 2026-01-27). Keyed on (cycle, expiry date); each row carries its circular number and link. `lot_size(...)` also respects "the new lot only applies once it is in force" for far-month contracts; `lot_size_for_contract()` needs no trade date. Tests: `tests/test_bt_lots_seed.py` (all three changeover windows by contract and by date alone, same-day weekly vs monthly, snapshot cross-check, engine). Not modelled: quarterly/half-yearly contracts already listed at a changeover (they switched on 26 Dec 2024 / 30 Dec 2025 EOD).
+- **Cost row 2026-10-01** (`data/cost_rates.json`) is an **UNVERIFIED seed from published rate cards** (Upstox brokerage page and NSE circular NSE/FA/73061, retrieved 2026-10-03): brokerage flat Rs 20, STT 0.15% sell (on premium), exchange 0.03553% (NSE 3,552 + IPFT 1 per crore, as one line), SEBI Rs 10/crore, stamp 0.003% buy, GST 18% on brokerage + exchange (SEBI fee not in the base, per Upstox's page). Every rate is marked `unverified` with its source; a run that uses these rates adds an `UNVERIFIED` warning to its result. New table keys: `verification`, `sources`, `gst_on`, `note`.
+- **Test 7d stays skipped**: no contract note yet. When you have one: check (1) one exchange line or two (transaction + IPFT), (2) STT rounding (paisa vs rupee), (3) whether the SEBI fee is in the GST base; then flip the rates to `verified` and un-skip 7d.
+
+## Phase 3a follow-ups A and B ✅ (approved and seeded)
+- **A. Cost table** (`backend/app/backtest/data/cost_rates.json`): six dated rows since 2022-01-01 (2022-01-01, 2023-04-01, 2024-04-01, 2024-10-01, 2026-03-01, 2026-04-01), **every rate "unverified"** (NSE/FATAX/56235, 63809, 73524; NSE/FA/56129, 61137, 64232, 73061; Upstox rate card via Wayback). Decisions: NSE IPFT (Rs 50 per crore) and the GST on it are included from 2023-04-01 (conservative, under a paisa per trade either way). Unchanged since 2022: brokerage Rs 20 flat, SEBI Rs 10/crore, stamp 0.003% (buy), GST 18%. The shipped 2026-10-01 seed row was replaced by the 2026-04-01 row (same values). Test 7d stays skipped until a real contract note exists.
+- **Phase 7 note (API brokerage)**: Upstox ran a promotional Rs 10 per order for orders placed through the API (its page says valid till 31 Dec 2025, other sources say 31 Mar 2026; it has since ended or changes). Backtests ignore it and use the standard Rs 20 flat. Before live API trading in Phase 7, read the current API-order brokerage from Upstox's charges page / brokerage-details endpoint and add a dated row if it differs.
+- **B. Expiry calendar** (`backend/app/backtest/expiry.py`, `data/expiry_rules.json`, `data/nse_holidays.json`, demo `uv run python -m scripts.expiry_calendar_demo`): Nifty weekly = Thursday and monthly = last Thursday for expiries up to 2025-08-31, Tuesday / last Tuesday from 2025-09-01 (SEBI/HO/MRD/TPD-1/P/CIR/2025/76, NSE/FAOP/68589, 68685, 68747); a holiday moves the expiry to the PREVIOUS trading day (Muhurat-only days are not trading days). NSE's Monday plan (FAOP/66938) was deferred (FAOP/67338) and never in force; the Nov-2024 end of other indices' weeklies (FAOP/64506) does not touch Nifty. Reproduces all 105 real Nifty expiries Upstox lists (2024-10-03..2026-09-29), everything in the 2026-10-03 instrument snapshot through 2026-12, and every expiry date in the lot-size circulars. 2022-01..2024-09 is rule-based only. NSE publishes the next year's holidays in December: add 2027 to `nse_holidays.json` then (a date missing there counts as a trading day).
+- **Tests**: `tests/test_bt_history.py` (a backtest over 30 days from 2022 to 2026, a day on each side of every lot / cost / expiry-rule change, uses the shipped lot, expiry and cost tables and no NoRatesForDate; right lot, expiry and cost row on each side), `tests/test_bt_cost_history.py`, `tests/test_bt_expiry.py`, `tests/test_bt_lots_seed.py`. Backend suite after 3a: 816 passed, 1 skipped (7d).
+
+## Phase 3b — Option P&L overlay ✅
+
+Estimate option P&L from the engine's index trades. The engine is unchanged; the index JSON is byte-identical with the overlay on or off.
+
+**Expired-candle probe (one request, as asked).** `GET /v2/expired-instruments/historical-candle/NSE_FO|…|03-10-2024/1minute/2024-10-03/2024-10-03` with the Analytics Token returned **375 one-minute bars**. No `UDAPI1149`. Expired history is available on this token, so calibration can use it. Both sources were still designed (you asked for that either way):
+- (a) `UpstoxHistorySource` — expired API for past expiries, regular historical API for contracts still listed.
+- (b) `RecordedSource` + `capture_listed_day` / `ingest_recorded_bars` — candles we store ourselves (`data/option_history/`), filled by an end-of-day capture (`uv run python -m scripts.capture_option_day`) so the store grows each week. The live feed is not subscribed (Monday's feed check is left alone); a later live recorder writes the same store.
+
+**What was built** (`backend/app/options/`)
+- `strikes.py` + `data/strike_steps.json`: step 50 from 2022-01-01, **unverified**. Dates before the table raise `StrikeStepUnknown` (never guessed). ATM ties round up (22,325 → 22,350). `+1` is one strike OTM.
+- `contract.py`: long → CE, short → PE; nearest weekly/monthly from the 3a calendar; `roll_on_expiry_day`; lot from `(cycle, expiry)`.
+- `bs.py`: Black-Scholes (Hull golden 4.7594 / 0.8086; ATM 183.36); tick snap 0.05 half-up, floor 0.05.
+- `time.py`: trading minutes / (375 × 250), or calendar minutes / (365 × 1440) as India VIX. Mon 10:00 → Tue expiry = 705 min (T = 0.00752).
+- `vix.py`: India VIX 1m open at the fill minute; last bar within 5 minutes otherwise; older → `vix_stale` still priced; none at all → `unpriced`.
+- `model.py` / `result.py`: overlay. The builder default (`OptionModelConfig()`, used by the golden tests) is still **r = q = 0**, slippage **0.5 points/leg**, scale 1.0. Case 22 golden: 25,000 CE 06 Oct 26, fills 126.65 / 150.55, net **1,483.79**. Held-past-expiry settles at intrinsic; exercise STT is not modelled (warned). A run with no config loads **option model v1** (below).
+- `events.py`: shipped `event_days.json` is **approved and seeded** (2026-10-03). Full Budget 2024-25 is **2024-07-23**. Added `2024-06-01` exit_poll. A non-trading event date also flags the next session as `reaction_day` (2023-05-13 Sat → 2023-05-15 Mon; 2024-06-01 Sat → 2024-06-03 Mon). Weekend dates that traded (`weekend_full`: 2025-02-01, 2026-02-01) flag on the day itself.
+- `history.py` + `calibration.py`: resumable fetch, pair at the same minute (option/index/VIX opens), filters (zero volume, premium < ₹5, first 3 minutes), Huber scale fit, day-block bootstrap, **implied net carry from put-call parity (not applied)**, and **trading-T vs calendar-T per DTE bucket**. Report: `data/validation/option_model_calibration_<date>.md` + `.json`.
+- Scripts: `scripts/calibrate_option_model.py` (no network unless `--fetch`), `scripts/capture_option_day.py`.
+
+**Decisions applied**
+1. The uncalibrated builder stays r = q = 0 (case 33). The shipped default is option model v1 (below). Every result records `model_version`.
+2. Slippage default 0.5 points/leg, configurable.
+3. Strike step 50, unverified, from 2022-01-01.
+4. Event-day list **approved and seeded** (2024-07-23 full budget; 2024-06-01 exit_poll; reaction_day on the next session when the event is not a trading day).
+5. Live calibration `--fetch` ran 2026-10-03: 105 expiries stored (2024-10-03..2026-09-29), 8.70M paired minutes kept. The first fit (one VIX scale **0.888**, r = q = 0) was **not** shipped. Carry was refit and approved as v1.
+
+**Option model v1** (`backend/app/options/data/option_model_v1.json`, as of 2026-10-03, ref `data/validation/option_model_carry_2026-10-03.json`). `overlay_options` loads this when no config is passed.
+- Net carry **7.2%** (r = 0.072, q = 0), calendar time, in the forward. Volatility time stays trading minutes.
+- VIX scale by DTE bucket: 0 → 0.6489, 1 → 0.8519, 2 → 0.9014, 3–4 → 0.9064, 5+ → 0.9022.
+- **Real-premium mode is the default.** A fill uses the stored 1m open of that exact contract at that minute when the bar exists; otherwise the model, and the trade is flagged `modelled`. Results count real vs modelled fills and split P&L the same way (a trade with any modelled fill is in the modelled bucket; an intrinsic expiry settlement is neither).
+- Warning `more than 20% of fills are modelled (N of M)` when the modelled share is above 20%. Any trade dated before 2024-10-03 adds `model only: rough check, not proof`.
+
+**2024-12-26 expiry week (one retry, 2026-10-03).** The first fetch had written a done-ledger and no parquet (empty candles marked done). The ledger was cleared and `fetch_expiry` run once more: 24 strikes (23500–24650) × CE/PE, 281 contracts listed, **fetched 0, empty 48, no parquet**. Upstox returned no 1m bars for that week. Not fetched again. Sessions 2024-12-20, 2024-12-23, 2024-12-24 and 2024-12-26 therefore have no nearest-weekly tape (expiry 2024-12-26) and those fills are modelled.
+
+**Tests**: `tests/test_opt_*.py` (72). Reports: `data/validation/option_model_calibration_2026-10-03.md` and `data/validation/option_model_carry_2026-10-03.md`.
+
+**Sample rerun (2026-10-03), real-premium mode, option model v1.** Nifty 5m, 2024-10-03 through the last stored bar (2026-10-01). Index costs zero (so index ₹ = points × the dated lot). Option costs from the dated table (still unverified) plus 0.5 points of slippage per leg. One lot, nearest weekly, ATM. No run crossed the 20% modelled-fill warning (about 1% of fills; the 2024-12-26 week). None is marked model-only.
+
+| strategy | index points | index ₹ | option ₹ after costs | trades | index win | option win | index max DD | option max DD | real fills | modelled fills | real ₹ | modelled ₹ |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| EmaCrossover (9/21) | 8,050.65 | 453,016.75 | −60,224.78 | 1,400 | 36.57% | 28.29% | 81,363.75 | 129,413.31 | 2,770 | 30 | −58,401.26 | −1,823.52 |
+| SupertrendFlip (10, 3) | 5,146.50 | 251,310.50 | −104,694.09 | 924 | 44.37% | 34.52% | 107,373.75 | 165,490.95 | 1,828 | 20 | −102,564.88 | −2,129.21 |
+| OpeningRangeBreakout (15m) | 848.90 | 55,053.00 | 38,622.33 | 492 | 44.31% | 37.60% | 78,723.75 | 60,471.10 | 974 | 10 | 38,482.93 | 139.40 |
+
+## Phase 3c-a — Backtest UI and saved runs ✅
+
+Left drawer stays open while the chart stays mounted. Form: strategy catalog (the three samples), params, symbol, timeframe, start (required) / end (optional), sessions, index vs options (real-premium, NIFTY50 only), strike offset −1/0/+1, option slippage (default 0.5). Square-off 15:15 and next-bar-open are shown and not editable. Index mode runs the engine with zero index costs. Options mode runs that same index pass, then option model v1 with the form's strike offset and slippage.
+
+`POST /api/backtests` returns a job id immediately. One worker. Progress is index bars, then overlay trades. Refresh reattaches from `data/backtests.sqlite` (gitignored). A second start is 409. Saved runs keep the full config, both run ids, model version, the cost rows applied, the data hash, git commit + dirty flag, and the full result. Replay uses the stored config. Same clean commit and same data hash must match the stored canonical JSON (`reproduced` true); a different commit or hash stores the new result with `reproduced` false. A dirty tree is not a reproduction.
+
+**Duplicate with changes** opens the form pre-filled from that run's config (a copy). Results and compare show `code not committed: may not reproduce` when the run's git state was dirty. Results: index vs options side by side, charges and slippage, equity and drawdown (one point per exit; the trough is `max_drawdown`), weekday / time of day / DTE buckets (0, 1, 2, 3–4, 5+) / event flags, sortable trades. Clicking a trade loads a window, switches symbol and timeframe, and places the entry about a third of the way across. Compare is 2–3 saved runs: metrics table and equity on one rupee axis. No combined P&L.
+
+**Tests** (`backend/tests/test_bt_ui.py`, `frontend/src/backtest/present.test.ts`): written first and shown failing (missing modules), then implemented. Save/reload, replay match, replay mismatch, job returns before the engine and a second start is 409, dirty warning, request validation (non-Nifty options, strike 2, unknown params, JobBusy), equity trough, DTE and flags summing to the option net, and the vitest form/sort/jump/compare cases.
+
+**Browser check (2026-10-03).** Opening range breakout, options, NIFTY50 5m, start 2024-10-03, ATM, 1 lot, range 15 minutes. All three opened in Compare. The tree was dirty, so results and compare both showed `code not committed: may not reproduce`. Index net is 55,053.00 on every row (slippage is on the option legs).
+
+| slippage / leg | option net | option max drawdown |
+|---:|---:|---:|
+| 0.5 | 38,622.33 | 60,471.10 |
+| 1.0 | 6,888.04 | 81,702.75 |
+| 1.5 | −24,754.99 | 1,04,512.76 |
+
+The 0.5 row matches the 3b sample. Walk-forward (3c-b) is not started.

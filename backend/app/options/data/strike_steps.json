@@ -1,0 +1,12 @@
+{
+  "_note": "Distance between Nifty option strikes. UNVERIFIED before real data exists: the step is 50 in today's instrument snapshot (all 115 strikes of the nearest expiry, 2026-10-03, are 50 apart); the expired-contract lists Upstox returns for 2024-10 onward are checked by the calibration run (see data/validation/option_model_calibration_*.md). For the study window the step is ASSUMED to be 50 (decision of the user). Dates before the first row are refused (StrikeStepUnknown), never guessed.",
+  "rows": [
+    {
+      "underlying": "NIFTY",
+      "step": 50,
+      "effective_from": "2022-01-01",
+      "verification": "unverified",
+      "source": "Instrument snapshot data/instruments/2026-10-03/NSE.json.gz (115 strikes of the 2026-10-06 expiry, all 50 apart); assumed unchanged back to 2022-01-01 (user decision)"
+    }
+  ]
+}

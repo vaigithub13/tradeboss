@@ -1,0 +1,248 @@
+{
+  "_note": "Dated cost rates for index OPTIONS, Upstox (percent values are written as percent, e.g. \"0.1\" = 0.1%; sebi_per_crore is rupees per crore). EVERY rate is \"unverified\": seeded from NSE circulars, the Finance Acts as quoted by NSE, and Upstox's published rate card (Wayback snapshots), not from a contract note. Approved by the user after checking NSE/FATAX/73524 and NSE/FA/64232 on nseindia.com. Decisions: IPFT and GST on it from 2023-04-01; Upstox's Rs 10 API-order promotion is ignored (Rs 20 flat, see PROGRESS.md Phase 7 note). Unchanged since 2022: brokerage Rs 20 flat, SEBI Rs 10/crore, stamp 0.003% (buy), GST 18%. Dates before 2022-01-01 raise NoRatesForDate. When a real contract note matches to the paisa (test_7d), flip the rates to \"verified\".",
+  "rows": [
+    {
+      "effective_from": "2022-01-01",
+      "note": "Base row (start of the study window). NSE IPFT contribution was Rs 0.01 per crore (0.0000001%): ignored, worth Rs 0.00008 on a Rs 7,500 trade.",
+      "rates": {
+        "brokerage_flat": "20",
+        "stt_sell_pct": "0.05",
+        "exchange_pct": "0.053",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18"
+      },
+      "gst_on": [
+        "brokerage",
+        "exchange"
+      ],
+      "verification": {
+        "brokerage_flat": "unverified",
+        "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified",
+        "sebi_per_crore": "unverified",
+        "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified",
+        "gst_on": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox page, Equity Options 'Flat Rs 20 per executed order': https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ ; https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "sebi_per_crore": "SEBI (Payment of Fees) (Amendment) Regulations, 2019, SEBI/LAD-NRO/GN/2019/03 (22 Mar 2019, effective 3 Apr 2019): Rs 10 per crore, options on premium https://taxguru.in/sebi/sebi-payment-of-fees-amendment-regulations-2019.html ; unchanged on every Upstox snapshot 2022-2026",
+        "stamp_buy_pct": "Finance Act 2019 / Indian Stamp Act amendment in force 1 Jul 2020, options 0.003% on the buyer: SEBI FAQ https://www.sebi.gov.in/sebi_data/faqfiles/jun-2020/1593534237938.pdf ; PIB release https://www.pib.gov.in/PressReleasePage.aspx?PRID=1635399 ; NSE https://www.nseindia.com/static/invest/first-time-investor-stamp-duty-charges-taxes",
+        "gst_pct": "18% on Upstox page snapshots https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ , https://upstox.com/brokerage-charges/ (statutory GST notification not fetched)",
+        "stt_sell_pct": "0.05% of premium on the sell side since 1 Jun 2016 (NSE/FATAX/32385, 16 May 2016); 'up to 31 Mar 2023' is stated in NSE/FATAX/56235 (1 Apr 2023; Finance Act 2023) https://nsearchives.nseindia.com/content/circulars/FATAX56235.pdf; Upstox snapshot https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/",
+        "exchange_pct": "Rs 53 per lakh of premium (0.053%), the Jan-2021 +6% rate, rolled back from 1 Apr 2023 in NSE/FA/56129 (24 Mar 2023) https://archives.nseindia.com/content/circulars/FA56129.pdf ('Existing Rs 53.00'); Upstox snapshot https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ 'Upto 31st March 2023: 0.053%'",
+        "gst_on": "Upstox snapshots up to 2024-12-01: 'GST on brokerage + transaction charges'; snapshot https://web.archive.org/web/20250601/https://upstox.com/brokerage-charges/ and today: 'brokerage + transaction + IPFT charges'"
+      }
+    },
+    {
+      "effective_from": "2023-04-01",
+      "note": "Three changes on 1 Apr 2023 (STT, NSE transaction charge, NSE IPFT contribution). The IPFT extra (Rs 50 per crore = 0.0005%, GST charged on it) is included from this date by decision (conservative; under a paisa per trade either way): NSE charged it to the member from here, but Upstox only began listing it between 2024-12-01 and 2025-06-01, so it is UNVERIFIED that it ever appeared on a contract note before 2024-10-01 (SEBI true-to-label).",
+      "rates": {
+        "brokerage_flat": "20",
+        "stt_sell_pct": "0.0625",
+        "exchange_pct": "0.05",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18",
+        "extra": [
+          {
+            "name": "ipft",
+            "pct": "0.0005",
+            "sides": [
+              "BUY",
+              "SELL"
+            ],
+            "gst": true
+          }
+        ]
+      },
+      "gst_on": [
+        "brokerage",
+        "exchange"
+      ],
+      "verification": {
+        "brokerage_flat": "unverified",
+        "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified",
+        "sebi_per_crore": "unverified",
+        "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified",
+        "gst_on": "unverified",
+        "ipft": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox page, Equity Options 'Flat Rs 20 per executed order': https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ ; https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "sebi_per_crore": "SEBI (Payment of Fees) (Amendment) Regulations, 2019, SEBI/LAD-NRO/GN/2019/03 (22 Mar 2019, effective 3 Apr 2019): Rs 10 per crore, options on premium https://taxguru.in/sebi/sebi-payment-of-fees-amendment-regulations-2019.html ; unchanged on every Upstox snapshot 2022-2026",
+        "stamp_buy_pct": "Finance Act 2019 / Indian Stamp Act amendment in force 1 Jul 2020, options 0.003% on the buyer: SEBI FAQ https://www.sebi.gov.in/sebi_data/faqfiles/jun-2020/1593534237938.pdf ; PIB release https://www.pib.gov.in/PressReleasePage.aspx?PRID=1635399 ; NSE https://www.nseindia.com/static/invest/first-time-investor-stamp-duty-charges-taxes",
+        "gst_pct": "18% on Upstox page snapshots https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ , https://upstox.com/brokerage-charges/ (statutory GST notification not fetched)",
+        "stt_sell_pct": "NSE/FATAX/56235 (1 Apr 2023; Finance Act 2023) https://nsearchives.nseindia.com/content/circulars/FATAX56235.pdf: 0.0625% from 1 Apr 2023 (was 0.05%)",
+        "exchange_pct": "NSE/FA/56129 (24 Mar 2023) https://archives.nseindia.com/content/circulars/FA56129.pdf: Rs 50.00 per lakh (0.050%) from 1 Apr 2023 (was 53.00); Upstox announcement https://upstox.com/announcements/updates/nse-transaction-charges-and-stt-from-1st-april-2023/ and snapshot https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/",
+        "ipft": "NSE/FA/56129 (24 Mar 2023) https://archives.nseindia.com/content/circulars/FA56129.pdf: NSE IPFT contribution Rs 0.01 -> Rs 50 per crore of premium from 1 Apr 2023; Upstox lists it as 'Rs 0.50 per lakh of premium' only in snapshot https://web.archive.org/web/20250601/https://upstox.com/brokerage-charges/ (not in https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/)",
+        "gst_on": "Upstox snapshots up to 2024-12-01: 'GST on brokerage + transaction charges'; snapshot https://web.archive.org/web/20250601/https://upstox.com/brokerage-charges/ and today: 'brokerage + transaction + IPFT charges'"
+      }
+    },
+    {
+      "effective_from": "2024-04-01",
+      "note": "Transaction charge slabs trimmed by Rs 0.50 per lakh (the headline slab Rs 50.00 -> 49.50).",
+      "rates": {
+        "brokerage_flat": "20",
+        "stt_sell_pct": "0.0625",
+        "exchange_pct": "0.0495",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18",
+        "extra": [
+          {
+            "name": "ipft",
+            "pct": "0.0005",
+            "sides": [
+              "BUY",
+              "SELL"
+            ],
+            "gst": true
+          }
+        ]
+      },
+      "gst_on": [
+        "brokerage",
+        "exchange"
+      ],
+      "verification": {
+        "brokerage_flat": "unverified",
+        "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified",
+        "sebi_per_crore": "unverified",
+        "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified",
+        "gst_on": "unverified",
+        "ipft": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox page, Equity Options 'Flat Rs 20 per executed order': https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ ; https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "sebi_per_crore": "SEBI (Payment of Fees) (Amendment) Regulations, 2019, SEBI/LAD-NRO/GN/2019/03 (22 Mar 2019, effective 3 Apr 2019): Rs 10 per crore, options on premium https://taxguru.in/sebi/sebi-payment-of-fees-amendment-regulations-2019.html ; unchanged on every Upstox snapshot 2022-2026",
+        "stamp_buy_pct": "Finance Act 2019 / Indian Stamp Act amendment in force 1 Jul 2020, options 0.003% on the buyer: SEBI FAQ https://www.sebi.gov.in/sebi_data/faqfiles/jun-2020/1593534237938.pdf ; PIB release https://www.pib.gov.in/PressReleasePage.aspx?PRID=1635399 ; NSE https://www.nseindia.com/static/invest/first-time-investor-stamp-duty-charges-taxes",
+        "gst_pct": "18% on Upstox page snapshots https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ , https://upstox.com/brokerage-charges/ (statutory GST notification not fetched)",
+        "stt_sell_pct": "NSE/FATAX/56235 (1 Apr 2023; Finance Act 2023) https://nsearchives.nseindia.com/content/circulars/FATAX56235.pdf (unchanged until 30 Sep 2024)",
+        "exchange_pct": "NSE/FA/61137 (14 Mar 2024) https://nsearchives.nseindia.com/content/circulars/FA61137.pdf: Rs 49.50 per lakh for the main slab from 1 Apr 2024; Upstox snapshot https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ 'From 1st April 2024 to 30th September 2024: 0.0495%'",
+        "ipft": "NSE/FA/56129 (24 Mar 2023) https://archives.nseindia.com/content/circulars/FA56129.pdf : Rs 50 per crore of premium (0.0005%) from 1 Apr 2023, unchanged by NSE/FA/61137 https://nsearchives.nseindia.com/content/circulars/FA61137.pdf",
+        "gst_on": "Upstox snapshots up to 2024-12-01: 'GST on brokerage + transaction charges'; snapshot https://web.archive.org/web/20250601/https://upstox.com/brokerage-charges/ and today: 'brokerage + transaction + IPFT charges'"
+      }
+    },
+    {
+      "effective_from": "2024-10-01",
+      "note": "STT 0.0625% -> 0.1%. NSE moves from slabs to ONE flat rate (SEBI true-to-label circular SEBI/HO/MRD/TPD-1/P/CIR/2024/92): clients pay what NSE charges the member, 3,503 + 50 = Rs 3,553 per crore. GST on IPFT included (decision).",
+      "rates": {
+        "brokerage_flat": "20",
+        "stt_sell_pct": "0.1",
+        "exchange_pct": "0.03503",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18",
+        "extra": [
+          {
+            "name": "ipft",
+            "pct": "0.0005",
+            "sides": [
+              "BUY",
+              "SELL"
+            ],
+            "gst": true
+          }
+        ]
+      },
+      "gst_on": [
+        "brokerage",
+        "exchange"
+      ],
+      "verification": {
+        "brokerage_flat": "unverified",
+        "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified",
+        "sebi_per_crore": "unverified",
+        "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified",
+        "gst_on": "unverified",
+        "ipft": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox page, Equity Options 'Flat Rs 20 per executed order': https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ ; https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "sebi_per_crore": "SEBI (Payment of Fees) (Amendment) Regulations, 2019, SEBI/LAD-NRO/GN/2019/03 (22 Mar 2019, effective 3 Apr 2019): Rs 10 per crore, options on premium https://taxguru.in/sebi/sebi-payment-of-fees-amendment-regulations-2019.html ; unchanged on every Upstox snapshot 2022-2026",
+        "stamp_buy_pct": "Finance Act 2019 / Indian Stamp Act amendment in force 1 Jul 2020, options 0.003% on the buyer: SEBI FAQ https://www.sebi.gov.in/sebi_data/faqfiles/jun-2020/1593534237938.pdf ; PIB release https://www.pib.gov.in/PressReleasePage.aspx?PRID=1635399 ; NSE https://www.nseindia.com/static/invest/first-time-investor-stamp-duty-charges-taxes",
+        "gst_pct": "18% on Upstox page snapshots https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ , https://upstox.com/brokerage-charges/ (statutory GST notification not fetched)",
+        "stt_sell_pct": "NSE/FATAX/63809 (9 Sep 2024; Finance (No.2) Act 2024) https://nsearchives.nseindia.com/content/circulars/FATAX63809.pdf: 0.10% from 1 Oct 2024 (was 0.0625%)",
+        "exchange_pct": "NSE/FA/64232 (27 Sep 2024; cited as 64323 inside FA/73061) https://nsearchives.nseindia.com/content/circulars/FA64232.pdf: Rs 35.03 per lakh of premium (0.03503%) from 1 Oct 2024; FA/73061 table 'existing outflow': Rs 3,503 + Rs 50 IPFT = Rs 3,553 per crore; Upstox snapshot https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ lists 0.03503% only",
+        "ipft": "NSE/FA/73061 (27 Feb 2026) https://nsearchives.nseindia.com/content/circulars/FA73061.pdf 'existing outflow': Rs 50 per crore each side",
+        "gst_on": "Upstox snapshots up to 2024-12-01: 'GST on brokerage + transaction charges'; snapshot https://web.archive.org/web/20250601/https://upstox.com/brokerage-charges/ and today: 'brokerage + transaction + IPFT charges'"
+      }
+    },
+    {
+      "effective_from": "2026-03-01",
+      "note": "No change in the total NSE outflow (Rs 3,553 per crore): IPFT rolled back to Rs 0.01 per crore and the transaction charge raised to Rs 3,552.99. Modelled as ONE line 0.03553% as Upstox's page now shows it ('IPFT combined with transaction charges'); GST then covers it.",
+      "rates": {
+        "brokerage_flat": "20",
+        "stt_sell_pct": "0.1",
+        "exchange_pct": "0.03553",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18"
+      },
+      "gst_on": [
+        "brokerage",
+        "exchange"
+      ],
+      "verification": {
+        "brokerage_flat": "unverified",
+        "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified",
+        "sebi_per_crore": "unverified",
+        "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified",
+        "gst_on": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox page, Equity Options 'Flat Rs 20 per executed order': https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ ; https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "sebi_per_crore": "SEBI (Payment of Fees) (Amendment) Regulations, 2019, SEBI/LAD-NRO/GN/2019/03 (22 Mar 2019, effective 3 Apr 2019): Rs 10 per crore, options on premium https://taxguru.in/sebi/sebi-payment-of-fees-amendment-regulations-2019.html ; unchanged on every Upstox snapshot 2022-2026",
+        "stamp_buy_pct": "Finance Act 2019 / Indian Stamp Act amendment in force 1 Jul 2020, options 0.003% on the buyer: SEBI FAQ https://www.sebi.gov.in/sebi_data/faqfiles/jun-2020/1593534237938.pdf ; PIB release https://www.pib.gov.in/PressReleasePage.aspx?PRID=1635399 ; NSE https://www.nseindia.com/static/invest/first-time-investor-stamp-duty-charges-taxes",
+        "gst_pct": "18% on Upstox page snapshots https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ , https://upstox.com/brokerage-charges/ (statutory GST notification not fetched)",
+        "stt_sell_pct": "NSE/FATAX/63809 (9 Sep 2024; Finance (No.2) Act 2024) https://nsearchives.nseindia.com/content/circulars/FATAX63809.pdf (unchanged until 31 Mar 2026)",
+        "exchange_pct": "NSE/FA/73061 (27 Feb 2026) https://nsearchives.nseindia.com/content/circulars/FA73061.pdf: Rs 3,552.99 transaction + Rs 0.01 IPFT = Rs 3,553 per crore of premium, each side, from 1 Mar 2026; Upstox page 'From 1st March 2026: NSE 0.03553% (on premium)' https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "gst_on": "Upstox snapshots up to 2024-12-01: 'GST on brokerage + transaction charges'; snapshot https://web.archive.org/web/20250601/https://upstox.com/brokerage-charges/ and today: 'brokerage + transaction + IPFT charges'"
+      }
+    },
+    {
+      "effective_from": "2026-04-01",
+      "note": "STT 0.10% -> 0.15% (Finance Act 2026). Same values as the shipped 2026-10-01 seed row (which this row would replace).",
+      "rates": {
+        "brokerage_flat": "20",
+        "stt_sell_pct": "0.15",
+        "exchange_pct": "0.03553",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18"
+      },
+      "gst_on": [
+        "brokerage",
+        "exchange"
+      ],
+      "verification": {
+        "brokerage_flat": "unverified",
+        "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified",
+        "sebi_per_crore": "unverified",
+        "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified",
+        "gst_on": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox page, Equity Options 'Flat Rs 20 per executed order': https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ ; https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ ; https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "sebi_per_crore": "SEBI (Payment of Fees) (Amendment) Regulations, 2019, SEBI/LAD-NRO/GN/2019/03 (22 Mar 2019, effective 3 Apr 2019): Rs 10 per crore, options on premium https://taxguru.in/sebi/sebi-payment-of-fees-amendment-regulations-2019.html ; unchanged on every Upstox snapshot 2022-2026",
+        "stamp_buy_pct": "Finance Act 2019 / Indian Stamp Act amendment in force 1 Jul 2020, options 0.003% on the buyer: SEBI FAQ https://www.sebi.gov.in/sebi_data/faqfiles/jun-2020/1593534237938.pdf ; PIB release https://www.pib.gov.in/PressReleasePage.aspx?PRID=1635399 ; NSE https://www.nseindia.com/static/invest/first-time-investor-stamp-duty-charges-taxes",
+        "gst_pct": "18% on Upstox page snapshots https://web.archive.org/web/20220315/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20230415/https://upstox.com/brokerage-charges/ , https://web.archive.org/web/20241201000000/https://upstox.com/brokerage-charges/ , https://upstox.com/brokerage-charges/ (statutory GST notification not fetched)",
+        "stt_sell_pct": "NSE/FATAX/73524 (31 Mar 2026; Finance Act 2026) https://nsearchives.nseindia.com/content/circulars/FATAX73524.pdf: 0.15% from 1 Apr 2026 (was 0.10%); Upstox page 'STT/CTT (From 1st April 2026) ... 0.15% on sell side (on premium)' https://upstox.com/brokerage-charges/ (retrieved 2026-10-03)",
+        "exchange_pct": "NSE/FA/73061 (27 Feb 2026) https://nsearchives.nseindia.com/content/circulars/FA73061.pdf, as the 2026-03-01 row",
+        "gst_on": "Upstox snapshots up to 2024-12-01: 'GST on brokerage + transaction charges'; snapshot https://web.archive.org/web/20250601/https://upstox.com/brokerage-charges/ and today: 'brokerage + transaction + IPFT charges'"
+      }
+    }
+  ]
+}

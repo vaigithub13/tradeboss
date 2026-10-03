@@ -1,0 +1,396 @@
+"""BacktestBroker: orders, intrabar matching, positions, trades (critical module).
+
+Matching rules (approved, see tests/test_bt_fills.py, test_bt_intrabar.py):
+
+* an order may fill from `min_t` on (the bar after the decision), never on the bar it was placed on;
+* MARKET fills at the open of the first eligible bar; a stop (SL = stop-market) fills when price
+  TOUCHES its level, at the level, or at the OPEN when the bar gaps through it; a LIMIT fills only
+  when price trades STRICTLY through its level, at the level, or at the (better) open on a gap;
+* inside one bar, orders that gap at the open go first (market first, then gaps, by order id), then
+  orders triggered by the bar's range: a protective stop before anything else, then the level
+  nearest the open. When more than one order is triggered in the same bar the fill is flagged
+  `ambiguous` (stop-before-target is the pessimistic assumption);
+* an entry that fills at the open lets its bracket children work in the SAME bar; an entry that
+  triggers inside the bar lets its stop work (flagged ambiguous) but its target only from the next bar;
+* a fill never changes the past: everything here is driven bar by bar.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
+
+from app.backtest.contracts import Signal
+from app.backtest.context import PositionView
+from app.backtest.costs import CostModel, Slippage
+from app.backtest.result import Trade
+from app.backtest.sources import ist_date
+
+CENT = Decimal("0.01")
+PRICE_Q = Decimal("0.000001")
+_REASON = {"MARKET": "market", "SL": "stop", "LIMIT": "limit"}
+
+
+def _d(x: float) -> Decimal:
+    return Decimal(str(x))
+
+
+@dataclass
+class Order:
+    id: int
+    side: str
+    type: str
+    price: float | None
+    lots: int
+    tag: str
+    oco: str | None
+    reduce_only: bool
+    kind: str  # entry | exit | stop | target
+    min_t: int
+    stop: float | None = None
+    target: float | None = None
+    ambiguous_in: int | None = None
+
+
+@dataclass
+class _Open:
+    direction: int
+    entry_time: int
+    entry_tag: str
+    lot_size: int
+    entries: list[tuple[Decimal, int]] = field(default_factory=list)
+    exits: list[tuple[Decimal, int]] = field(default_factory=list)
+    charges: dict[str, Decimal] = field(default_factory=dict)
+    slip: Decimal = Decimal("0")
+    gap: bool = False
+    ambiguous: bool = False
+    optimistic: bool = False
+
+
+class BacktestBroker:
+    """Implements the Broker contract (place / cancel / positions) for a backtest."""
+
+    def __init__(self, *, cost_model: CostModel, slippage: Slippage, lot_resolver: Callable[[date], int],
+                 events: list[dict[str, Any]], counters: dict[str, int]) -> None:
+        self.cost_model, self.slippage, self.lot_resolver = cost_model, slippage, lot_resolver
+        self.events, self.counters = events, counters
+        self._working: dict[int, Order] = {}
+        self._next_id = 1
+        self.lots = 0  # signed
+        self.lot_size = 1
+        self._avg = Decimal("0")
+        self._open: _Open | None = None
+        self.trades: list[Trade] = []
+        self._realized = Decimal("0")
+
+    # ------------------------------------------------------------------ views (for ctx)
+    def positions(self) -> PositionView:
+        return self.position_view()
+
+    def position_view(self) -> PositionView:
+        side = 1 if self.lots > 0 else -1 if self.lots < 0 else 0
+        return PositionView(side, abs(self.lots), abs(self.lots) * self.lot_size, float(self._avg) if self.lots else 0.0)
+
+    def realized_net(self) -> float:
+        return float(self._realized)
+
+    def open_orders(self) -> list[dict[str, Any]]:
+        return [
+            {"id": o.id, "side": o.side, "type": o.type, "price": o.price, "lots": o.lots, "tag": o.tag,
+             "reduce_only": o.reduce_only}
+            for o in sorted(self._working.values(), key=lambda x: x.id)
+        ]
+
+    # ------------------------------------------------------------------ placing / cancelling
+    def _event(self, kind: str, t: int, **kw: Any) -> None:
+        self.events.append({"kind": kind, "t": int(t), **kw})
+
+    def place(self, signal: Signal, *, t: int, ref_price: float, min_t: int,
+              block: tuple[str, bool] | None = None, **_: Any) -> int | None:
+        """Register a signal as a working order. `block` = (reason, also_reduce_only): the order is
+        recorded but can never fill (no next bar / after square-off) and is reported as `unfilled`."""
+        pos = self.lots
+        side = signal.side
+        reduce_only = False
+        lots = signal.qty
+        if side == "EXIT":
+            if pos == 0:
+                self._reject(t, signal, "no_position")
+                return None
+            side = "SELL" if pos > 0 else "BUY"
+            lots = min(signal.qty, abs(pos))
+            reduce_only = True
+        elif signal.type in ("LIMIT", "SL") and pos != 0 and (side == "SELL") == (pos > 0):
+            reduce_only = True  # a resting order against the position only ever reduces it
+        if signal.stop is not None or signal.target is not None:
+            ref = signal.price if signal.type != "MARKET" and signal.price is not None else ref_price
+            buy = side == "BUY"
+            ok = (signal.stop is None or (signal.stop < ref if buy else signal.stop > ref)) and (
+                signal.target is None or (signal.target > ref if buy else signal.target < ref)
+            )
+            if not ok:
+                self._reject(t, signal, "bad_bracket")
+                return None
+        order = Order(self._next_id, side, signal.type, signal.price, lots, signal.tag, signal.oco, reduce_only,
+                      "exit" if reduce_only else "entry", min_t, signal.stop, signal.target)
+        self._next_id += 1
+        self.counters["orders"] += 1
+        self._event("order_placed", t, id=order.id, side=side, type=signal.type, price=signal.price, lots=lots,
+                    tag=signal.tag, reduce_only=reduce_only)
+        if block is not None and (block[1] or not reduce_only):
+            self.counters["unfilled"] += 1
+            self._event("unfilled", t, id=order.id, side=side, tag=signal.tag, reason=block[0])
+            return None
+        self._working[order.id] = order
+        return order.id
+
+    def _reject(self, t: int, signal: Signal, reason: str) -> None:
+        self.counters["rejected"] += 1
+        self._event("order_rejected", t, side=signal.side, type=signal.type, tag=signal.tag, reason=reason)
+        return None
+
+    def _drop(self, order: Order, t: int, reason: str) -> None:
+        self._working.pop(order.id, None)
+        self.counters["cancelled"] += 1
+        self._event("order_cancelled", t, id=order.id, side=order.side, tag=order.tag, reason=reason)
+
+    def cancel(self, order_id: int, *, t: int = 0, reason: str = "cancelled", **_: Any) -> bool:
+        order = self._working.get(order_id)
+        if order is None:
+            return False
+        self._drop(order, t, reason)
+        return True
+
+    def cancel_matching(self, tag: str | None, t: int) -> int:
+        victims = [o for o in sorted(self._working.values(), key=lambda x: x.id) if tag is None or o.tag == tag]
+        for o in victims:
+            self._drop(o, t, "cancelled")
+        return len(victims)
+
+    def cancel_all(self, t: int, reason: str | None) -> None:
+        for o in sorted(self._working.values(), key=lambda x: x.id):
+            if reason is None:
+                self._working.pop(o.id, None)
+            else:
+                self._drop(o, t, reason)
+
+    # ------------------------------------------------------------------ matching
+    @staticmethod
+    def _open_fill(o: Order, op: float) -> tuple[float, bool] | None:
+        """Price (and 'gapped') if the order fills at the open of the bar."""
+        if o.type == "MARKET":
+            return op, False
+        p = o.price
+        assert p is not None
+        if o.type == "SL":
+            if o.side == "BUY" and op >= p:
+                return op, op > p
+            if o.side == "SELL" and op <= p:
+                return op, op < p
+        else:
+            if o.side == "BUY" and op < p:
+                return op, True
+            if o.side == "SELL" and op > p:
+                return op, True
+        return None
+
+    @staticmethod
+    def _range_trigger(o: Order, hi: float, lo: float) -> float | None:
+        p = o.price
+        if p is None or o.type == "MARKET":
+            return None
+        if o.type == "SL":
+            if (o.side == "BUY" and hi >= p) or (o.side == "SELL" and lo <= p):
+                return p
+        else:
+            if (o.side == "BUY" and lo < p) or (o.side == "SELL" and hi > p):
+                return p
+        return None
+
+    def on_sub_bar(self, ts: int, op: float, hi: float, lo: float, base_s: int) -> None:
+        if not self._working:
+            return
+        # 1. everything that fills at the open (market orders, gaps)
+        while True:
+            for order in sorted(self._working.values(), key=lambda x: x.id):
+                if order.min_t > ts:
+                    continue
+                hit = self._open_fill(order, op)
+                if hit is None:
+                    continue
+                self._execute(order, hit[0], ts, gap=hit[1], ambiguous=False, at_open=True, base_s=base_s)
+                break
+            else:
+                break
+        # 2. orders triggered inside the bar
+        while self._working:
+            cands: list[tuple[tuple[int, float, int], Order, float]] = []
+            for order in self._working.values():
+                if order.min_t > ts:
+                    continue
+                trig = self._range_trigger(order, hi, lo)
+                if trig is not None:
+                    protective = order.reduce_only and order.type == "SL"
+                    cands.append(((0 if protective else 1, abs(trig - op), order.id), order, trig))
+            if not cands:
+                return
+            cands.sort(key=lambda x: x[0])
+            _, order, price = cands[0]
+            amb = len(cands) > 1 or order.ambiguous_in == ts
+            self._execute(order, price, ts, gap=False, ambiguous=amb, at_open=False, base_s=base_s)
+
+    def fill_now(self, order_id: int, price: float, t: int, children_from: int) -> None:
+        """`same_bar_close` mode: fill a MARKET order at the signal bar's close (optimistic)."""
+        order = self._working.get(order_id)
+        if order is not None:
+            self._execute(order, price, t, gap=False, ambiguous=False, at_open=True, base_s=60, optimistic=True,
+                          children_from=children_from)
+
+    def force_exit(self, t: int, price: float, reason: str, cancel_reason: str | None) -> None:
+        """Square-off / session end / end of data: drop working orders, close the position at `price`."""
+        self.cancel_all(t, cancel_reason)
+        if self.lots == 0:
+            return
+        order = Order(self._next_id, "SELL" if self.lots > 0 else "BUY", "MARKET", None, abs(self.lots), reason, None,
+                      True, "exit", t)
+        self._next_id += 1
+        self._working[order.id] = order
+        if reason == "end_of_data":
+            self.counters["end_of_data_exits"] += 1
+        self._execute(order, price, t, gap=False, ambiguous=False, at_open=True, base_s=60, reason=reason)
+
+    # ------------------------------------------------------------------ executing a fill
+    def _execute(self, order: Order, raw: float, t: int, *, gap: bool, ambiguous: bool, at_open: bool, base_s: int,
+                 reason: str | None = None, optimistic: bool = False, children_from: int | None = None) -> None:
+        self._working.pop(order.id, None)
+        pos = self.lots
+        lots = order.lots
+        if order.reduce_only:
+            if pos == 0 or (order.side == "BUY") == (pos > 0):
+                self.counters["cancelled"] += 1
+                self._event("order_cancelled", t, id=order.id, side=order.side, tag=order.tag, reason="position_closed")
+                return
+            lots = min(lots, abs(pos))
+        price = raw if order.type == "LIMIT" else self.slippage.apply(order.side, raw)
+        sign = 1 if order.side == "BUY" else -1
+        closing = min(lots, abs(pos)) if pos != 0 and (sign > 0) != (pos > 0) else 0
+        opening = lots - closing
+        day = ist_date(t)
+        exit_reason = reason or _REASON[order.type]
+        exit_tag = reason if reason else order.tag
+        if gap:
+            self.counters["gaps"] += 1
+        if ambiguous:
+            self.counters["ambiguous"] += 1
+        if optimistic:
+            self.counters["optimistic_fills"] = self.counters.get("optimistic_fills", 0) + 1
+        self.counters["fills"] += 1
+        self._event("fill", t, id=order.id, side=order.side, type=order.type, price=float(price), raw_price=float(raw),
+                    lots=lots, gap=gap, ambiguous=ambiguous, optimistic=optimistic, reason=exit_reason, tag=order.tag)
+        dp = _d(price)
+
+        def flag(tr: _Open) -> None:
+            tr.gap |= gap
+            tr.ambiguous |= ambiguous
+            tr.optimistic |= optimistic
+
+        def charge(tr: _Open, units: int) -> None:
+            leg = self.cost_model.leg_cost(order.side, float(price), units, day)
+            for k, v in leg.components.items():
+                tr.charges[k] = tr.charges.get(k, Decimal("0")) + v
+            tr.slip += abs(dp - _d(raw)) * units if order.type != "LIMIT" else Decimal("0")
+
+        if closing:
+            tr = self._open
+            assert tr is not None
+            units = closing * self.lot_size
+            tr.exits.append((dp, units))
+            charge(tr, units)
+            flag(tr)
+            self.lots += sign * closing
+            if self.lots == 0:
+                self._finish(tr, t, exit_reason, exit_tag)
+        if opening:
+            if self.lots == 0:
+                self.lot_size = self.lot_resolver(day)
+                self._open = _Open(sign, t, order.tag, self.lot_size)
+                self._avg = Decimal("0")
+            tr = self._open
+            assert tr is not None
+            units = opening * self.lot_size
+            tr.entries.append((dp, units))
+            have = abs(self.lots)
+            self._avg = (self._avg * have + dp * opening) / (have + opening)
+            charge(tr, units)
+            flag(tr)
+            self.lots += sign * opening
+
+        if order.oco:
+            for other in [o for o in self._working.values() if o.oco == order.oco]:
+                self._drop(other, t, "oco")
+        if opening and (order.stop is not None or order.target is not None):
+            self._bracket(order, opening, t, at_open, base_s, children_from)
+        if self.lots == 0:
+            for other in [o for o in sorted(self._working.values(), key=lambda x: x.id) if o.reduce_only]:
+                self._drop(other, t, "position_closed")
+
+    def _bracket(self, order: Order, lots: int, t: int, at_open: bool, base_s: int, children_from: int | None) -> None:
+        side = "SELL" if order.side == "BUY" else "BUY"
+        label = f"bracket:{order.id}"
+        for kind, level in (("stop", order.stop), ("target", order.target)):
+            if level is None:
+                continue
+            if children_from is not None:
+                min_t, amb_in = children_from, None
+            elif at_open:
+                min_t, amb_in = t, None
+            elif kind == "stop":
+                min_t, amb_in = t, t  # works in the entry bar, but the order of events inside it is unknown
+            else:
+                min_t, amb_in = t + base_s, None
+            child = Order(self._next_id, side, "SL" if kind == "stop" else "LIMIT", level, lots, f"{order.tag}:{kind}",
+                          label, True, kind, min_t, ambiguous_in=amb_in)
+            self._next_id += 1
+            self._working[child.id] = child
+            self.counters["orders"] += 1
+            self._event("order_placed", t, id=child.id, side=side, type=child.type, price=level, lots=lots,
+                        tag=child.tag, reduce_only=True)
+
+    # ------------------------------------------------------------------ trades
+    def _finish(self, tr: _Open, t: int, reason: str, exit_tag: str) -> None:
+        e_units = sum(u for _, u in tr.entries)
+        x_units = sum(u for _, u in tr.exits)
+        e_val = sum((p * u for p, u in tr.entries), Decimal("0"))
+        x_val = sum((p * u for p, u in tr.exits), Decimal("0"))
+        gross = ((x_val - e_val) * tr.direction).quantize(CENT, rounding=ROUND_HALF_UP)
+        total = sum(tr.charges.values(), Decimal("0.00"))
+        net = gross - total
+        self._realized += net
+        lots_in = e_units // tr.lot_size
+        self.trades.append(Trade(
+            id=len(self.trades) + 1,
+            direction="LONG" if tr.direction > 0 else "SHORT",
+            entry_time=int(tr.entry_time),
+            entry_price=float((e_val / e_units).quantize(PRICE_Q)),
+            exit_time=int(t),
+            exit_price=float((x_val / x_units).quantize(PRICE_Q)),
+            lots=int(lots_in),
+            units=int(e_units),
+            lot_size=int(tr.lot_size),
+            gross_pnl=float(gross),
+            charges={k: float(v) for k, v in tr.charges.items()},
+            charges_total=float(total),
+            slippage_cost=float(tr.slip.quantize(CENT, rounding=ROUND_HALF_UP)),
+            net_pnl=float(net),
+            exit_reason=reason,
+            entry_tag=tr.entry_tag,
+            exit_tag=exit_tag,
+            gap=tr.gap,
+            ambiguous=tr.ambiguous,
+            optimistic=tr.optimistic,
+        ))
+        self._open = None
+        self._avg = Decimal("0")

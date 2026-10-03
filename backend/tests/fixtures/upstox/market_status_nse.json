@@ -1,0 +1,8 @@
+{
+ "status": "success",
+ "data": {
+  "exchange": "NSE",
+  "status": "NORMAL_CLOSE",
+  "last_updated": 1790796000000
+ }
+}
