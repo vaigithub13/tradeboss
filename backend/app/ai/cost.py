@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.ai.sessions import session_calendar
 from app.pine.openai_client import _setting
 
 DEFAULT_NEUTRAL_BAND = 0.003
@@ -38,10 +39,14 @@ def auto_analysis() -> dict[str, object]:
         minutes = 15
     if minutes < 1:
         minutes = 15
+    calendar = session_calendar()
     return {
         "language": analysis_language(),
         "auto": raw in {"1", "true", "yes", "on"},
         "auto_minutes": minutes,
+        "holidays": calendar["holidays"],
+        "weekend_sessions": calendar["weekend_sessions"],
+        "muhurat": calendar["muhurat"],
     }
 
 

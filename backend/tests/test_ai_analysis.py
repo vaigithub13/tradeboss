@@ -507,4 +507,11 @@ def test_auto_analyse_is_off_until_the_setting_is_on(monkeypatch: pytest.MonkeyP
     assert auto_analysis()["auto_minutes"] == 15
     monkeypatch.setenv("AI_ANALYSIS_AUTO", "true")
     monkeypatch.setenv("AI_ANALYSIS_AUTO_MINUTES", "15")
-    assert auto_analysis() == {"language": "en", "auto": True, "auto_minutes": 15}
+    turned_on = auto_analysis()
+    assert turned_on["language"] == "en"
+    assert turned_on["auto"] is True
+    assert turned_on["auto_minutes"] == 15
+    # 2 Oct 2026 is a Friday holiday. 1 Feb 2026 is a Sunday budget session.
+    assert "2026-10-02" in turned_on["holidays"]
+    assert "2026-02-01" in turned_on["weekend_sessions"]
+    assert "2025-10-21" in turned_on["muhurat"]

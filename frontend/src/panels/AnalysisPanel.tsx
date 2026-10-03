@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { ApiError, type SessionType } from "../api/client";
 import { analyseSymbol, fetchAiSettings, fetchTrack, type AnalyseResult, type TrackResult } from "../api/ai";
-import { autoDue, autoLabel, type AutoSettings } from "../ai/auto";
+import { autoDue, autoLabel, type AutoSettings, type MarketStatus } from "../ai/auto";
 import { ANALYSIS_LABEL, HORIZONS, hitRateText, levelLines, type LevelLine } from "../ai/present";
+import { useLiveStore } from "../store/liveStore";
 
 interface Props {
   symbol: string | null;
@@ -22,8 +23,11 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open =
   const [running, setRunning] = useState(false);
   const [settings, setSettings] = useState<AutoSettings | null>(null);
   const [autoToken, setAutoToken] = useState(0);
+  const market = useLiveStore((s) => s.status?.market ?? "unknown");
   const runningRef = useRef(false);
+  const marketRef = useRef<MarketStatus>(market);
   runningRef.current = running;
+  marketRef.current = market;
 
   useEffect(() => {
     if (!symbol) return;
@@ -45,7 +49,16 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open =
         if (!stop) setSettings(next);
       })
       .catch(() => {
-        if (!stop) setSettings({ language: "en", auto: false, auto_minutes: 15 });
+        if (!stop) {
+          setSettings({
+            language: "en",
+            auto: false,
+            auto_minutes: 15,
+            holidays: [],
+            weekend_sessions: [],
+            muhurat: [],
+          });
+        }
       });
     return () => {
       stop = true;
@@ -57,7 +70,7 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open =
     const id = window.setInterval(() => {
       const current = settings;
       if (!current || runningRef.current) return;
-      if (!autoDue(new Date(), last, current.auto_minutes, current.auto)) return;
+      if (!autoDue(new Date(), last, current.auto_minutes, current.auto, current, marketRef.current)) return;
       last = Date.now();
       setAutoToken((token) => token + 1);
     }, 15_000);
