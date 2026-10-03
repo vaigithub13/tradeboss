@@ -8,6 +8,10 @@ from fastapi import APIRouter, HTTPException
 
 from app.pine.checks import planned_checks, realistic_options_config, summary_card
 from app.pine.convert import convert_draft
+from app.pine.gates import (
+    GateError, accept_report, approve_draft, draft_hash, issue_draft, issue_report,
+    report_hash, require_accepted, require_approved,
+)
 from app.pine.openai_client import OpenAIPineClient, openai_key
 from app.pine.report import MissingKeyError, ReportError, build_report
 from app.pine.sandbox import SandboxError
@@ -47,20 +51,34 @@ def report_script(body: dict[str, Any]) -> dict[str, Any]:
         include_walk_forward=bool(body.get("walk_forward")),
     )
     report["card"]["warnings"] = list(dict.fromkeys([*report["warnings"], *report["card"]["warnings"]]))
+    report_id, digest = issue_report(report)
+    report["id"] = report_id
+    report["hash"] = digest
     return report
+
+
+@router.post("/accept")
+def accept_script(body: dict[str, Any]) -> dict[str, bool]:
+    """The Accept button. A convert call cannot record this."""
+    try:
+        accept_report(str(body.get("report_id") or ""), str(body.get("report_hash") or ""))
+    except GateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"accepted": True}
 
 
 @router.post("/convert")
 def convert_script(body: dict[str, Any]) -> dict[str, Any]:
     source = _source(body)
-    if not body.get("accepted"):
-        raise HTTPException(status_code=400, detail="accept the semantics report before conversion")
+    supplied = body.get("report") if isinstance(body.get("report"), dict) else {}
+    report = {**supplied, "scan": scan(source)}
+    try:
+        require_accepted(str(body.get("report_id") or ""), report_hash(report))
+    except GateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     key = openai_key()
     if not key:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY is not set")
-    scanned = scan(source)
-    supplied = body.get("report") if isinstance(body.get("report"), dict) else {}
-    report = {**supplied, "scan": scanned}
     client = OpenAIPineClient(key, purpose="conversion")
     try:
         result = convert_draft(source, client=client, report=report)
@@ -71,13 +89,30 @@ def convert_script(body: dict[str, Any]) -> dict[str, Any]:
         "usage": client.usage,
         "finish_reason": client.finish_reason,
     }
+    draft_id, digest = issue_draft(str(result.get("python") or ""))
+    result["id"] = draft_id
+    result["hash"] = digest
     return result
+
+
+@router.post("/approve")
+def approve_script(body: dict[str, Any]) -> dict[str, bool]:
+    """The Approve button for one exact diff. Saving cannot record this."""
+    try:
+        approve_draft(str(body.get("draft_id") or ""), str(body.get("draft_hash") or ""))
+    except GateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"approved": True}
 
 
 @router.post("/save")
 def save_script(body: dict[str, Any]) -> dict[str, Any]:
     name = str(body.get("name") or "")
     source = str(body.get("source") or "")
+    try:
+        require_approved(str(body.get("draft_id") or ""), draft_hash(source))
+    except GateError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         path = save_user_strategy(name, source, replace=bool(body.get("replace")))
     except SandboxError as exc:

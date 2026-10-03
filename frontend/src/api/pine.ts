@@ -17,10 +17,34 @@ export function scanPine(source: string): Promise<{ scan: PineScan }> {
   return postJson("/api/pine/scan", { source });
 }
 
-export function reportPine(source: string): Promise<{ scan: PineScan; warnings: string[]; card: PineCard }> {
-  return postJson("/api/pine/report", { source, accepted: false });
+export interface PineReport {
+  id: string;
+  hash: string;
+  scan: PineScan;
+  warnings: string[];
+  model: unknown;
+  card: PineCard;
 }
 
-export function convertPine(source: string): Promise<{ python: string; tests: string; ready: boolean; errors: string[] }> {
-  return postJson("/api/pine/convert", { source, accepted: true });
+export function reportPine(source: string): Promise<PineReport> {
+  return postJson("/api/pine/report", { source });
+}
+
+export function acceptReport(reportId: string, reportHash: string): Promise<{ accepted: boolean }> {
+  return postJson("/api/pine/accept", { report_id: reportId, report_hash: reportHash });
+}
+
+export function convertPine(
+  source: string,
+  report: PineReport,
+): Promise<{ python: string; tests: string; ready: boolean; errors: string[]; id: string; hash: string }> {
+  return postJson("/api/pine/convert", {
+    source,
+    report_id: report.id,
+    report: { scan: report.scan, model: report.model, warnings: report.warnings, card: report.card },
+  });
+}
+
+export function approveDraft(draftId: string, draftHash: string): Promise<{ approved: boolean }> {
+  return postJson("/api/pine/approve", { draft_id: draftId, draft_hash: draftHash });
 }

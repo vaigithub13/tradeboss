@@ -22,7 +22,7 @@ class PanelBoundary extends Component<{ children: ReactNode }, { message: string
 }
 
 import { ApiError } from "../api/client";
-import { convertPine, reportPine, scanPine, type PineScan } from "../api/pine";
+import { acceptReport, approveDraft, convertPine, reportPine, scanPine, type PineReport, type PineScan } from "../api/pine";
 import { cardLines, convertEnabled, showBacktestCard, type PineCard } from "../pine/present";
 
 const TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h"] as const;
@@ -55,7 +55,11 @@ function PineEditor() {
       automaticLayout: true,
     });
     (node as HTMLDivElement & { __pine?: monaco.editor.IStandaloneCodeEditor }).__pine = editor;
-    const sub = editor.onDidChangeModelContent(() => setSource(editor.getValue()));
+    const sub = editor.onDidChangeModelContent(() => {
+      const next = editor.getValue();
+      setSource(next);
+      setAccepted(false);
+    });
     return () => {
       sub.dispose();
       editor.dispose();
@@ -67,7 +71,11 @@ function PineEditor() {
   const [card, setCard] = useState<PineCard | null>(null);
   const [modelError, setModelError] = useState<string | null>(null);
   const [draft, setDraft] = useState<string | null>(null);
+  const [draftId, setDraftId] = useState<string | null>(null);
+  const [draftHash, setDraftHash] = useState<string | null>(null);
+  const [draftApproved, setDraftApproved] = useState(false);
   const [draftErrors, setDraftErrors] = useState<string[]>([]);
+  const [issued, setIssued] = useState<PineReport | null>(null);
   const [plotNote, setPlotNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,13 +88,18 @@ function PineEditor() {
     setModelError(null);
     setAccepted(false);
     setDraft(null);
+    setDraftId(null);
+    setDraftHash(null);
+    setDraftApproved(false);
     setDraftErrors([]);
+    setIssued(null);
     setCard(null);
     try {
       const local = await scanPine(source);
       setScan(local.scan);
       try {
         const report = await reportPine(source);
+        setIssued(report);
         setWarnings(report.warnings);
         setCard(report.card);
       } catch (err) {
@@ -99,16 +112,49 @@ function PineEditor() {
     }
   }
 
-  async function onConvert(): Promise<void> {
-    if (!convertEnabled(accepted)) return;
+  async function onAccept(): Promise<void> {
+    if (!issued) return;
     setBusy(true);
     setError(null);
     try {
-      const result = await convertPine(source);
+      await acceptReport(issued.id, issued.hash);
+      setAccepted(true);
+    } catch (err) {
+      setAccepted(false);
+      setError(err instanceof ApiError ? err.message : "the report was not accepted");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onConvert(): Promise<void> {
+    if (!convertEnabled(accepted) || !issued) return;
+    setBusy(true);
+    setError(null);
+    setDraftApproved(false);
+    try {
+      const result = await convertPine(source, issued);
       setDraft(result.python);
+      setDraftId(result.id);
+      setDraftHash(result.hash);
       setDraftErrors(result.ready ? [] : result.errors ?? ["draft failed the checks"]);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "conversion failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onApprove(): Promise<void> {
+    if (!draftId || !draftHash) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await approveDraft(draftId, draftHash);
+      setDraftApproved(true);
+    } catch (err) {
+      setDraftApproved(false);
+      setError(err instanceof ApiError ? err.message : "the diff was not approved");
     } finally {
       setBusy(false);
     }
@@ -157,7 +203,12 @@ function PineEditor() {
           {warnings.map((line) => (
             <p key={line} className="text-amber-200">{line}</p>
           ))}
-          <button type="button" className="rounded border border-white/15 px-2 py-1" onClick={() => setAccepted(true)}>
+          <button
+            type="button"
+            className="rounded border border-white/15 px-2 py-1 disabled:opacity-40"
+            disabled={!issued || busy}
+            onClick={() => void onAccept()}
+          >
             Accept report
           </button>
           {kind === "strategy" && (
@@ -200,6 +251,14 @@ function PineEditor() {
             <p key={line} className="text-amber-200">{line}</p>
           ))}
           <pre className="max-h-64 overflow-auto whitespace-pre-wrap rounded border border-white/10 p-2">{draft}</pre>
+          <button
+            type="button"
+            className="mt-2 rounded border border-white/15 px-2 py-1 disabled:opacity-40"
+            disabled={!draftId || !draftHash || busy}
+            onClick={() => void onApprove()}
+          >
+            {draftApproved ? "Diff approved" : "Approve diff"}
+          </button>
         </section>
       )}
     </aside>

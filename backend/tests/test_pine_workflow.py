@@ -373,6 +373,114 @@ def test_the_conversion_prompt_includes_the_contract_and_frames_pine_as_data() -
     assert "1515-1520" in prompt
 
 
+class _Script:
+    def __init__(self, replies: list[str]) -> None:
+        self.replies = replies
+        self.prompts: list[str] = []
+
+    def complete(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return self.replies[len(self.prompts) - 1]
+
+
+def test_future_annotations_is_allowed_and_nothing_else_from_future() -> None:
+    check_source("from __future__ import annotations\n" + GOOD)
+    with pytest.raises(SandboxError, match=r"remove line 1: from __future__ import print_function"):
+        check_source("from __future__ import print_function\n" + GOOD)
+    with pytest.raises(SandboxError, match="from __future__ import annotations"):
+        check_source("from __future__ import annotations, print_function\n" + GOOD)
+
+
+def test_a_repair_names_the_line_and_a_fake_model_fixes_it() -> None:
+    broken = "from __future__ import print_function\n" + GOOD
+    fixed = "from __future__ import annotations\n" + GOOD
+    fake = _Script([
+        json.dumps({"python": broken, "tests": ""}),
+        json.dumps({"python": fixed, "tests": ""}),
+    ])
+    result = convert_draft(SESSION_CLOSE, client=fake, report={"scan": scan(SESSION_CLOSE)})
+    assert result["ready"] is True
+    assert result["attempts"] == 2
+    assert "remove line 1: from __future__ import print_function" in fake.prompts[1]
+
+
+def test_convert_without_acceptance_is_refused() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine.gates import clear_gates, issue_report
+
+    clear_gates()
+    report = {
+        "scan": scan(SESSION_CLOSE),
+        "model": {"claims": {"session_close_fires": False}},
+        "warnings": [],
+        "card": {},
+    }
+    report_id, _digest = issue_report(report)
+    with TestClient(app) as client:
+        refused = client.post("/api/pine/convert", json={
+            "source": SESSION_CLOSE,
+            "report_id": report_id,
+            "report": report,
+            "accepted": True,
+        })
+    assert refused.status_code == 400
+    assert "accept" in refused.json()["detail"]
+
+
+def test_an_accepted_report_edited_afterwards_is_refused() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine.gates import accept_report, clear_gates, issue_report
+
+    clear_gates()
+    report = {
+        "scan": scan(SESSION_CLOSE),
+        "model": {"claims": {"session_close_fires": False}},
+        "warnings": [],
+        "card": {},
+    }
+    report_id, digest = issue_report(report)
+    accept_report(report_id, digest)
+    edited = {**report, "model": {"claims": {"session_close_fires": True}}}
+    with TestClient(app) as client:
+        refused = client.post("/api/pine/convert", json={
+            "source": SESSION_CLOSE,
+            "report_id": report_id,
+            "report": edited,
+            "accepted": True,
+        })
+    assert refused.status_code == 400
+
+
+def test_save_without_approval_is_refused_and_an_edited_diff_is_refused() -> None:
+    from fastapi.testclient import TestClient
+
+    from app.main import app
+    from app.pine.gates import approve_draft, clear_gates, issue_draft
+    from app.pine.save import USER_DIR
+
+    clear_gates()
+    draft_id, digest = issue_draft(GOOD)
+    name = "gate_probe_do_not_keep"
+    target = USER_DIR / f"{name}.py"
+    if target.exists():
+        target.unlink()
+    with TestClient(app) as client:
+        bare = client.post("/api/pine/save", json={
+            "name": name, "source": GOOD, "draft_id": draft_id, "draft_hash": digest,
+        })
+        assert bare.status_code == 400
+        approve_draft(draft_id, digest)
+        edited = client.post("/api/pine/save", json={
+            "name": name, "source": GOOD + "\n# edited\n", "draft_id": draft_id, "draft_hash": digest,
+        })
+        assert edited.status_code == 400
+    assert not target.exists()
+
+
 def test_conversion_uses_its_own_model_and_at_least_8000_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("AI_MODEL", "gpt-4o-mini")
     monkeypatch.setenv("MAX_AI_OUTPUT_TOKENS", "800")
