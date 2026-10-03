@@ -403,4 +403,20 @@ Log XZ is unchanged across the three settings: its entries are market orders at 
 | Log XZ | 5,332.14 | 26,478.05 | 96 | 0 | 2 of 7. Same as the minute-open walk-forward: the first five stayed flat, then RMA 14 on 15m. Test nets +23,733.48 and −18,401.34. |
 | Price Channel | −14,183.70 | 71,950.19 | 93 | 0 | 3 of 7. Length 40 on 15m. Test nets +24,093.91, −13,824.89, −24,452.72. The last four windows stayed flat. |
 
-**Pivot `stop=na` (2026-10-03).** Same empty-state window as the parity table, quantity 1, no costs, no slippage. TradingView's #350 short stays open from 2026-09-30 12:15 until the 2026-10-01 14:25 stop, and the list has 351 closed trades. Turning a missing stop into a market order still produces 518 closed trades and several reversals through that afternoon. Skipping the missing stop and leaving the previous order working produces 13 closed trades, net −255.10, and the last closed trade exits 2026-09-01 10:50. Cancelling the missing side instead produces 11 closed trades, net −183.10, and the same last exit. Neither version is the Sep 30 short, and neither is 351. `tv_parity` keeps the previous order.
+**Pivot `stop=na` (2026-10-03).** Same empty-state window as the parity table, quantity 1, no costs, no slippage. TradingView's #350 short stays open from 2026-09-30 12:15 until the 2026-10-01 14:25 stop, and the list has 351 closed trades. Turning a missing stop into a market order still produces 518 closed trades and several reversals through that afternoon. Skipping the missing stop and leaving the previous order working produces 13 closed trades, net −255.10, and the last closed trade exits 2026-09-01 10:50. Cancelling the missing side instead produces 11 closed trades, net −183.10, and the same last exit. Neither version is the Sep 30 short, and neither is 351. `tv_parity` keeps the previous order. Pivot parity is unresolved and parked: neither `stop=na` hypothesis reproduces TradingView's 351 trades, and the strategy loses under realistic fills.
+
+**Delta-adjusted stop fills (2026-10-03).** Default for a stop inside the minute: option open plus the option-model-v1 delta (call positive, put negative) times the index move from that minute's open, clamped to the option minute's high and low. Market fills stay at the open. The old minute-open fill is now `optimistic` and the result says so. Saved on `835e8cf`, tree clean. Peek count stayed 0. Same realistic window and slippage 1.0. Index ₹ is unchanged.
+
+| strategy | option ₹ | option win | option max DD |
+|---|---:|---:|---:|
+| Pivot Extension | −509,817.79 | 27.89% | 534,738.16 |
+| Log XZ | −305,678.93 | 26.46% | 315,367.69 |
+| Price Channel | 8,826.14 | 35.43% | 110,523.49 |
+
+**Walk-forward, `delta_adjusted`, same window, no holdout.** Peek count stayed 0.
+
+| strategy | OOS option ₹ | OOS max DD | OOS trades | param changes | windows with a choice |
+|---|---:|---:|---:|---:|---|
+| Pivot Extension | −41,495.51 | 82,817.65 | 567 | 1 | 6 of 7. The first window stayed flat. Faithful 15m for the next three tests, then carried_pivots 15m. Test nets +4,096.62, +1,799.24, −17,680.91, −16,110.32, +32,474.38, −46,074.52. |
+| Log XZ | 5,332.14 | 26,478.05 | 96 | 0 | 2 of 7. Unchanged from the open fill: RMA 14 on 15m for the last two windows (+23,733.48, −18,401.34). |
+| Price Channel | −30,607.41 | 93,341.02 | 308 | 2 | 5 of 7. Length 40 on 15m, then length 20 on 5m, then length 40 on 15m. Windows 5 and 6 stayed flat. Test nets +27,915.16, −3,474.75, −31,586.05, −18,224.23, −5,237.54. |
