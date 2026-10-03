@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { fetchRun, fetchRuns, fetchStrategies, startBacktest, type BacktestRun, type StrategySpec } from "../api/backtests";
+import { fetchRun, fetchRuns, fetchStrategies, startBacktest, startHoldout, startWalkForward, type BacktestRun, type StrategySpec } from "../api/backtests";
 import { formFromRun, type RunConfig } from "../backtest/present";
 import type { SessionType, Timeframe } from "../api/client";
 
@@ -9,10 +9,31 @@ interface Focus {
   time: number;
 }
 
+export interface WalkSettings {
+  train_months: number;
+  test_months: number;
+  step_months: number;
+  min_trades: number;
+  max_combinations: number;
+  include_forward: boolean;
+  slippage_points: number;
+}
+
+const WALK_INITIAL: WalkSettings = {
+  train_months: 6,
+  test_months: 2,
+  step_months: 2,
+  min_trades: 30,
+  max_combinations: 50,
+  include_forward: false,
+  slippage_points: 1,
+};
+
 interface BacktestState {
   panelOpen: boolean;
   catalog: StrategySpec[];
   form: RunConfig;
+  walk: WalkSettings;
   runs: BacktestRun[];
   active: BacktestRun | null;
   compareIds: string[];
@@ -24,11 +45,14 @@ interface BacktestState {
   setPanelOpen: (open: boolean) => void;
   loadCatalog: () => Promise<void>;
   setForm: (patch: Partial<RunConfig>) => void;
+  setWalk: (patch: Partial<WalkSettings>) => void;
   setParam: (key: string, value: number | string) => void;
   useChartDefaults: (symbol: string, timeframe: Timeframe, sessions: SessionType[]) => void;
   duplicate: (run: BacktestRun) => void;
   refresh: () => Promise<void>;
   start: () => Promise<void>;
+  startWalk: () => Promise<void>;
+  runHoldout: (id: string) => Promise<void>;
   openRun: (id: string) => Promise<void>;
   toggleCompare: (id: string) => void;
   setComparing: (on: boolean) => void;
@@ -54,6 +78,7 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
   panelOpen: false,
   catalog: [],
   form: INITIAL,
+  walk: WALK_INITIAL,
   runs: [],
   active: null,
   compareIds: [],
@@ -76,6 +101,8 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
 
   setForm: (patch) => set({ form: { ...get().form, ...patch } }),
 
+  setWalk: (patch) => set({ walk: { ...get().walk, ...patch } }),
+
   setParam: (key, value) => set({ form: { ...get().form, params: { ...get().form.params, [key]: value } } }),
 
   useChartDefaults: (symbol, timeframe, sessions) => {
@@ -85,10 +112,23 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
   },
 
   duplicate: (run) => {
+    const form = formFromRun(run.config);
+    const walk = run.config.kind === "walk_forward"
+      ? {
+          train_months: run.config.train_months ?? WALK_INITIAL.train_months,
+          test_months: run.config.test_months ?? WALK_INITIAL.test_months,
+          step_months: run.config.step_months ?? WALK_INITIAL.step_months,
+          min_trades: run.config.min_trades ?? WALK_INITIAL.min_trades,
+          max_combinations: run.config.max_combinations ?? WALK_INITIAL.max_combinations,
+          include_forward: run.config.include_forward ?? false,
+          slippage_points: run.config.slippage_points,
+        }
+      : get().walk;
     set({
       panelOpen: true,
       comparing: false,
-      form: formFromRun(run.config),
+      form,
+      walk,
       error: null,
     });
   },
@@ -110,8 +150,55 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
   start: async () => {
     set({ error: null, busy: true, comparing: false });
     try {
-      const { id } = await startBacktest(get().form);
+      const { kind: _kind, train_months: _t, test_months: _te, step_months: _s, min_trades: _m, max_combinations: _c, include_forward: _f, ...config } = get().form;
+      const { id } = await startBacktest(config);
       const active = await fetchRun(id);
+      set({ active, selectedTradeId: null });
+      await get().refresh();
+    } catch (e) {
+      set({ error: message(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  startWalk: async () => {
+    const { form, walk } = get();
+    set({ error: null, busy: true, comparing: false });
+    try {
+      const { id } = await startWalkForward({
+        kind: "walk_forward",
+        strategy: form.strategy,
+        symbol: form.symbol,
+        timeframe: form.timeframe,
+        start: form.start,
+        end: form.end,
+        sessions: form.sessions,
+        mode: "options",
+        strike_offset: form.strike_offset,
+        slippage_points: walk.slippage_points,
+        train_months: walk.train_months,
+        test_months: walk.test_months,
+        step_months: walk.step_months,
+        min_trades: walk.min_trades,
+        max_combinations: walk.max_combinations,
+        include_forward: walk.include_forward,
+      });
+      const active = await fetchRun(id);
+      set({ active, selectedTradeId: null });
+      await get().refresh();
+    } catch (e) {
+      set({ error: message(e) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+
+  runHoldout: async (id) => {
+    set({ error: null, busy: true, comparing: false });
+    try {
+      const started = await startHoldout(id);
+      const active = await fetchRun(started.id);
       set({ active, selectedTradeId: null });
       await get().refresh();
     } catch (e) {

@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { BacktestRun, EquityPoint, ResultTrade } from "../api/backtests";
+import type { BacktestRun, EquityPoint, ResultTrade, RunResult } from "../api/backtests";
 import { fetchRun } from "../api/backtests";
 import {
+  HOLDOUT_COUNT,
   compareSelection,
+  compareSeries,
   compareWarningLines,
   runLabel,
   sortTrades,
@@ -62,6 +64,7 @@ export function BacktestResults() {
       )}
       {active.error && <p className="text-red-300">{active.error}</p>}
       <WarningList lines={warningLines(active.warnings, active.git_dirty)} />
+      {active.result?.holdout && <p>{HOLDOUT_COUNT(active.result.holdout.peeks)}</p>}
       {active.status === "done" && active.result && <DoneRun run={active} />}
     </section>
   );
@@ -99,6 +102,7 @@ function DoneRun({ run }: { run: BacktestRun }) {
         )}
       </div>
       <MoneyTotals run={run} />
+      {result.kind === "walk_forward" && <WalkForwardDetail result={result} runId={run.id} />}
       <div className="grid grid-cols-2 gap-3">
         <Curve title="Equity (₹)" series={[{ name: "Index", points: result.equity.index, color: "#7dd3fc" }, ...(option ? [{ name: "Options", points: result.equity.option, color: "#fbbf24" }] : [])]} field="equity" />
         <Curve title="Drawdown (₹)" series={[{ name: "Index", points: result.equity.index, color: "#7dd3fc" }, ...(option ? [{ name: "Options", points: result.equity.option, color: "#fbbf24" }] : [])]} field="drawdown" />
@@ -284,6 +288,63 @@ export function TradeCard() {
   );
 }
 
+function WalkForwardDetail({ result, runId }: { result: RunResult; runId: string }) {
+  const runHoldout = useBacktestStore((s) => s.runHoldout);
+  const busy = useBacktestStore((s) => s.busy);
+  const windows = result.windows ?? [];
+  return (
+    <div className="flex flex-col gap-2">
+      <p>Chosen params changed {result.param_changes ?? 0} times. Holdout {result.holdout?.start} to {result.holdout?.end}.</p>
+      <table className="w-full text-left">
+        <thead>
+          <tr className="text-white/50">
+            <th>Window</th>
+            <th>Train</th>
+            <th>Test</th>
+            <th>Choice</th>
+            <th>Test net</th>
+            <th>Test trades</th>
+          </tr>
+        </thead>
+        <tbody>
+          {windows.map((row) => (
+            <tr key={row.window}>
+              <td>{row.window}</td>
+              <td>{row.train_start} → {row.train_end}</td>
+              <td>{row.test_start} → {row.test_end}</td>
+              <td>{row.reason ?? JSON.stringify(row.params)}</td>
+              <td>{inr(row.test.net_pnl)}</td>
+              <td>{row.test.trades}{row.test.flat ? " flat" : ""}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {(result.degradation ?? []).length > 0 && (
+        <ul>
+          {result.degradation?.map((row) => (
+            <li key={row.window}>
+              Window {row.window} degradation {row.ratio.toFixed(3)} (train {inr(row.train_net_per_trade)} / trade, test {inr(row.test_net_per_trade)} / trade)
+            </li>
+          ))}
+        </ul>
+      )}
+      <button
+        type="button"
+        className="w-fit rounded border border-amber-400/50 px-3 py-1.5 text-amber-100 disabled:opacity-40"
+        disabled={busy}
+        onClick={() => {
+          const holdout = result.holdout;
+          const span = holdout ? `${holdout.start} to ${holdout.end}` : "the fixed holdout";
+          if (!window.confirm(`Run the final holdout on ${span}? This counts as a peek even if the run fails.`)) return;
+          void runHoldout(runId);
+        }}
+      >
+        Final holdout
+      </button>
+    </div>
+  );
+}
+
 function CompareView({ ids, labels }: { ids: string[]; labels: BacktestRun[] }) {
   const [runs, setRuns] = useState<BacktestRun[]>([]);
   useEffect(() => {
@@ -334,7 +395,7 @@ function CompareView({ ids, labels }: { ids: string[]; labels: BacktestRun[] }) 
         field="equity"
         series={runs.map((run, i) => ({
           name: runLabel(run.config),
-          points: run.result?.summary.option ? (run.result?.equity.option ?? []) : (run.result?.equity.index ?? []),
+          points: run.result ? compareSeries(run.result) : [],
           color: colors[i] ?? "#fff",
         }))}
       />

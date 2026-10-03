@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 import type { StrategySpec } from "../api/backtests";
-import { runLabel, type RunConfig } from "../backtest/present";
+import { gridHint, runLabel, type RunConfig } from "../backtest/present";
 import { useBacktestStore } from "../store/backtestStore";
 import { useChartStore } from "../store/chartStore";
 
@@ -9,6 +9,9 @@ const STRATEGY_LABEL: Record<string, string> = {
   ema_crossover: "EMA crossover",
   supertrend_flip: "Supertrend flip",
   opening_range_breakout: "Opening range breakout",
+  pivot_extension: "Pivot Extension",
+  log_xz: "Log XZ",
+  price_channel: "Price Channel",
 };
 
 export function BacktestPanel() {
@@ -23,6 +26,9 @@ export function BacktestPanel() {
   const setForm = useBacktestStore((s) => s.setForm);
   const setParam = useBacktestStore((s) => s.setParam);
   const start = useBacktestStore((s) => s.start);
+  const startWalk = useBacktestStore((s) => s.startWalk);
+  const walk = useBacktestStore((s) => s.walk);
+  const setWalk = useBacktestStore((s) => s.setWalk);
   const refresh = useBacktestStore((s) => s.refresh);
   const duplicate = useBacktestStore((s) => s.duplicate);
   const openRun = useBacktestStore((s) => s.openRun);
@@ -182,6 +188,34 @@ export function BacktestPanel() {
       >
         Run
       </button>
+      <div className="flex flex-col gap-2 rounded border border-white/10 p-2">
+        <h3 className="font-semibold text-white">Walk-forward</h3>
+        <p className="text-white/40">{gridHint(form.strategy)}. Lots stay 1. Mode stays long/short.</p>
+        <div className="grid grid-cols-2 gap-2">
+          <NumberField label="Train months" value={walk.train_months} onChange={(value) => setWalk({ train_months: value })} />
+          <NumberField label="Test months" value={walk.test_months} onChange={(value) => setWalk({ test_months: value })} />
+          <NumberField label="Step months" value={walk.step_months} onChange={(value) => setWalk({ step_months: value })} />
+          <NumberField label="Min trades" value={walk.min_trades} onChange={(value) => setWalk({ min_trades: value })} />
+          <NumberField label="Max combinations" value={walk.max_combinations} onChange={(value) => setWalk({ max_combinations: value })} />
+          <NumberField label="WF slippage" value={walk.slippage_points} step={0.5} onChange={(value) => setWalk({ slippage_points: value })} />
+        </div>
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={walk.include_forward}
+            onChange={(e) => setWalk({ include_forward: e.target.checked })}
+          />
+          Include the forward period after 2026-10-01
+        </label>
+        <button
+          type="button"
+          className="rounded bg-emerald-800 px-3 py-1.5 text-white disabled:opacity-40"
+          disabled={busy || running || form.mode !== "options" || form.symbol !== "NIFTY50"}
+          onClick={() => void startWalk()}
+        >
+          Walk-forward
+        </button>
+      </div>
       {running && active && (
         <p className="text-white/60">
           {active.progress.phase} {active.progress.done}/{active.progress.total || "…"}
@@ -224,6 +258,23 @@ export function BacktestPanel() {
         Compare
       </button>
     </aside>
+  );
+}
+
+function NumberField({ label, value, onChange, step = 1 }: { label: string; value: number; onChange: (value: number) => void; step?: number }) {
+  return (
+    <label className="flex flex-col gap-1">
+      {label}
+      <input
+        aria-label={label}
+        type="number"
+        min={0}
+        step={step}
+        className="rounded border border-white/10 bg-white/5 px-2 py-1"
+        value={value}
+        onChange={(e) => onChange(Number(e.target.value))}
+      />
+    </label>
   );
 }
 

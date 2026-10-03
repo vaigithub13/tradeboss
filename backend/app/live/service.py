@@ -89,6 +89,8 @@ class LiveConfig:
     reconcile_until: str = "16:30"
     default_sessions: tuple[str, ...] = ("normal", "weekend_full")
     base_keys: tuple[str, ...] = (NIFTY_INDEX_KEY, VIX_KEY)
+    spread_recorder_enabled: bool = False
+    spreads_dir: Path | None = None
 
 
 def _hhmm(s: str) -> dtime:
@@ -143,6 +145,7 @@ class LiveService:
             volume_known=self._volume_known,
             on_views_changed=self.refresh_subscriptions,
         )
+        self._spreads = None
         self.connection = FeedConnection(
             authorize=authorize or (lambda: authorize_feed(_token())),
             on_frame=self._on_frame,
@@ -180,6 +183,7 @@ class LiveService:
         if self.connection.lock is not None:
             self.connection.lock.release()
         self.recorder.close()
+        self._close_spreads()
         set_overlay(None)
 
     # ------------------------------------------------------------------ feed callbacks (loop thread)
@@ -191,6 +195,7 @@ class LiveService:
         with self._elock:
             self.engine.on_frame(raw, wall)
         self._drain()
+        self._record_spreads(raw)
 
     def _on_disconnect(self) -> None:
         with self._elock:
@@ -391,6 +396,8 @@ class LiveService:
                 with contextlib.suppress(Exception):
                     self._flags.rest_status = await asyncio.to_thread(client.market_status, "NSE")
         # 4. instrument roll (front future changes) etc.
+        if self._spreads is not None:
+            self._spreads.flush()
         self.refresh_subscriptions()
 
     # ------------------------------------------------------------------ subscriptions
@@ -407,7 +414,7 @@ class LiveService:
         self._key_cache[symbol] = key
         return key
 
-    def subscription_keys(self) -> list[str]:
+    def _chart_keys(self) -> list[str]:
         keys = list(self.cfg.base_keys)
         idx = current_index(self.cfg.instruments_dir)
         fut = idx.front_future() if idx is not None else None
@@ -418,6 +425,53 @@ class LiveService:
             if k:
                 keys.append(k)
         return list(dict.fromkeys(keys))[:MAX_SUBSCRIPTIONS]
+
+    def subscription_keys(self) -> list[str]:
+        chart = self._chart_keys()
+        if not self.cfg.spread_recorder_enabled:
+            return chart
+        from app.live.spreads.keys import compose_keys
+
+        return compose_keys(chart, self._spread_session().keys(), enabled=True)
+
+    def _spread_session(self):
+        if self._spreads is None:
+            from app.live.spreads.session import SpreadSession
+            from app.live.spreads.select import Contract
+            from app.upstox.instruments import current_index as load_index
+
+            def listed(expiry):
+                idx = load_index(self.cfg.instruments_dir)
+                if idx is None:
+                    return []
+                return [
+                    Contract(i.key, float(i.strike), i.instrument_type, i.expiry)
+                    for i in idx.instruments
+                    if i.kind == "option" and i.expiry == expiry and i.strike is not None and i.instrument_type in ("CE", "PE")
+                ]
+
+            directory = self.cfg.spreads_dir or (self.cfg.state_dir.parent / "spreads")
+            self._spreads = SpreadSession(directory, listed)
+        return self._spreads
+
+    def _record_spreads(self, raw: bytes) -> None:
+        if not self.cfg.spread_recorder_enabled:
+            return
+        session = self._spread_session()
+        before = session.keys()
+        session.on_frame(raw, market_open=self.market_open() is True)
+        if session.keys() != before:
+            self.refresh_subscriptions()
+
+    def _close_spreads(self) -> None:
+        if self._spreads is None:
+            return
+        with self._elock:
+            bars = [
+                {"time": bar.minute * 60, "high": bar.high, "low": bar.low}
+                for bar in self.engine.bars(NIFTY_INDEX_KEY, include_withheld=True)
+            ]
+        self._spreads.close(bars)
 
     def refresh_subscriptions(self) -> None:
         self.connection.set_keys(self.subscription_keys())
@@ -482,6 +536,8 @@ def build_service() -> LiveService:
         reconcile_at=settings.live_reconcile_at,
         reconcile_until=settings.live_reconcile_until,
         default_sessions=settings.default_sessions,
+        spread_recorder_enabled=settings.spread_recorder_enabled,
+        spreads_dir=settings.data_dir / "spreads",
     )
     enabled = settings.live_feed_enabled and settings.upstox_token_value() is not None
     return LiveService(cfg, get_store(), client_factory=make_client, enabled=enabled)

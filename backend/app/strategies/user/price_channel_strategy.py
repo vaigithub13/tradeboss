@@ -1,5 +1,9 @@
-from app.backtest.contracts import Signal, Strategy
-from app.strategies.pine_common import PinePort, entry_window, minute_of, TICK
+from __future__ import annotations
+
+from typing import Any
+
+from app.backtest.contracts import Signal
+from app.strategies.pine_common import PinePort, entry_window, TICK, timeframe_minutes
 
 
 class PriceChannelStrategy(PinePort):
@@ -8,16 +12,16 @@ class PriceChannelStrategy(PinePort):
     def __init__(
         self,
         length: int = 20,
+        execution: str = "realistic",
         lots: int = 1,
         use_target: bool = False,
         use_stop: bool = False,
         target_points: float = 10.0,
         stop_points: float = 7.0,
         tick: float = TICK,
-        execution: str = "realistic",
     ) -> None:
-        if not isinstance(length, int) or length < 1:
-            raise ValueError("length must be an int >= 1")
+        if length < 1:
+            raise ValueError("length must be >= 1")
         super().__init__(
             execution=execution,
             lots=lots,
@@ -28,44 +32,33 @@ class PriceChannelStrategy(PinePort):
             tick=tick,
             length=length,
         )
-        self.length = length
+        self.length = int(length)
 
-    def _highest_high(self, ctx) -> float:
-        return max(float(b["high"]) for b in ctx.bars[-self.length:])
-
-    def _lowest_low(self, ctx) -> float:
-        return min(float(b["low"]) for b in ctx.bars[-self.length:])
-
-    def on_bar(self, bar: dict[str, object], ctx) -> list[Signal]:
+    def on_bar(self, bar: dict[str, Any], ctx: Any) -> list[Signal]:
         if len(ctx.bars) <= self.length:
             return []
 
         out: list[Signal] = []
 
-        session = self.session_exit(bar, ctx)
-        if session:
-            out.extend(session)
+        exit_signals = self.session_exit(bar, ctx)
+        if exit_signals:
+            out.extend(exit_signals)
 
-        t = int(bar["time"])
-        if not entry_window(t, ctx.timeframe_minutes):
+        bar_minutes = timeframe_minutes(ctx.timeframe)
+        if not entry_window(bar["time"], bar_minutes):
             return out
 
-        hh = self._highest_high(ctx)
-        ll = self._lowest_low(ctx)
+        highs = ctx.bars.high
+        lows = ctx.bars.low
+        hh = max(highs[-self.length:])
+        ll = min(lows[-self.length:])
 
-        long_stop = round(hh + self.tick, 2)
-        short_stop = round(ll - self.tick, 2)
+        long_stop = round(float(hh) + self.tick, 2)
+        short_stop = round(float(ll) - self.tick, 2)
 
-        if ctx.position.side == 0:
-            signals = [
-                self.entry("BUY", long_stop, "LE"),
-                self.entry("SELL", short_stop, "SE"),
-            ]
-        else:
-            signals = [
-                self.entry("BUY", long_stop, "LE"),
-                self.entry("SELL", short_stop, "SE"),
-            ]
-
+        signals = [
+            self.entry("BUY", long_stop, "LE"),
+            self.entry("SELL", short_stop, "SE"),
+        ]
         out.extend(self.arm(ctx, signals))
         return out

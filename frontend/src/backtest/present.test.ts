@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import {
   DIRTY_WARNING,
+  HOLDOUT_COUNT,
   compareSelection,
+  compareSeries,
   compareWarningLines,
   formFromRun,
   jumpWindow,
@@ -84,6 +86,29 @@ describe("jumpWindow", () => {
     expect(placed.to - placed.from).toBe(120);
     expect((90 - placed.from) / (placed.to - placed.from)).toBeCloseTo(1 / 3, 5);
     expect(jumpWindow(times, 50, 120)).toEqual({ kind: "load", center: 50 });
+  });
+});
+
+describe("walk-forward results", () => {
+  it("shows the combination warning and the fixed holdout count", () => {
+    expect(warningLines(["walk-forward tried 4 combinations"], false)).toContain(
+      "walk-forward tried 4 combinations",
+    );
+    expect(HOLDOUT_COUNT(2)).toBe("final holdout has been run 2 times");
+  });
+
+  it("compare plots the stitched out-of-sample equity", () => {
+    const series = compareSeries({
+      kind: "walk_forward",
+      equity: {
+        option: [
+          { exit_time: 1, equity: 30, drawdown: 0 },
+          { exit_time: 2, equity: 20, drawdown: 10 },
+          { exit_time: 3, equity: 25, drawdown: 10 },
+        ],
+      },
+    });
+    expect(series.map((point) => point.equity)).toEqual([30, 20, 25]);
   });
 });
 

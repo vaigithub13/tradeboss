@@ -13,6 +13,13 @@ export interface RunConfig {
   mode: "index" | "options";
   strike_offset: number;
   slippage_points: number;
+  kind?: "walk_forward" | "holdout";
+  train_months?: number;
+  test_months?: number;
+  step_months?: number;
+  min_trades?: number;
+  max_combinations?: number;
+  include_forward?: boolean;
 }
 
 export interface TradeRow {
@@ -97,7 +104,7 @@ export function compareSelection(
   return { ok: true, ids: unique };
 }
 
-export function runLabel(config: Pick<RunConfig, "strategy" | "slippage_points" | "mode">): string {
+export function runLabel(config: Pick<RunConfig, "strategy" | "slippage_points" | "mode"> & { kind?: string }): string {
   const name =
     config.strategy === "opening_range_breakout"
       ? "ORB"
@@ -105,7 +112,37 @@ export function runLabel(config: Pick<RunConfig, "strategy" | "slippage_points" 
         ? "EMA"
         : config.strategy === "supertrend_flip"
           ? "Supertrend"
-          : config.strategy;
+          : config.strategy === "pivot_extension"
+            ? "Pivot"
+            : config.strategy === "log_xz"
+              ? "Log XZ"
+              : config.strategy === "price_channel"
+                ? "Channel"
+                : config.strategy;
   const slip = config.mode === "options" ? ` ${config.slippage_points} pt` : "";
-  return `${name}${slip}`;
+  const prefix = config.kind === "walk_forward" ? "WF " : "";
+  return `${prefix}${name}${slip}`;
+}
+
+export function HOLDOUT_COUNT(peeks: number): string {
+  return `final holdout has been run ${peeks} times`;
+}
+
+export function compareSeries(result: {
+  kind?: string;
+  equity?: { option?: { exit_time: number; equity: number; drawdown: number }[]; index?: { exit_time: number; equity: number; drawdown: number }[] };
+}): { exit_time: number; equity: number; drawdown: number }[] {
+  if (result.kind === "walk_forward") return result.equity?.option ?? [];
+  const option = result.equity?.option ?? [];
+  return option.length > 0 ? option : (result.equity?.index ?? []);
+}
+
+export function gridHint(strategy: string): string {
+  if (strategy === "ema_crossover") return "Grid: fast 5, 9, 12 × slow 15, 21, 34";
+  if (strategy === "supertrend_flip") return "Grid: ATR 7, 10, 14 × multiplier 2, 3, 4";
+  if (strategy === "opening_range_breakout") return "Grid: range 5, 15, 30 minutes";
+  if (strategy === "pivot_extension") return "Grid: faithful and carried_pivots × 5m and 15m";
+  if (strategy === "log_xz") return "Grid: length 10, 14 × 5m and 15m";
+  if (strategy === "price_channel") return "Grid: length 20, 40 × 5m and 15m";
+  return "Grid: strategy defaults";
 }

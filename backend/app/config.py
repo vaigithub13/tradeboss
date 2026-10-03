@@ -59,6 +59,9 @@ class Settings(BaseSettings):
     live_reconcile_at: str = "15:45"
     live_reconcile_until: str = "16:30"
 
+    # Option book recorder. Stays off until it is turned on after the first live session.
+    spread_recorder_enabled: bool = False
+
     @property
     def feed_recordings_dir(self) -> Path:
         return self.data_dir / "feed-recordings"

@@ -68,7 +68,23 @@ export interface SideSummary {
   modelled_pnl?: number | null;
 }
 
+export interface WalkWindow {
+  window: number;
+  train_start: string;
+  train_end: string;
+  test_start: string;
+  test_end: string;
+  params: Record<string, number | string> | null;
+  reason: string | null;
+  test: { net_pnl: number; max_drawdown: number; trades: number; flat: boolean };
+}
+
 export interface RunResult {
+  kind?: string;
+  holdout?: { start: string; end: string; peeks: number };
+  windows?: WalkWindow[];
+  degradation?: { window: number; train_net_per_trade: number; test_net_per_trade: number; ratio: number }[];
+  param_changes?: number;
   summary: { index: SideSummary; option: SideSummary | null };
   equity: { index: EquityPoint[]; option: EquityPoint[] };
   trades: ResultTrade[];
@@ -108,6 +124,14 @@ export function fetchStrategies(): Promise<{ strategies: StrategySpec[] }> {
 
 export function startBacktest(config: RunConfig): Promise<{ id: string }> {
   return postJson("/api/backtests", config);
+}
+
+export function startWalkForward(body: Record<string, unknown>): Promise<{ id: string }> {
+  return postJson("/api/backtests", body);
+}
+
+export function startHoldout(fromRun: string): Promise<{ id: string }> {
+  return postJson("/api/backtests/holdout", { from_run: fromRun, kind: "holdout" });
 }
 
 export function fetchRuns(): Promise<{ runs: BacktestRun[] }> {
