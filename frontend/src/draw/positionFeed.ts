@@ -77,8 +77,7 @@ export function positionViews(
     const size = positionSize(levels, settings, lots[drawing.id] ?? 0);
     const outcome = positionOutcome(side, drawing.anchors, bars, minutes, cursor, size.quantity);
     const optionLabel = settings.options ? notes[drawing.id] ?? null : null;
-    const labels = positionLabels(levels, size, outcome, settings.compact);
-    if (optionLabel) labels.push({ role: "option", text: optionLabel });
+    const labels = positionLabels(levels, size, outcome, settings.compact, optionLabel);
     return [{
       id: drawing.id,
       labels,

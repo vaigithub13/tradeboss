@@ -430,7 +430,7 @@ function PositionFields({ drawing }: { drawing: Drawing }) {
         <input type="checkbox" checked={settings.options} onChange={(ev) => write({ ...settings, options: ev.target.checked })} />
         Options
       </label>
-      <div className="mt-1 whitespace-pre-wrap break-words text-white/90" data-testid="position-readout">
+      <div className="mt-1 whitespace-pre-wrap break-words text-white/90" data-testid="position-readout" title={view?.labels.some((label) => label.tooltip) ? "estimated" : undefined}>
         {(view?.labels ?? []).map((label) => label.text).join("\n") || "pending"}
       </div>
     </div>

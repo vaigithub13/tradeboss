@@ -65,8 +65,20 @@ export interface PositionOutcome {
 }
 
 export interface PositionLabel {
-  role: "target" | "stop" | "outcome" | "quantity" | "option";
+  role: "target" | "stop" | "centre";
   text: string;
+  lines: string[];
+  /** Centre box is green when the result is not a loss. */
+  tone: "profit" | "loss";
+  tooltip?: string;
+}
+
+export interface BadgePlacement {
+  role: "target" | "stop" | "centre";
+  x: number;
+  y: number;
+  w: number;
+  h: number;
 }
 
 export interface PriceSpan {
@@ -180,7 +192,35 @@ export function positionSize(levels: PositionLevels, settings: PositionSettings,
 
 export function quantityNote(lots: number, riskPerLot: number, budget: number): string | null {
   if (lots > 0 || !(riskPerLot > budget)) return null;
-  return `0 lots: risk per lot Rs ${riskPerLot.toFixed(2)} exceeds budget Rs ${budget.toFixed(2)}`;
+  return `risk/lot Rs ${trimNum(riskPerLot)} > budget Rs ${trimNum(budget)}`;
+}
+
+const TICK = 0.05;
+
+/** Two decimals, then drop a trailing zero the way TradingView prints 2.5 and 1. */
+export function trimNum(value: number): string {
+  return value.toFixed(2).replace(/(\.\d*?)0+$/, "$1").replace(/\.$/, "");
+}
+
+function amountText(points: number, lots: number, lotSize: number): string {
+  if (lots > 0 && lotSize >= 1) return trimNum(points * lots * lotSize);
+  if (lotSize >= 1) return `${trimNum(points * lotSize)} per lot`;
+  return "0";
+}
+
+function zoneLine(name: "Target" | "Stop", points: number, percent: number, lots: number, lotSize: number): string {
+  const ticks = points / TICK;
+  return `${name}: ${trimNum(points)} (${trimNum(percent)}%) ${trimNum(ticks)}, Amount: ${amountText(points, lots, lotSize)}`;
+}
+
+export function optionCentreLine(note: string): string | null {
+  const entry = note.match(/entry ([0-9]+(?:\.[0-9]+)?)/);
+  const target = note.match(/target ([0-9]+(?:\.[0-9]+)?)/);
+  const stop = note.match(/stop ([0-9]+(?:\.[0-9]+)?)/);
+  const qty = note.match(/option-based quantity ([0-9]+) lots/);
+  if (!entry?.[1] || !target?.[1] || !stop?.[1] || !qty?.[1]) return null;
+  const kind = /\bPE\b/.test(note) ? "PE" : "CE";
+  return `ATM ${kind} ~${trimNum(Number(entry[1]))} -> T ${trimNum(Number(target[1]))} / S ${trimNum(Number(stop[1]))}, option qty ${qty[1]}`;
 }
 
 export function positionZones(side: PositionSide, entry: number, target: number, stop: number): { profit: PriceSpan; risk: PriceSpan } {
@@ -189,13 +229,31 @@ export function positionZones(side: PositionSide, entry: number, target: number,
   return { profit: band(entry, target), risk: band(entry, stop) };
 }
 
-function money(value: number): string {
-  const sign = value > 0 ? "+" : "";
-  return `${sign}${value.toFixed(2)}`;
-}
-
-function rupees(value: number): string {
-  return `₹${value.toFixed(2)}`;
+function centreLines(levels: PositionLevels, size: PositionSize, outcome: PositionOutcome, compact: boolean, optionNote?: string | null): string[] {
+  const qty = `Qty: ${size.lots}`;
+  const ratio = levels.ratio == null ? null : `Risk/reward ratio: ${trimNum(levels.ratio)}`;
+  if (compact) {
+    const lines = [qty];
+    if (ratio) lines.push(ratio);
+    const note = quantityNote(size.lots, size.riskPerLot, size.riskBudget);
+    if (note) lines.push(note);
+    return lines;
+  }
+  const pnl = outcome.pnlRupees ?? 0;
+  let head = `Open PnL: ${trimNum(pnl)}, ${qty}`;
+  if (outcome.status === "pending") head = `Pending, ${qty}`;
+  if (outcome.status === "not_entered") head = `Not entered, ${qty}`;
+  if (outcome.status === "target" || outcome.status === "stop" || outcome.status === "ambiguous") head = `Closed PnL: ${trimNum(pnl)}, ${qty}`;
+  const lines = [head];
+  if (ratio) lines.push(ratio);
+  const note = quantityNote(size.lots, size.riskPerLot, size.riskBudget);
+  if (note) lines.push(note);
+  if (outcome.status === "ambiguous") lines.push("stop assumed");
+  if (optionNote && outcome.status !== "pending" && outcome.status !== "not_entered") {
+    const option = optionCentreLine(optionNote);
+    if (option) lines.push(option);
+  }
+  return lines;
 }
 
 export function positionLabels(
@@ -203,30 +261,99 @@ export function positionLabels(
   size: PositionSize,
   outcome: PositionOutcome,
   compact: boolean,
+  optionNote?: string | null,
 ): PositionLabel[] {
-  const ratio = levels.ratio == null ? "" : ` ${levels.ratio.toFixed(2)}R`;
-  const targetMove = money(levels.side === "long" ? levels.rewardPoints : -levels.rewardPoints);
-  const stopMove = money(levels.side === "long" ? -levels.riskPoints : levels.riskPoints);
-  const targetPct = levels.side === "long" ? levels.rewardPercent : -levels.rewardPercent;
-  const stopPct = levels.side === "long" ? -levels.riskPercent : levels.riskPercent;
-  const target = compact
-    ? `${levels.target.toFixed(2)}${ratio}`
-    : `${levels.target.toFixed(2)} (${targetMove}, ${money(targetPct)}%)${ratio} ${rupees(size.rewardRupees)}`;
-  const stop = compact
-    ? `${levels.stop.toFixed(2)}`
-    : `${levels.stop.toFixed(2)} (${stopMove}, ${money(stopPct)}%) ${rupees(size.riskRupees)}`;
+  const tone: PositionLabel["tone"] = outcome.pnlRupees != null && outcome.pnlRupees < 0 ? "loss" : "profit";
+  const centre = centreLines(levels, size, outcome, compact, optionNote);
   const labels: PositionLabel[] = [
-    { role: "target", text: target },
-    { role: "stop", text: stop },
+    { role: "centre", text: centre.join("\n"), lines: centre, tone, tooltip: optionNote ? "estimated" : undefined },
   ];
-  const note = quantityNote(size.lots, size.riskPerLot, size.riskBudget);
-  if (note) labels.push({ role: "quantity", text: note });
-  if (outcome.status === "open" && outcome.pnlRupees != null) labels.push({ role: "outcome", text: `open ${rupees(outcome.pnlRupees)}` });
-  if (outcome.status === "target") labels.push({ role: "outcome", text: "target hit" });
-  if (outcome.status === "stop") labels.push({ role: "outcome", text: "stop hit" });
-  if (outcome.status === "ambiguous") labels.push({ role: "outcome", text: "ambiguous (stop assumed)" });
-  if (outcome.status === "not_entered") labels.push({ role: "outcome", text: "not entered" });
+  if (compact) return labels;
+  labels.unshift(
+    { role: "target", text: zoneLine("Target", levels.rewardPoints, levels.rewardPercent, size.lots, size.lotSize), lines: [zoneLine("Target", levels.rewardPoints, levels.rewardPercent, size.lots, size.lotSize)], tone: "profit" },
+    { role: "stop", text: zoneLine("Stop", levels.riskPoints, levels.riskPercent, size.lots, size.lotSize), lines: [zoneLine("Stop", levels.riskPoints, levels.riskPercent, size.lots, size.lotSize)], tone: "loss" },
+  );
   return labels;
+}
+
+/** Keep a drag handle off the label it would otherwise cover. */
+export function shiftHandleOffBadges(
+  point: { x: number; y: number },
+  badges: readonly { x: number; y: number; w: number; h: number }[],
+  pad = 7,
+): { x: number; y: number } {
+  for (const badge of badges) {
+    const inside = point.x >= badge.x && point.x <= badge.x + badge.w && point.y >= badge.y && point.y <= badge.y + badge.h;
+    if (!inside) continue;
+    const toLeft = point.x - badge.x;
+    const toRight = badge.x + badge.w - point.x;
+    return toLeft <= toRight ? { x: badge.x - pad, y: point.y } : { x: badge.x + badge.w + pad, y: point.y };
+  }
+  return point;
+}
+
+function rangesOverlap(a: BadgePlacement, b: BadgePlacement): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
+
+/** Centre the badges on the tool and keep every box off the others. */
+export function placePositionBadges(input: {
+  toolLeft: number;
+  toolWidth: number;
+  entryY: number;
+  profitTop: number;
+  profitHeight: number;
+  riskTop: number;
+  riskHeight: number;
+  badges: readonly { role: "target" | "stop" | "centre"; w: number; h: number }[];
+  paneHeight: number;
+}): BadgePlacement[] {
+  const gap = 4;
+  const mid = input.toolLeft + input.toolWidth / 2;
+  const placed = new Map<BadgePlacement["role"], BadgePlacement>();
+  const box = (role: BadgePlacement["role"], y: number): void => {
+    const badge = input.badges.find((item) => item.role === role);
+    if (!badge) return;
+    placed.set(role, { role, x: mid - badge.w / 2, y, w: badge.w, h: badge.h });
+  };
+  const centre = input.badges.find((item) => item.role === "centre");
+  if (centre) box("centre", input.entryY - centre.h / 2);
+  const profitAbove = input.profitTop + input.profitHeight <= input.entryY + 1;
+  const riskAbove = input.riskTop + input.riskHeight <= input.entryY + 1;
+  const target = input.badges.find((item) => item.role === "target");
+  if (target) box("target", profitAbove ? input.profitTop - gap - target.h : input.profitTop + input.profitHeight + gap);
+  const stop = input.badges.find((item) => item.role === "stop");
+  if (stop) box("stop", riskAbove ? input.riskTop - gap - stop.h : input.riskTop + input.riskHeight + gap);
+
+  const pushAway = (role: "target" | "stop", above: boolean): void => {
+    const outer = placed.get(role);
+    const middle = placed.get("centre");
+    if (!outer || !middle) return;
+    if (!rangesOverlap(outer, middle)) return;
+    outer.y = above ? middle.y - gap - outer.h : middle.y + middle.h + gap;
+  };
+  pushAway("target", profitAbove);
+  pushAway("stop", riskAbove);
+
+  const all = [...placed.values()];
+  if (all.length === 0) return [];
+  const minY = Math.min(...all.map((item) => item.y));
+  if (minY < 2) for (const item of all) item.y += 2 - minY;
+  const maxY = Math.max(...all.map((item) => item.y + item.h));
+  if (maxY > input.paneHeight - 2) for (const item of all) item.y -= maxY - (input.paneHeight - 2);
+
+  const shiftBeside = (lower: BadgePlacement, upper: BadgePlacement): void => {
+    if (!rangesOverlap(lower, upper)) return;
+    lower.x = upper.x + upper.w + gap;
+    if (lower.x + lower.w > input.toolLeft + input.toolWidth + lower.w) lower.x = upper.x - gap - lower.w;
+  };
+  const middle = placed.get("centre");
+  const targetBox = placed.get("target");
+  const stopBox = placed.get("stop");
+  if (middle && targetBox) shiftBeside(targetBox, middle);
+  if (middle && stopBox) shiftBeside(stopBox, middle);
+  if (targetBox && stopBox) shiftBeside(stopBox, targetBox);
+  return [...placed.values()];
 }
 
 function touches(bar: Bar, price: number): boolean {

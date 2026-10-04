@@ -26,6 +26,9 @@ import {
   defaultPositionSettings,
   movePositionHandle,
   pointsOf,
+  optionCentreLine,
+  shiftHandleOffBadges,
+  placePositionBadges,
   positionLabels,
   positionLevels,
   positionOutcome,
@@ -109,11 +112,13 @@ describe("defaults, handles, and size", () => {
     const tooSmall = positionSize(levels, sized(65, 5_000), 65);
     expect(tooSmall.lots).toBe(0);
     expect(quantityNote(tooSmall.lots, tooSmall.riskPerLot, tooSmall.riskBudget)).toBe(
-      "0 lots: risk per lot Rs 6500.00 exceeds budget Rs 5000.00",
+      "risk/lot Rs 6500 > budget Rs 5000",
     );
-    expect(positionLabels(levels, tooSmall, { status: "pending", endTime: null, exitPrice: null, pnlPoints: null, pnlRupees: null, activatedAt: null, targetTime: null, stopTime: null }, true).map((label) => label.text)).toContain(
-      "0 lots: risk per lot Rs 6500.00 exceeds budget Rs 5000.00",
-    );
+    const zeroLabels = positionLabels(levels, tooSmall, { status: "pending", endTime: null, exitPrice: null, pnlPoints: null, pnlRupees: null, activatedAt: null, targetTime: null, stopTime: null }, false);
+    expect(zeroLabels.find((label) => label.role === "centre")?.lines).toContain("Pending, Qty: 0");
+    expect(zeroLabels.find((label) => label.role === "centre")?.lines).toContain("risk/lot Rs 6500 > budget Rs 5000");
+    expect(zeroLabels.find((label) => label.role === "target")?.text).toBe("Target: 200 (0.83%) 4000, Amount: 13000 per lot");
+    expect(zeroLabels.find((label) => label.role === "stop")?.text).toBe("Stop: 100 (0.42%) 2000, Amount: 6500 per lot");
     expect(positionSize(levels, { ...defaultPositionSettings(), lotSize: null }, 65).lotSize).toBe(65);
     const flat = positionLevels("long", [entry, { time: T_1300, price: 24_200 }, { time: T_1300, price: 24_000 }]);
     expect(flat.ratio).toBeNull();
@@ -153,22 +158,87 @@ describe("defaults, handles, and size", () => {
     const size = positionSize(levels, sized(), 65);
     const open = positionOutcome("long", anchors, [bar(T_0915, 24_000, 24_050, 23_980, 24_080)], [], null, size.quantity);
     expect(positionLabels(levels, size, open, false).map((label) => label.text)).toEqual([
-      "24200.00 (+200.00, +0.83%) 2.00R ₹13000.00",
-      "23900.00 (-100.00, -0.42%) ₹6500.00",
-      "open ₹5200.00",
+      "Target: 200 (0.83%) 4000, Amount: 13000",
+      "Stop: 100 (0.42%) 2000, Amount: 6500",
+      "Open PnL: 5200, Qty: 1\nRisk/reward ratio: 2",
     ]);
-    expect(positionLabels(levels, size, open, true).map((label) => label.text)).toEqual(["24200.00 2.00R", "23900.00", "open ₹5200.00"]);
+    expect(positionLabels(levels, size, open, true).map((label) => label.text)).toEqual(["Qty: 1\nRisk/reward ratio: 2"]);
     const shortLevels = positionLevels("short", [
       entry,
       { time: T_1300, price: 23_800 },
       { time: T_1300, price: 24_100 },
     ]);
     expect(positionLabels(shortLevels, size, { status: "pending", endTime: null, exitPrice: null, pnlPoints: null, pnlRupees: null, activatedAt: null, targetTime: null, stopTime: null }, false).map((label) => label.text)).toEqual([
-      "23800.00 (-200.00, -0.83%) 2.00R ₹13000.00",
-      "24100.00 (+100.00, +0.42%) ₹6500.00",
+      "Target: 200 (0.83%) 4000, Amount: 13000",
+      "Stop: 100 (0.42%) 2000, Amount: 6500",
+      "Pending, Qty: 1\nRisk/reward ratio: 2",
     ]);
+    const option = "NIFTY 24000 CE 06 OCT 26 estimated entry 154.55 target 282.15 stop 120.40 P&L/lot 1.00 option-based quantity 2 lots";
+    expect(optionCentreLine(option)).toBe("ATM CE ~154.55 -> T 282.15 / S 120.4, option qty 2");
+    expect(positionLabels(levels, size, open, false, option).find((label) => label.role === "centre")?.lines.at(-1)).toBe(
+      "ATM CE ~154.55 -> T 282.15 / S 120.4, option qty 2",
+    );
+    expect(positionLabels(levels, size, open, false, option).find((label) => label.role === "centre")?.tooltip).toBe("estimated");
+    expect(positionLabels(levels, size, open, true, option).find((label) => label.role === "centre")?.lines).toEqual(["Qty: 1", "Risk/reward ratio: 2"]);
+  });
+
+  it("keeps the target above a long's profit zone and the stop below the risk zone without overlap", () => {
+    const placed = placePositionBadges({
+      toolLeft: 100,
+      toolWidth: 200,
+      entryY: 200,
+      profitTop: 80,
+      profitHeight: 120,
+      riskTop: 200,
+      riskHeight: 80,
+      paneHeight: 400,
+      badges: [
+        { role: "target", w: 180, h: 24 },
+        { role: "stop", w: 160, h: 24 },
+        { role: "centre", w: 140, h: 40 },
+      ],
+    });
+    const target = placed.find((item) => item.role === "target");
+    const stop = placed.find((item) => item.role === "stop");
+    const centre = placed.find((item) => item.role === "centre");
+    expect(target && target.y + target.h).toBeLessThanOrEqual(80);
+    expect(stop && stop.y).toBeGreaterThanOrEqual(280);
+    expect(centre && centre.y).toBeLessThan(200);
+    expect(centre && centre.y + centre.h).toBeGreaterThan(200);
+    expect(target && centre && stop && overlaps(target, centre)).toBe(false);
+    expect(target && centre && stop && overlaps(stop, centre)).toBe(false);
+    const tight = placePositionBadges({
+      toolLeft: 40,
+      toolWidth: 80,
+      entryY: 50,
+      profitTop: 40,
+      profitHeight: 10,
+      riskTop: 50,
+      riskHeight: 10,
+      paneHeight: 120,
+      badges: [
+        { role: "target", w: 200, h: 30 },
+        { role: "stop", w: 200, h: 30 },
+        { role: "centre", w: 180, h: 48 },
+      ],
+    });
+    const boxes = tight.filter((item): item is NonNullable<typeof item> => item != null);
+    for (let i = 0; i < boxes.length; i += 1) {
+      for (let j = i + 1; j < boxes.length; j += 1) expect(overlaps(boxes[i]!, boxes[j]!)).toBe(false);
+    }
+  });
+
+  it("moves a handle that sits inside a label to the nearer edge", () => {
+    const badge = { x: 100, y: 40, w: 200, h: 30 };
+    expect(shiftHandleOffBadges({ x: 120, y: 55 }, [badge])).toEqual({ x: 93, y: 55 });
+    expect(shiftHandleOffBadges({ x: 280, y: 55 }, [badge])).toEqual({ x: 307, y: 55 });
+    expect(shiftHandleOffBadges({ x: 40, y: 55 }, [badge])).toEqual({ x: 40, y: 55 });
   });
 });
+
+function overlaps(a: { x: number; y: number; w: number; h: number }, b: { x: number; y: number; w: number; h: number }): boolean {
+  return a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+}
 
 describe("outcome", () => {
   const anchors = [
@@ -228,8 +298,8 @@ describe("outcome", () => {
       pnlRupees: -6_500,
     });
     expect(positionOutcome("long", anchors, both, [], null, qty).status).toBe("ambiguous");
-    expect(positionLabels(positionLevels("long", anchors), positionSize(positionLevels("long", anchors), sized(), 65), positionOutcome("long", anchors, both, [], null, qty), true).map((label) => label.text)).toContain(
-      "ambiguous (stop assumed)",
+    expect(positionLabels(positionLevels("long", anchors), positionSize(positionLevels("long", anchors), sized(), 65), positionOutcome("long", anchors, both, [], null, qty), false).map((label) => label.text).join("\n")).toContain(
+      "stop assumed",
     );
   });
 
@@ -266,8 +336,8 @@ describe("outcome", () => {
     const after = positionOutcome("long", anchors, stopFirst, [], null, qty);
     expect(after.status).toBe("open");
     expect(after.activatedAt).toBe(T_0930);
-    expect(positionLabels(positionLevels("long", edge), positionSize(positionLevels("long", edge), sized(), 65), positionOutcome("long", edge, missed, [], null, qty), true).map((label) => label.text)).toContain(
-      "not entered",
+    expect(positionLabels(positionLevels("long", edge), positionSize(positionLevels("long", edge), sized(), 65), positionOutcome("long", edge, missed, [], null, qty), false).map((label) => label.text).join("\n")).toContain(
+      "Not entered",
     );
   });
 

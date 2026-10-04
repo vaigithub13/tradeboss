@@ -133,9 +133,22 @@ export function bindDrawings(
     gesture = null;
   };
 
+  const onPointerHover = (ev: PointerEvent): void => {
+    if (gesture) return;
+    const store = useDrawStore.getState();
+    if (store.tool !== "cursor") {
+      primitive.setHovered(null);
+      return;
+    }
+    const { x, y } = local(ev);
+    const hit = primitive.pick(x, y);
+    primitive.setHovered(hit && hit.id !== "draft" ? hit.id : null);
+  };
+
   chart.subscribeClick(onClick);
   chart.subscribeCrosshairMove(onMove);
   el.addEventListener("pointerdown", onPointerDown, true);
+  el.addEventListener("pointermove", onPointerHover);
   window.addEventListener("pointermove", onPointerMove);
   window.addEventListener("pointerup", onPointerUp);
 
@@ -143,6 +156,7 @@ export function bindDrawings(
     chart.unsubscribeClick(onClick);
     chart.unsubscribeCrosshairMove(onMove);
     el.removeEventListener("pointerdown", onPointerDown, true);
+    el.removeEventListener("pointermove", onPointerHover);
     window.removeEventListener("pointermove", onPointerMove);
     window.removeEventListener("pointerup", onPointerUp);
   };

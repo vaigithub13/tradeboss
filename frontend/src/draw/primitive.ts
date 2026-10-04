@@ -11,6 +11,7 @@ import type {
 } from "lightweight-charts";
 
 import type { FvgBox } from "./api";
+import { placePositionBadges, shiftHandleOffBadges } from "./position";
 import {
   fibPrices,
   anchorLogical,
@@ -42,7 +43,7 @@ export interface DrawScene {
   weekendSessions: readonly string[];
   views: readonly {
     id: string;
-    labels: { role: string; text: string }[];
+    labels: { role: string; text: string; lines?: string[]; tone?: string; tooltip?: string }[];
     endTime: number | null;
     status: string;
     entryTime: number;
@@ -70,6 +71,13 @@ interface Zone {
   color: string;
 }
 
+interface BadgeSpec {
+  role: "target" | "stop" | "centre";
+  lines: string[];
+  color: string;
+  tooltip?: string;
+}
+
 interface Shape {
   id: string;
   style: DrawStyle;
@@ -78,6 +86,9 @@ interface Shape {
   fill: { x: number; y: number; w: number; h: number } | null;
   fills: Zone[];
   labels: { x: number; y: number; text: string }[];
+  entryLine: Seg | null;
+  badges: BadgeSpec[];
+  badgeFrame: { entryY: number; profit: Zone; risk: Zone } | null;
 }
 
 export interface DrawHit {
@@ -116,12 +127,30 @@ class DrawRenderer implements IPrimitivePaneRenderer {
           const bottom = Math.min(mediaSize.height, zone.y + zone.h);
           if (right > left && bottom > top) {
             ctx.save();
-            ctx.globalAlpha = 0.18;
+            ctx.globalAlpha = 0.2;
             ctx.fillStyle = zone.color;
             ctx.fillRect(left, top, right - left, bottom - top);
+            ctx.globalAlpha = 0.7;
+            ctx.strokeStyle = zone.color;
+            ctx.lineWidth = 1;
+            ctx.strokeRect(left, top, right - left, bottom - top);
             ctx.restore();
           }
         }
+        if (shape.entryLine) {
+          ctx.save();
+          ctx.strokeStyle = "rgba(255,255,255,0.9)";
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(shape.entryLine.x1, shape.entryLine.y1);
+          ctx.lineTo(shape.entryLine.x2, shape.entryLine.y2);
+          ctx.stroke();
+          ctx.restore();
+        }
+        const badgeBoxes =
+          shape.badges.length > 0 && shape.badgeFrame && shape.fill
+            ? drawPositionBadges(ctx, shape, mediaSize.height, shape.id === this.owner.hoveredId)
+            : [];
         if (shape.fill && shape.style.fill) {
           const left = Math.max(0, shape.fill.x);
           const right = Math.min(mediaSize.width, shape.fill.x + shape.fill.w);
@@ -147,13 +176,14 @@ class DrawRenderer implements IPrimitivePaneRenderer {
         ctx.font = "11px sans-serif";
         ctx.textBaseline = "bottom";
         for (const label of shape.labels) ctx.fillText(label.text, label.x, label.y);
-        if (shape.id === this.owner.scene.selectedId) {
+        if (shape.id === this.owner.scene.selectedId || shape.id === this.owner.hoveredId) {
           ctx.fillStyle = "#0b0e14";
           ctx.strokeStyle = "#ffffff";
           ctx.lineWidth = 1;
           for (const handle of shape.handles) {
-            ctx.fillRect(handle.x - 4, handle.y - 4, 8, 8);
-            ctx.strokeRect(handle.x - 4, handle.y - 4, 8, 8);
+            const point = shiftHandleOffBadges(handle, badgeBoxes);
+            ctx.fillRect(point.x - 4, point.y - 4, 8, 8);
+            ctx.strokeRect(point.x - 4, point.y - 4, 8, 8);
           }
         }
         ctx.restore();
@@ -162,7 +192,85 @@ class DrawRenderer implements IPrimitivePaneRenderer {
   }
 }
 
+function roundBox(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, radius: number): void {
+  const r = Math.min(radius, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function measurePositionBadges(ctx: CanvasRenderingContext2D, shape: Shape, paneHeight: number) {
+  const frame = shape.badgeFrame;
+  const body = shape.fill;
+  if (!frame || !body) return { measured: [], placed: [] };
+  ctx.save();
+  ctx.font = "12px sans-serif";
+  const measured = shape.badges.map((badge) => {
+    const widths = badge.lines.map((line) => ctx.measureText(line).width);
+    const textWidth = widths.length === 0 ? 0 : Math.max(...widths);
+    const height = badge.lines.reduce((sum, line) => sum + (line.startsWith("risk/lot") ? 13 : 16), 0) + 10;
+    return { ...badge, w: textWidth + 16, h: Math.max(22, height) };
+  });
+  ctx.restore();
+  return {
+    measured,
+    placed: placePositionBadges({
+      toolLeft: body.x,
+      toolWidth: body.w,
+      entryY: frame.entryY,
+      profitTop: frame.profit.y,
+      profitHeight: frame.profit.h,
+      riskTop: frame.risk.y,
+      riskHeight: frame.risk.h,
+      paneHeight,
+      badges: measured,
+    }),
+  };
+}
+
+function drawPositionBadges(ctx: CanvasRenderingContext2D, shape: Shape, paneHeight: number, showTooltip: boolean) {
+  const { measured, placed } = measurePositionBadges(ctx, shape, paneHeight);
+  ctx.save();
+  ctx.font = "12px sans-serif";
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "center";
+  for (const badge of placed) {
+    const spec = measured.find((item) => item.role === badge.role);
+    if (!spec) continue;
+    ctx.fillStyle = spec.color;
+    roundBox(ctx, badge.x, badge.y, badge.w, badge.h, 4);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    let y = badge.y + 5;
+    for (const line of spec.lines) {
+      const lineHeight = line.startsWith("risk/lot") ? 13 : 16;
+      ctx.font = line.startsWith("risk/lot") ? "10px sans-serif" : "12px sans-serif";
+      ctx.fillText(line, badge.x + badge.w / 2, y + lineHeight / 2);
+      y += lineHeight;
+    }
+    if (showTooltip && spec.tooltip && spec.role === "centre") {
+      ctx.font = "11px sans-serif";
+      const tip = spec.tooltip;
+      const tipW = ctx.measureText(tip).width + 12;
+      const tipX = badge.x + badge.w / 2 - tipW / 2;
+      const tipY = Math.max(2, badge.y - 22);
+      ctx.fillStyle = "#131722";
+      roundBox(ctx, tipX, tipY, tipW, 18, 3);
+      ctx.fill();
+      ctx.fillStyle = "#ffffff";
+      ctx.fillText(tip, badge.x + badge.w / 2, tipY + 9);
+    }
+  }
+  ctx.restore();
+  return placed;
+}
+
 export class DrawPrimitive implements ISeriesPrimitive {
+  hoveredId: string | null = null;
   scene: DrawScene = {
     drawings: [],
     timeframe: "15m",
@@ -179,9 +287,16 @@ export class DrawPrimitive implements ISeriesPrimitive {
 
   private chart: Chart | null = null;
   private series: Series | null = null;
+  private textCtx: CanvasRenderingContext2D | null = null;
   private requestUpdate: () => void = () => {};
   private readonly renderer = new DrawRenderer(this);
   private readonly views: readonly IPrimitivePaneView[] = [{ renderer: () => this.renderer }];
+
+  private badgeBoxes(shape: Shape, paneHeight: number) {
+    if (!this.textCtx) this.textCtx = document.createElement("canvas").getContext("2d");
+    if (!this.textCtx) return [];
+    return measurePositionBadges(this.textCtx, shape, paneHeight).placed;
+  }
 
   attached(param: SeriesAttachedParameter<Time, "Candlestick">): void {
     this.chart = param.chart as Chart;
@@ -205,13 +320,22 @@ export class DrawPrimitive implements ISeriesPrimitive {
     this.requestUpdate();
   }
 
+  setHovered(id: string | null): void {
+    if (this.hoveredId === id) return;
+    this.hoveredId = id;
+    this.requestUpdate();
+  }
+
   pick(x: number, y: number): DrawHit | null {
     const size = this.chart?.paneSize();
     const shapes = this.shapes(size?.width ?? 0, size?.height ?? 0);
-    const selected = shapes.find((shape) => shape.id === this.scene.selectedId);
-    if (selected) {
-      for (const handle of selected.handles) {
-        if (Math.hypot(x - handle.x, y - handle.y) <= HIT + 2) return { id: selected.id, handle: handle.index };
+    for (const shape of shapes) {
+      if (shape.id !== this.scene.selectedId && shape.id !== this.hoveredId) continue;
+      const boxes =
+        shape.badges.length > 0 && shape.badgeFrame && shape.fill ? this.badgeBoxes(shape, size?.height ?? 0) : [];
+      for (const handle of shape.handles) {
+        const point = shiftHandleOffBadges(handle, boxes);
+        if (Math.hypot(x - point.x, y - point.y) <= HIT + 2) return { id: shape.id, handle: handle.index };
       }
     }
     let best: { id: string; dist: number } | null = null;
@@ -292,14 +416,14 @@ export class DrawPrimitive implements ISeriesPrimitive {
     const fills = [zone(target.y, view.profitColor), zone(stop.y, view.stopColor)];
     const top = Math.min(...fills.map((item) => item.y));
     const bottom = Math.max(...fills.map((item) => item.y + item.h));
-    const placed = labelsForWidth(
-      drawing.tool,
-      w,
-      view.labels.map((label) => ({
-        y: label.role === "stop" ? stop.y : label.role === "target" ? target.y : entry.y,
-        text: label.text,
-      })),
-    );
+    const badges: BadgeSpec[] = view.labels.flatMap((label) => {
+      if (label.role !== "target" && label.role !== "stop" && label.role !== "centre") return [];
+      const lines = label.lines && label.lines.length > 0 ? label.lines : [label.text];
+      const color = label.role === "stop" || label.tone === "loss" ? view.stopColor : view.profitColor;
+      return [{ role: label.role, lines, color, tooltip: label.tooltip }];
+    });
+    const profit = fills[0];
+    const risk = fills[1];
     return {
       ...base,
       handles: [
@@ -310,11 +434,10 @@ export class DrawPrimitive implements ISeriesPrimitive {
       ],
       fill: { x, y: top, w, h: Math.max(1, bottom - top) },
       fills,
-      segments: fills.flatMap((item) => [
-        { x1: item.x, y1: item.y, x2: item.x + item.w, y2: item.y },
-        { x1: item.x, y1: item.y + item.h, x2: item.x + item.w, y2: item.y + item.h },
-      ]),
-      labels: placed.map((label) => ({ x: x + w + 6, y: label.y, text: label.text })),
+      segments: [],
+      entryLine: { x1: x, y1: entry.y, x2: x + w, y2: entry.y },
+      badges,
+      badgeFrame: profit && risk ? { entryY: entry.y, profit, risk } : null,
     };
   }
 
@@ -368,7 +491,7 @@ export class DrawPrimitive implements ISeriesPrimitive {
       const p = this.xy(anchor);
       return p ? [{ ...p, index }] : [];
     });
-    const base: Shape = { id: drawing.id, style, handles, fill: null, fills: [], segments: [], labels: [] };
+    const base: Shape = { id: drawing.id, style, handles, fill: null, fills: [], segments: [], labels: [], entryLine: null, badges: [], badgeFrame: null };
     if (drawing.tool === "long_position" || drawing.tool === "short_position") return this.positionShape(drawing, base);
 
     if (drawing.tool === "horizontal" || drawing.tool === "horizontal_ray") {
