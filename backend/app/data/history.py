@@ -25,7 +25,7 @@ from typing import Any
 import duckdb
 import pandas as pd
 
-from app.data.importer import COLUMNS, build_frame
+from app.data.importer import COLUMNS, build_frame, write_parquet
 from app.upstox.client import UpstoxClient, parse_candles
 from app.upstox.instruments import NIFTY_INDEX_KEY, Instrument
 
@@ -119,15 +119,8 @@ def read_parquet(path: Path) -> pd.DataFrame:
 
 
 def write_parquet_atomic(df: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".tmp")
-    con = duckdb.connect()
-    try:
-        con.register("candles_df", df)
-        con.execute(f"COPY (SELECT * FROM candles_df ORDER BY time) TO '{_q(tmp)}' (FORMAT PARQUET)")
-    finally:
-        con.close()
-    os.replace(tmp, path)
+    """Publish a candle file only when it contains rows. An empty frame changes nothing."""
+    write_parquet(df, path)
 
 
 def day_start_ts(d: date) -> int:

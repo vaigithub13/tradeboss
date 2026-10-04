@@ -8,6 +8,8 @@ from pathlib import Path
 import duckdb
 import pandas as pd
 
+from app.data.importer import parquet_rows
+from app.data.publish import publish_file
 from app.live.model import IST
 from app.live.spreads.rows import COLUMNS
 
@@ -66,14 +68,20 @@ def _chunk_path(directory: Path, day: date) -> Path:
 
 
 def _write(frame: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    escaped = str(path).replace("'", "''")
-    con = duckdb.connect()
-    try:
-        con.register("spreads_df", frame)
-        con.execute(f"COPY (SELECT * FROM spreads_df ORDER BY ts_ms) TO '{escaped}' (FORMAT PARQUET)")
-    finally:
-        con.close()
+    if len(frame) == 0:
+        return
+
+    def copy(tmp: Path) -> None:
+        escaped = str(tmp).replace("'", "''")
+        con = duckdb.connect()
+        try:
+            con.register("spreads_df", frame)
+            con.execute(f"COPY (SELECT * FROM spreads_df ORDER BY ts_ms) TO '{escaped}' (FORMAT PARQUET)")
+        finally:
+            con.close()
+
+    if not publish_file(path, copy, accept=lambda tmp: parquet_rows(tmp) > 0):
+        raise OSError(f"refusing to publish an empty {path.name}")
 
 
 def read_spreads(directory: Path, day: date) -> pd.DataFrame:

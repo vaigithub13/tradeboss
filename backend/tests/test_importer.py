@@ -124,6 +124,7 @@ def test_write_parquet_roundtrip_via_duckdb(tmp_path: Path) -> None:
     df, _ = build_frame([raw(2024, 1, 1, 9, 15), raw(2024, 11, 1, 18, 0)])
     out = tmp_path / "candles" / "TEST" / "5m.parquet"
     write_parquet(df, out)
+    assert not out.with_name(out.name + ".tmp").exists()
     rows = duckdb.connect().execute(
         f"SELECT session_type, oi FROM read_parquet('{out}') ORDER BY time"
     ).fetchall()

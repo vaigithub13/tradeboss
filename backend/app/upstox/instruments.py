@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import gzip
 import json
-import os
 import re
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -21,6 +20,8 @@ from pathlib import Path
 from typing import Any, Literal
 
 import httpx
+
+from app.data.publish import publish_file
 
 IST = timezone(timedelta(hours=5, minutes=30))
 NSE_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
@@ -160,15 +161,14 @@ def take_snapshot(
         prev_path = snapshot_path(base, prev_day)
         if _same_content(raw, prev_path.read_bytes()):
             marker = snapshot_marker(base, day)
-            marker.parent.mkdir(parents=True, exist_ok=True)
-            tmp = marker.with_suffix(".tmp")
-            tmp.write_text(f"{prev_day.isoformat()}\n")
-            os.replace(tmp, marker)
+            note = f"{prev_day.isoformat()}\n"
+            if not publish_file(marker, lambda tmp: tmp.write_text(note), accept=lambda tmp: tmp.stat().st_size > 0):
+                raise SnapshotError("refusing to publish an empty snapshot note")
             return SnapshotResult(day, prev_path, "unchanged", same_as=prev_day)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".gz.tmp")
-    tmp.write_bytes(raw)
-    os.replace(tmp, path)
+    if not raw:
+        raise SnapshotError("refusing to publish an empty instrument file")
+    if not publish_file(path, lambda tmp: tmp.write_bytes(raw), accept=lambda tmp: tmp.stat().st_size == len(raw)):
+        raise SnapshotError("refusing to publish an empty instrument file")
     marker = snapshot_marker(base, day)
     if marker.exists():  # a forced re-download that turned out different from the earlier note
         marker.unlink()

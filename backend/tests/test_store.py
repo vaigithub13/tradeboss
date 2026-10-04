@@ -77,7 +77,11 @@ def test_dates_of_type(store: CandleStore) -> None:
 
 
 def test_an_empty_parquet_has_no_time_range(tmp_path: Path) -> None:
-    write_parquet(pd.DataFrame({"time": pd.Series([], dtype="int64")}), tmp_path / "EMPTY" / "1m.parquet")
+    write_parquet(
+        pd.DataFrame({"time": pd.Series([], dtype="int64")}),
+        tmp_path / "EMPTY" / "1m.parquet",
+        allow_empty=True,
+    )
     store = CandleStore(tmp_path)
     assert store.symbols() == ["EMPTY"]
     with pytest.raises(SymbolNotFound):

@@ -19,6 +19,7 @@ from app.data.history import (
     split_windows,
     symbol_dir_name,
     sync_symbol,
+    write_parquet_atomic,
 )
 from app.data.importer import build_frame
 from app.data.store import CandleStore
@@ -169,7 +170,38 @@ def test_holidays_and_empty_windows_still_count_as_covered(tmp_path: Path) -> No
     again = FakeClient()
     sync_symbol(again, tmp_path, FUT, from_date=D(2026, 9, 1), now=NOW)
     assert again.historical_calls == []
-    assert not (tmp_path / symbol_dir_name(FUT.key) / "1m.parquet").exists() or len(read_parquet(tmp_path / symbol_dir_name(FUT.key) / "1m.parquet")) == 0
+    parquet = tmp_path / symbol_dir_name(FUT.key) / "1m.parquet"
+    assert not parquet.exists()
+    assert not parquet.with_name(parquet.name + ".tmp").exists()
+
+
+def test_an_empty_download_does_not_create_or_wipe_a_candle_file(tmp_path: Path) -> None:
+    path = tmp_path / "NSE_FO_35005_26_12_2024" / "1m.parquet"
+    write_parquet_atomic(frame(D(2026, 9, 30), 5), path)
+    kept = path.read_bytes()
+    empty = read_parquet(Path("/nonexistent/none.parquet"))
+    write_parquet_atomic(empty, path)
+    assert path.read_bytes() == kept
+    missing = tmp_path / "NEW" / "1m.parquet"
+    write_parquet_atomic(empty, missing)
+    assert not missing.exists()
+    assert not missing.with_name(missing.name + ".tmp").exists()
+
+
+def test_an_interrupted_candle_write_keeps_the_previous_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = tmp_path / "NIFTY50" / "1m.parquet"
+    write_parquet_atomic(frame(D(2026, 9, 30), 5), path)
+    kept = path.read_bytes()
+
+    def boom(_df: pd.DataFrame, dest: Path) -> None:
+        dest.write_bytes(b"partial")
+        raise RuntimeError("interrupted")
+
+    monkeypatch.setattr("app.data.importer._copy_parquet", boom)
+    with pytest.raises(RuntimeError, match="interrupted"):
+        write_parquet_atomic(frame(D(2026, 9, 30), 6), path)
+    assert path.read_bytes() == kept
+    assert not path.with_name(path.name + ".tmp").exists()
 
 
 def test_history_never_goes_before_january_2022(tmp_path: Path) -> None:

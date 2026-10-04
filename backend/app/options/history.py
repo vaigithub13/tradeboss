@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import tempfile
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -25,6 +23,8 @@ from typing import Any, Protocol
 import duckdb
 import pandas as pd
 
+from app.data.importer import parquet_rows
+from app.data.publish import publish_file
 from app.options.strikes import KINDS, atm_strike
 from app.upstox.client import UpstoxError, parse_candles
 from app.upstox.instruments import InstrumentIndex
@@ -90,15 +90,15 @@ class OptionHistoryStore:
         return json.loads(p.read_text()) if p.exists() else {}
 
     def _atomic(self, path: Path, write: Callable[[Path], None]) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
-        os.close(fd)
-        try:
-            write(Path(tmp))
-            os.replace(tmp, path)
-        finally:
-            if os.path.exists(tmp):
-                os.remove(tmp)
+        """Replace ``path`` only when the temp file is non-empty. A parquet also needs rows."""
+
+        def accept(tmp: Path) -> bool:
+            if path.suffix == ".parquet":
+                return parquet_rows(tmp) > 0
+            return True
+
+        if not publish_file(path, write, accept=accept):
+            raise OSError(f"refusing to publish {path.name}")
 
     @staticmethod
     def _lk(strike: float, kind: str) -> str:

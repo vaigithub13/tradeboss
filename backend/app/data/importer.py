@@ -21,6 +21,8 @@ from typing import Any
 import duckdb
 import pandas as pd
 
+from app.data.publish import publish_file
+
 from app.data.sessions import (
     MUHURAT_DATES,
     SESSION_CLOSE_MIN,
@@ -108,10 +110,39 @@ def build_frame(
     )
 
 
-def write_parquet(df: pd.DataFrame, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def parquet_rows(path: Path) -> int:
+    """Row count of a parquet file. Unreadable files raise; they are not published."""
     escaped = str(path).replace("'", "''")
     con = duckdb.connect()
-    con.register("candles_df", df)
-    con.execute(f"COPY (SELECT * FROM candles_df ORDER BY time) TO '{escaped}' (FORMAT PARQUET)")
-    con.close()
+    try:
+        row = con.execute(f"SELECT count(*) FROM read_parquet('{escaped}')").fetchone()
+    finally:
+        con.close()
+    return 0 if row is None else int(row[0])
+
+
+def _copy_parquet(df: pd.DataFrame, path: Path) -> None:
+    escaped = str(path).replace("'", "''")
+    con = duckdb.connect()
+    try:
+        con.register("candles_df", df)
+        con.execute(f"COPY (SELECT * FROM candles_df ORDER BY time) TO '{escaped}' (FORMAT PARQUET)")
+    finally:
+        con.close()
+
+
+def write_parquet(df: pd.DataFrame, path: Path, *, allow_empty: bool = False) -> None:
+    """Publish ``path`` only when the temp parquet is readable.
+
+    An empty frame is not a download result: the destination is left untouched
+    unless ``allow_empty`` is set (the store test that plants a zero-row file).
+    """
+    if len(df) == 0 and not allow_empty:
+        return
+
+    def accept(tmp: Path) -> bool:
+        rows = parquet_rows(tmp)
+        return rows > 0 or (allow_empty and rows == 0)
+
+    if not publish_file(path, lambda tmp: _copy_parquet(df, tmp), accept=accept):
+        raise OSError(f"refusing to publish {path.name}: the write was empty or unreadable")

@@ -308,6 +308,26 @@ def test_expired_future_volume_is_fetched_once_and_not_again(tmp_path: Path) -> 
     assert second.calls == []
 
 
+def test_an_expired_future_with_no_candles_does_not_leave_a_parquet(tmp_path: Path) -> None:
+    from app.data.futures_volume import sync_expired_future
+    from app.data.history import read_meta, symbol_dir_name
+
+    class Empty:
+        def expired_historical_candles(self, key: str, start: date, end: date, interval: str = "1minute"):
+            assert interval == "1minute"
+            return []
+
+    key = "NSE_FO|35005|26-12-2024"
+    sync_expired_future(
+        Empty(), tmp_path, expiry=date(2024, 12, 26), expired_key=key,
+        symbol="NIFTY FUT 26 DEC 24", now_date=date(2026, 10, 4),
+    )
+    folder = tmp_path / symbol_dir_name(key)
+    assert not (folder / "1m.parquet").exists()
+    assert list(folder.glob("*.tmp")) == []
+    assert read_meta(folder).covered  # the empty range is remembered, so it is not fetched again
+
+
 def test_registry_rejects_a_bad_roll_setting() -> None:
     with pytest.raises(ValueError):
         validate_params("vwap_fut", {"roll_days": -1})

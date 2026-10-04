@@ -72,6 +72,12 @@ def test_parse_master_requires_nifty_50_to_be_present() -> None:
 
 
 # ------------------------------------------------------------------ dated snapshots
+def test_an_empty_instrument_download_is_not_saved(tmp_path: Path) -> None:
+    with pytest.raises(SnapshotError):
+        take_snapshot(tmp_path, now=MORNING, fetch=lambda: b"")
+    assert list(tmp_path.rglob("*")) == []
+
+
 def test_snapshot_is_stored_under_the_ist_date_and_never_overwritten_without_force(tmp_path: Path) -> None:
     calls = 0
 
