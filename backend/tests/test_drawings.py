@@ -88,6 +88,88 @@ def test_a_drawing_without_timeframe_fields_shows_on_every_timeframe(tmp_path) -
     assert row["locked"] is False
 
 
+def _position(drawing_id: str, tool: str = "long_position") -> dict:
+    row = _line(drawing_id)
+    row["tool"] = tool
+    row["anchors"] = [
+        {"time": 1_790_826_300, "price": 24000.0},
+        {"time": 1_790_839_800, "price": 24480.0},
+        {"time": 1_790_839_800, "price": 23760.0},
+    ]
+    row["position"] = {
+        "accountSize": 250000,
+        "riskMode": "rupees",
+        "riskPercent": 1,
+        "riskRupees": 5000,
+        "lotSize": 65,
+        "priceMode": "points",
+        "profitColor": "#089981",
+        "stopColor": "#f23645",
+        "compact": True,
+        "options": True,
+    }
+    row["drawnOn"] = "15m"
+    row["showOn"] = ["15m", "1h"]
+    return row
+
+
+def test_a_position_keeps_its_three_anchors_and_settings_across_a_restart(tmp_path) -> None:
+    path = tmp_path / "drawings.sqlite"
+    DrawingStore(path).replace("NIFTY50", [_position("long"), _position("short", "short_position"), _line("trend")])
+    again = DrawingStore(path).load("NIFTY50")
+    assert [(row["id"], row["tool"]) for row in again] == [("long", "long_position"), ("short", "short_position"), ("trend", "trend")]
+    assert again[0]["anchors"] == [
+        {"time": 1_790_826_300, "price": 24000.0},
+        {"time": 1_790_839_800, "price": 24480.0},
+        {"time": 1_790_839_800, "price": 23760.0},
+    ]
+    assert again[0]["position"]["accountSize"] == 250000
+    assert again[0]["position"]["riskMode"] == "rupees"
+    assert again[0]["position"]["lotSize"] == 65
+    assert again[0]["position"]["priceMode"] == "points"
+    assert again[0]["position"]["compact"] is True
+    assert again[0]["position"]["options"] is True
+    assert again[0]["drawnOn"] == "15m"
+    assert again[0]["showOn"] == ["15m", "1h"]
+    assert "position" not in again[2]
+
+
+def test_a_position_without_settings_stores_the_defaults(tmp_path) -> None:
+    path = tmp_path / "drawings.sqlite"
+    row = _position("long")
+    del row["position"]
+    DrawingStore(path).replace("NIFTY50", [row])
+    stored = DrawingStore(path).load("NIFTY50")[0]["position"]
+    assert stored == {
+        "accountSize": 1000000,
+        "riskMode": "percent",
+        "riskPercent": 1,
+        "riskRupees": 10000,
+        "lotSize": None,
+        "priceMode": "price",
+        "profitColor": "#089981",
+        "stopColor": "#f23645",
+        "compact": False,
+        "options": False,
+    }
+
+
+def test_a_position_with_the_wrong_shape_is_rejected(tmp_path) -> None:
+    store = DrawingStore(tmp_path / "drawings.sqlite")
+    short = _position("long")
+    short["anchors"] = short["anchors"][:2]
+    with pytest.raises(ValueError, match="3 anchors"):
+        store.replace("NIFTY50", [short])
+    bad_mode = _position("long")
+    bad_mode["position"]["riskMode"] = "lots"
+    with pytest.raises(ValueError, match="riskMode"):
+        store.replace("NIFTY50", [bad_mode])
+    fraction = _position("long")
+    fraction["position"]["lotSize"] = 65.5
+    with pytest.raises(ValueError, match="lotSize"):
+        store.replace("NIFTY50", [fraction])
+
+
 def test_bad_drawings_are_rejected(tmp_path) -> None:
     store = DrawingStore(tmp_path / "drawings.sqlite")
     bad = _line("a")

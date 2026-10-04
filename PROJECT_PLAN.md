@@ -228,7 +228,7 @@ Built. The tests in `frontend/src/draw/model.test.ts`, `backend/tests/test_drawi
 
 ### Manual drawings
 
-A left toolbar, in this order: cursor, trend line, ray, extended line, horizontal line, horizontal ray, vertical line, rectangle, Fibonacci retracement, text, price/time measure, eraser, lock all, hide all. Cursor, eraser, lock all, and hide all are not stored drawings.
+A left toolbar, in this order: cursor, trend line, ray, extended line, horizontal line, horizontal ray, vertical line, rectangle, Fibonacci retracement, text, price/time measure, long position, short position, eraser, lock all, hide all. Cursor, eraser, lock all, and hide all are not stored drawings.
 
 An anchor is `{ time, price }`. `time` is unix seconds. Nothing is stored in pixels. Zoom, scroll, a new candle, and a restart do not move an anchor. Switching timeframe does not rewrite the stored time. On screen, the anchor is drawn on the bar that contains that time. Intraday bars use the same 09:15 IST buckets as `resample`. A 12:47 anchor on a 15-minute chart is drawn at the 12:45 bar (unix `1790838900` on 1 Oct 2026) and the stored time stays 12:47 (`1790839020`). A 10:20 anchor on a 1-hour chart is drawn at 10:15. A daily bar maps to 09:15 IST of that date. A weekly bar maps to 09:15 IST on that week's Monday.
 
@@ -242,7 +242,7 @@ Fibonacci prices run from the second anchor back toward the first at 0, 0.236, 0
 
 Select, drag a handle, and move the whole drawing. Delete removes the selected drawing (the Delete key). Lock all refuses move, handle edits, and delete. Hide all leaves the drawings saved and draws none. Undo and redo are a document stack (Cmd+Z, Cmd+Shift+Z). A new edit after undo drops the redo branch.
 
-Drawings are per symbol, not per timeframe, in SQLite at `data/drawings.sqlite` (the `data/` directory stays gitignored). `GET /api/drawings?symbol=` loads them. `PUT /api/drawings` replaces that symbol's list. Export is `{ "symbol", "drawings" }`. Import replaces that symbol and leaves every other symbol alone. A missing symbol, an unknown tool, or an anchor without `time` and `price` is rejected. The allowed tools are `trend`, `ray`, `extended`, `horizontal`, `horizontal_ray`, `vertical`, `rectangle`, `fib`, `text`, and `measure`.
+Drawings are per symbol, not per timeframe, in SQLite at `data/drawings.sqlite` (the `data/` directory stays gitignored). `GET /api/drawings?symbol=` loads them. `PUT /api/drawings` replaces that symbol's list. Export is `{ "symbol", "drawings" }`. Import replaces that symbol and leaves every other symbol alone. A missing symbol, an unknown tool, or an anchor without `time` and `price` is rejected. The allowed tools are `trend`, `ray`, `extended`, `horizontal`, `horizontal_ray`, `vertical`, `rectangle`, `fib`, `text`, `measure`, `long_position`, and `short_position`.
 
 Each drawing has `knownAt`. A drawing made during replay is stamped with the replay cursor, so it stays visible at that cursor. A drawing made live is stamped with the last candle's time. While a replay cursor is set, a drawing whose `knownAt` is after that cursor is not drawn. A later live drawing is hidden in an earlier replay. With no cursor, age does not hide anything. New live candles do not change stored anchors. The lines are a Lightweight Charts v5 series primitive on the candlestick series, so they move with the scale.
 
@@ -267,6 +267,36 @@ A higher-timeframe gap is drawn on a lower chart only after candle 3 of the high
 `session_gaps` is `include` (the default) or `exclude`. Exclude drops a gap whose candle 1 and candle 3 fall on different IST dates (an overnight gap). The indicator setting is labelled Overnight gaps.
 
 `compute` arrays `bull_top`, `bull_bottom`, `bear_top`, and `bear_bottom` are set on candle 3 only, and are NaN before that. `show_last` dropping an older box clears that bar too.
+
+### Long position and short position
+
+Spec. The tests in `frontend/src/draw/position.test.ts`, `backend/tests/test_drawings.py`, and `backend/tests/test_position_option.py` are the contract. The toolbar buttons and the primitive are not built yet.
+
+Both tools are stored drawings. A click sets the entry anchor `{ time, price }`. The other two anchors are the target and the stop. Their time is the right edge. Their prices are the default levels. Anchors stay time and price. `knownAt`, `drawnOn`, `showOn`, hide, lock, undo, the object tree, zoom to, and the 8px hit area are the same rules as every other drawing. The object tree labels them "Long position" and "Short position".
+
+The default stop is 1% of the entry price away from the entry. The default target is twice that far, so the risk/reward ratio is 2. A long target is above the entry and its stop is below. A short target is below the entry and its stop is above. The right edge is 15 session bars after the entry bar. The count uses the same NSE session rules as the empty area to the right of the last candle, including holidays. An entry at 09:15 IST on 1 Oct 2026 on a 15-minute chart ends at 13:00 the same day (`1790839800`). An entry at 15:15 that day (`1790847900`) ends at 12:45 on Monday 5 Oct (`1791184500`), because 2 Oct 2026 is a holiday.
+
+Four handles. Entry moves the entry time and price. Target moves the target price only. Stop moves the stop price only. The right edge moves the target time and the stop time together and leaves both prices where they are. Lock all and a locked drawing refuse those handle edits and refuse delete. Account size, risk, colours, compact mode, the options toggle, hide, lock, and `showOn` can still be changed.
+
+The profit zone is the band from entry to target, green `#089981`. The risk zone is the band from entry to stop, red `#f23645`. A short swaps which band is above the entry. Those two colours are settings.
+
+Reward points are `target − entry` for a long and `entry − target` for a short. Risk points are `entry − stop` for a long and `stop − entry` for a short. Each percent is that distance divided by the entry price, times 100. The ratio is reward divided by risk. A risk of 0 or less has no ratio. The risk budget is `accountSize × riskPercent / 100` when risk mode is `percent`, and `riskRupees` when risk mode is `rupees`. The default account size is ₹10,00,000, the default risk is 1%, and the default rupee risk is ₹10,000. Quantity is whole lots: `floor(budget / (risk points × lot size))`. Units are lots times the lot size. Rupee profit is reward points times units. Rupee loss is risk points times units. A missing lot, a lot below 1, or a risk that is not positive produces 0 lots. The lot is the dated lot table for the symbol on the entry's IST date (`NIFTY50` uses `NIFTY`). A date inside a lot-size transition is ambiguous: the drawing keeps the lot empty and does not guess. A stored lot size overrides the table. Prices are what is stored. Points mode edits the target and the stop as a distance from the entry and writes the price back.
+
+Full labels, prices and money to two decimals, no thousands separator:
+
+- target `24200.00 (+200.00, +0.83%) 2.00R ₹13000.00` for a long from 24000 to 24200 with a 23900 stop, one lot of 65, and a ₹10,000 budget
+- stop `23900.00 (-100.00, -0.42%) ₹6500.00`
+- a short target uses the signed index move, so 200 points down is `23800.00 (-200.00, -0.83%) 2.00R ₹13000.00`
+
+Compact mode keeps `24200.00 2.00R` and `23900.00`. When the ratio is missing the `R` token is left off. The outcome line is `open ₹5200.00` (a minus sign on the amount when the open result is a loss), `target hit`, `stop hit`, or `ambiguous (stop assumed)`. A position that has not started has no outcome line.
+
+After the entry time the tool reads the candles it is given. Bars that start before the entry bar, bars that start after the right edge, and bars that start after the replay cursor are ignored. While none of the remaining bars has reached the target or the stop, the position is open: the zones run to the last bar still inside the right edge, and the open result uses that bar's close. A long hits the target when a bar's high is at or above it, and hits the stop when a bar's low is at or below it. A short hits the target on the low and the stop on the high. The first such bar ends the zones on that bar. A fill at the target takes the reward. A fill at the stop takes the loss. Later bars do not change it. Live updates by passing the new candles into the same function.
+
+When one bar reaches both prices, the 1-minute bars inside it decide. Only minutes at or after the entry time, inside that bar, and at or before the cursor are read. The first minute that touches one price wins, and the zones end on that minute. A minute that touches both, or a chart bar that touches both when no 1-minute bar separates them, is `ambiguous (stop assumed)`: the stop fill is used. Replay passes the cursor in. A target that prints on a later bar stays hidden, and the result stays the open result of the last bar the cursor can see.
+
+The drawing stores a `position` object. Defaults: account size 1000000, risk mode `percent`, risk percent 1, risk rupees 10000, lot size `null`, price mode `price`, profit colour `#089981`, stop colour `#f23645`, compact false, options false. A long or short position has exactly three anchors. A short list is rejected with a message that contains `3 anchors`. `riskMode` is `percent` or `rupees`, and anything else is rejected with a message that contains `riskMode`. `priceMode` is `price` or `points`. `lotSize` is null or a positive whole number, and a fraction is rejected with a message that contains `lotSize`. A missing `position` object is stored as the defaults. Another tool does not grow a `position` field. `riskMode` is `percent` or `rupees`. `priceMode` is `price` or `points`. `lotSize` is null or a positive whole number.
+
+The options section is off unless the drawing's options toggle is on and the symbol is `NIFTY50` or `NIFTY`. It then shows the ATM call for a long, or the ATM put for a short, of the nearest weekly expiry, from the same contract choice the backtest uses. The entry premium and delta are option model v1 at the entry price and the entry time, with the India VIX passed in (the stored 1-minute VIX at or before the entry, and during replay at or before the cursor). The target and stop premiums start from that entry premium and move by `delta × index points`, then snap to the model's tick and floor. A missing VIX, a cursor before the entry, or a position that has not started leaves the section out. One lot is bought at the entry premium and sold at the exit premium. An open position exits at the index close's adjusted premium. A target exits at the target premium. A stop, including an ambiguous stop, exits at the stop premium. Both legs use the options cost table on the entry date. The rupee result is one lot after those costs. The label contains `estimated`. This path does not call Upstox.
 
 ---
 
