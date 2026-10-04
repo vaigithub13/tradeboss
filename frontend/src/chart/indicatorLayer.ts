@@ -1,10 +1,18 @@
+import type { CanvasRenderingTarget2D } from "fancy-canvas";
 import {
   HistogramSeries,
   LineSeries,
   LineStyle,
   LineType,
   type IChartApi,
+  type IPriceLine,
+  type IPrimitivePaneRenderer,
+  type IPrimitivePaneView,
   type ISeriesApi,
+  type ISeriesPrimitive,
+  type LineWidth,
+  type SeriesAttachedParameter,
+  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 
@@ -21,6 +29,11 @@ import {
 
 type AnySeries = ISeriesApi<"Line"> | ISeriesApi<"Histogram">;
 
+interface StochGuide {
+  role: "upper" | "middle" | "lower";
+  line: IPriceLine;
+}
+
 interface Bundle {
   type: IndicatorType;
   /** series keyed by role, e.g. { basis, upper, lower } or { up, down } */
@@ -29,6 +42,8 @@ interface Bundle {
   filledWith: { entry: IndicatorEntry | undefined; dataColors: string } | null;
   /** bumped on every refill; queued slices of an older fill are dropped */
   version: number;
+  guides: StochGuide[];
+  bandFill: StochBandFill | null;
 }
 
 /**
@@ -58,7 +73,7 @@ const asHist = (points: readonly HistogramPoint[]) =>
 
 /**
  * Owns the Lightweight Charts series of every indicator. Price-pane indicators draw over the
- * candles; RSI and MACD each get their own pane below (after the volume pane, if any).
+ * candles; RSI, Stochastic, and MACD each get their own pane below (after the volume pane, if any).
  * All lines are straight segments (LineType.Simple), never curved.
  */
 export class IndicatorLayer {
@@ -138,7 +153,7 @@ export class IndicatorLayer {
   private create(item: IndicatorInstance): Bundle {
     const c = item.colors;
     const color = (k: string): string => c[k] ?? "#d1d4dc";
-    const line = (col: string, pane: number, width: 1 | 2 = 2, extra: object = {}) =>
+    const line = (col: string, pane: number, width: LineWidth = 2, extra: object = {}) =>
       this.chart.addSeries(
         LineSeries,
         {
@@ -157,6 +172,8 @@ export class IndicatorLayer {
       series,
       filledWith: null,
       version: 0,
+      guides: [],
+      bandFill: null,
     });
 
     switch (item.type) {
@@ -191,6 +208,35 @@ export class IndicatorLayer {
         }
         this.chart.panes()[pane]?.setStretchFactor(SEPARATE_PANE_STRETCH);
         return bundle("rsi", { line: rsi });
+      }
+      case "stoch": {
+        const pane = this.newPane();
+        const scale = {
+          lastValueVisible: true,
+          priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+          autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 100 } }),
+        };
+        const k = line(color("k"), pane, lineWidth(item.params["k_width"]), scale);
+        const d = line(color("d"), pane, lineWidth(item.params["d_width"]), { ...scale, lastValueVisible: true });
+        const bandFill = new StochBandFill();
+        k.attachPrimitive(bandFill);
+        const guides = (["upper", "middle", "lower"] as const).map((role) => ({
+          role,
+          line: k.createPriceLine({
+            price: Number(item.params[role] ?? 0),
+            color: color("band"),
+            lineWidth: lineWidth(item.params["band_width"]),
+            lineStyle: LineStyle.Solid,
+            lineVisible: item.params["show_bands"] !== "hide",
+            axisLabelVisible: false,
+            title: "",
+          }),
+        }));
+        this.chart.panes()[pane]?.setStretchFactor(SEPARATE_PANE_STRETCH);
+        const created = bundle("stoch", { k, d });
+        created.guides = guides;
+        created.bandFill = bandFill;
+        return created;
       }
       case "macd": {
         const pane = this.newPane();
@@ -253,6 +299,10 @@ export class IndicatorLayer {
       case "rsi":
         lineJob("line", () => linePoints(t, out("rsi")));
         break;
+      case "stoch":
+        lineJob("k", () => linePoints(t, out("k")));
+        lineJob("d", () => linePoints(t, out("d")));
+        break;
       case "macd":
         lineJob("macd", () => linePoints(t, out("macd")));
         lineJob("signal", () => linePoints(t, out("signal")));
@@ -301,12 +351,39 @@ export class IndicatorLayer {
     }
   }
 
+  /** Colours, widths, band levels, and the background fill. Cheap, so it runs even when the values are unchanged. */
+  private syncStoch(item: IndicatorInstance, bundle: Bundle): void {
+    if (item.type !== "stoch" || !bundle.bandFill) return;
+    const s = bundle.series as Record<string, ISeriesApi<"Line">>;
+    const color = (key: string): string => item.colors[key] ?? "#d1d4dc";
+    s["k"]?.applyOptions({ color: color("k"), lineWidth: lineWidth(item.params["k_width"]) });
+    s["d"]?.applyOptions({ color: color("d"), lineWidth: lineWidth(item.params["d_width"]) });
+    const showBands = item.params["show_bands"] !== "hide";
+    const bandColor = color("band");
+    const width = lineWidth(item.params["band_width"]);
+    for (const guide of bundle.guides) {
+      guide.line.applyOptions({
+        price: Number(item.params[guide.role] ?? 0),
+        color: bandColor,
+        lineWidth: width,
+        lineVisible: showBands,
+      });
+    }
+    bundle.bandFill.set({
+      upper: Number(item.params["upper"] ?? 80),
+      lower: Number(item.params["lower"] ?? 20),
+      color: hexAlpha(bandColor, 0.1),
+      visible: item.params["show_background"] !== "hide",
+    });
+  }
+
   private fill(item: IndicatorInstance, bundle: Bundle, entry: IndicatorEntry | undefined): void {
     const c = item.colors;
     const color = (k: string): string => c[k] ?? "#d1d4dc";
     const s = bundle.series as Record<string, ISeriesApi<"Line">>;
 
     // Colours of lines are series options (cheap). Histogram colours live in the data.
+    this.syncStoch(item, bundle);
     const recolour = (role: string, col: string): void => void s[role]?.applyOptions({ color: col });
     switch (item.type) {
       case "sma":
@@ -327,6 +404,8 @@ export class IndicatorLayer {
       case "macd":
         recolour("macd", color("macd"));
         recolour("signal", color("signal"));
+        break;
+      case "stoch":
         break;
     }
 
@@ -366,5 +445,72 @@ export class IndicatorLayer {
       if (sliced) this.enqueue(() => run(job));
       else run(job);
     }
+  }
+}
+
+function lineWidth(value: unknown): LineWidth {
+  const n = Number(value);
+  if (n === 2 || n === 3 || n === 4) return n;
+  return 1;
+}
+
+function hexAlpha(hex: string, alpha: number): string {
+  const n = /^#([0-9a-fA-F]{6})$/.exec(hex);
+  if (!n?.[1]) return hex;
+  const raw = n[1];
+  const r = Number.parseInt(raw.slice(0, 2), 16);
+  const g = Number.parseInt(raw.slice(2, 4), 16);
+  const b = Number.parseInt(raw.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+}
+
+/** Fills the pane between the upper and lower Stochastic bands. */
+class StochBandFill implements ISeriesPrimitive<Time> {
+  upper = 80;
+  lower = 20;
+  color = "rgba(120, 123, 134, 0.1)";
+  visible = true;
+  private series: ISeriesApi<"Line"> | null = null;
+  private requestUpdate: () => void = () => {};
+  private readonly renderer: IPrimitivePaneRenderer = {
+    draw: (target: CanvasRenderingTarget2D) => {
+      target.useMediaCoordinateSpace(({ context, mediaSize }) => this.paint(context, mediaSize.width));
+    },
+  };
+  private readonly views: readonly IPrimitivePaneView[] = [{ zOrder: () => "bottom", renderer: () => this.renderer }];
+
+  attached(param: SeriesAttachedParameter<Time, "Line">): void {
+    this.series = param.series;
+    this.requestUpdate = param.requestUpdate;
+  }
+
+  detached(): void {
+    this.series = null;
+  }
+
+  paneViews(): readonly IPrimitivePaneView[] {
+    return this.views;
+  }
+
+  updateAllViews(): void {}
+
+  set(next: { upper: number; lower: number; color: string; visible: boolean }): void {
+    this.upper = next.upper;
+    this.lower = next.lower;
+    this.color = next.color;
+    this.visible = next.visible;
+    this.requestUpdate();
+  }
+
+  private paint(ctx: CanvasRenderingContext2D, width: number): void {
+    const series = this.series;
+    if (!this.visible || !series) return;
+    const y1 = series.priceToCoordinate(this.upper);
+    const y2 = series.priceToCoordinate(this.lower);
+    if (y1 == null || y2 == null) return;
+    ctx.save();
+    ctx.fillStyle = this.color;
+    ctx.fillRect(0, Math.min(y1, y2), width, Math.abs(y2 - y1));
+    ctx.restore();
   }
 }

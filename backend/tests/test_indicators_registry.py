@@ -31,10 +31,10 @@ PRICE_TOLERANCE = 0.01
 
 
 def test_types_panes_and_outputs() -> None:
-    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap", "fvg")
+    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "fvg")
     assert PANES == {
         "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price",
-        "rsi": "separate", "macd": "separate", "fvg": "price",
+        "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price",
     }  # fmt: skip
     assert OUTPUTS == {
         "sma": ["sma"],
@@ -42,6 +42,7 @@ def test_types_panes_and_outputs() -> None:
         "bb": ["basis", "upper", "lower"],
         "supertrend": ["supertrend", "direction"],
         "rsi": ["rsi"],
+        "stoch": ["k", "d"],
         "macd": ["macd", "signal", "hist"],
         "vwap": ["vwap"],
         "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
@@ -57,6 +58,22 @@ def test_types_panes_and_outputs() -> None:
         ("bb", {"length": 20, "mult": 2.0, "source": "close"}),
         ("supertrend", {"atr_length": 10, "multiplier": 3.0}),
         ("rsi", {"length": 14, "source": "close"}),
+        (
+            "stoch",
+            {
+                "k_length": 14,
+                "k_smoothing": 1,
+                "d_smoothing": 3,
+                "upper": 80,
+                "middle": 50,
+                "lower": 20,
+                "show_bands": "show",
+                "show_background": "show",
+                "k_width": 1,
+                "d_width": 1,
+                "band_width": 1,
+            },
+        ),
         ("macd", {"fast": 12, "slow": 26, "signal": 9, "source": "close"}),
         ("vwap", {"source": "hlc3"}),
     ],
@@ -82,6 +99,12 @@ def test_overrides_are_kept() -> None:
         ("ema", {"len": 20}),  # unknown parameter name
         ("bb", {"mult": 0}),
         ("rsi", {"length": 1}),
+        ("stoch", {"k_length": 0}),
+        ("stoch", {"k_smoothing": 0}),
+        ("stoch", {"d_smoothing": 0}),
+        ("stoch", {"show_bands": "maybe"}),
+        ("stoch", {"upper": 101}),
+        ("stoch", {"k_width": 5}),
         ("supertrend", {"atr_length": 0}),
         ("supertrend", {"multiplier": -1}),
         ("macd", {"fast": 26, "slow": 12}),  # fast must be < slow
@@ -103,6 +126,7 @@ def test_invalid_params_raise_value_error(itype: str, params: dict[str, object])
         ("bb", {"length": 20}, 5, 500),  # rule: 20
         ("ema", {"length": 20}, 5, 500),  # rule 8*(n+1) = 168
         ("rsi", {"length": 14}, 5, 500),  # rule 10*n = 140
+        ("stoch", {"k_length": 14, "k_smoothing": 1, "d_smoothing": 3}, 5, 500),  # rule 14+1+3-3 = 15
         ("supertrend", {"atr_length": 10}, 5, 1000),  # rule 100 -> floor of 1000
         ("macd", {"fast": 12, "slow": 26, "signal": 9}, 5, 500),  # rule 8*27 + 8*10 = 296
         ("vwap", {}, 5, 500),  # rule: a full 24h of bars = 288
@@ -111,6 +135,7 @@ def test_invalid_params_raise_value_error(itype: str, params: dict[str, object])
         ("sma", {"length": 600}, 5, 600),
         ("ema", {"length": 200}, 5, 1608),  # 8*201
         ("rsi", {"length": 100}, 5, 1000),  # 10*100
+        ("stoch", {"k_length": 600, "k_smoothing": 1, "d_smoothing": 1}, 5, 599),  # 600+1+1-3
         ("supertrend", {"atr_length": 200}, 5, 2000),  # 10*200
         ("macd", {"fast": 50, "slow": 100, "signal": 50}, 5, 1216),  # 8*101 + 8*51
         ("vwap", {}, 1, 1440),  # a full 24h of 1m bars
@@ -181,6 +206,8 @@ def test_compute_vwap_without_volume_raises() -> None:
         ("bb", {"length": 20, "mult": 2}),
         ("supertrend", {"atr_length": 10, "multiplier": 3}),
         ("rsi", {"length": 14}),
+        ("stoch", {"k_length": 14, "k_smoothing": 1, "d_smoothing": 3}),
+        ("stoch", {"k_length": 5, "k_smoothing": 3, "d_smoothing": 3}),
         ("macd", {"fast": 12, "slow": 26, "signal": 9}),
         ("vwap", {}),
     ],
@@ -222,6 +249,8 @@ REAL_PARAMS: list[tuple[str, dict[str, object]]] = [
     ("supertrend", {"atr_length": 10, "multiplier": 3}),
     ("supertrend", {"atr_length": 7, "multiplier": 2}),
     ("rsi", {"length": 14}),
+    ("stoch", {"k_length": 14, "k_smoothing": 1, "d_smoothing": 3}),
+    ("stoch", {"k_length": 5, "k_smoothing": 3, "d_smoothing": 3}),
     ("macd", {"fast": 12, "slow": 26, "signal": 9}),
     ("vwap", {}),
 ]

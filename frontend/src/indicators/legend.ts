@@ -55,6 +55,12 @@ export function legendRows(args: {
         case "rsi":
           row.entries.push({ label: "", text: fmt(at(item.type)), color: color("line") });
           break;
+        case "stoch":
+          row.entries.push(
+            { label: "%K", text: fmt(at("k")), color: color("k") },
+            { label: "%D", text: fmt(at("d")), color: color("d") },
+          );
+          break;
         case "bb":
           row.entries.push(
             { label: "basis", text: fmt(at("basis")), color: color("basis") },

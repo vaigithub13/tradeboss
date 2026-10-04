@@ -29,6 +29,7 @@ SPECS: list[tuple[str, str, dict[str, object]]] = [
     ("bb", "bb", {"length": 20, "mult": 2}),
     ("st", "supertrend", {"atr_length": 10, "multiplier": 3}),
     ("rsi", "rsi", {"length": 14}),
+    ("stoch", "stoch", {"k_length": 14, "k_smoothing": 1, "d_smoothing": 3}),
     ("macd", "macd", {"fast": 12, "slow": 26, "signal": 9}),
 ]
 

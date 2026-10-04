@@ -27,18 +27,24 @@ describe("defaults mirror the backend registry", () => {
     ["bb", { length: 20, mult: 2, source: "close" }],
     ["supertrend", { atr_length: 10, multiplier: 3 }],
     ["rsi", { length: 14, source: "close" }],
+    ["stoch", {
+      k_length: 14, k_smoothing: 1, d_smoothing: 3,
+      upper: 80, middle: 50, lower: 20,
+      show_bands: "show", show_background: "show",
+      k_width: 1, d_width: 1, band_width: 1,
+    }],
     ["macd", { fast: 12, slow: 26, signal: 9, source: "close" }],
     ["vwap", { source: "hlc3" }],
   ] as const)("%s", (type, expected) => {
     expect(defaultParams(type)).toEqual(expected);
   });
 
-  it("every type has outputs and colours; RSI and MACD are separate panes, the rest overlay", () => {
+  it("every type has outputs and colours; RSI, Stochastic, and MACD are separate panes", () => {
     for (const t of INDICATOR_TYPES) {
       expect(CATALOG[t].outputs.length).toBeGreaterThan(0);
       expect(CATALOG[t].colors.length).toBeGreaterThan(0);
     }
-    expect(INDICATOR_TYPES.filter((t) => CATALOG[t].pane === "separate")).toEqual(["rsi", "macd"]);
+    expect(INDICATOR_TYPES.filter((t) => CATALOG[t].pane === "separate")).toEqual(["rsi", "stoch", "macd"]);
   });
 });
 
@@ -60,6 +66,19 @@ describe("parseParam", () => {
     expect(parseParam(mult, "2.5")).toBe(2.5);
     expect(parseParam(mult, 0)).toBeNull();
     expect(parseParam(mult, -1)).toBeNull();
+  });
+
+  it("Stochastic lengths are at least 1 and band levels stay inside 0–100", () => {
+    expect(parseParam(def("stoch", "k_length"), 1)).toBe(1);
+    expect(parseParam(def("stoch", "k_smoothing"), 0)).toBeNull();
+    expect(parseParam(def("stoch", "d_smoothing"), 3)).toBe(3);
+    expect(parseParam(def("stoch", "upper"), 0)).toBe(0);
+    expect(parseParam(def("stoch", "upper"), 100)).toBe(100);
+    expect(parseParam(def("stoch", "lower"), 101)).toBeNull();
+    expect(parseParam(def("stoch", "k_width"), 4)).toBe(4);
+    expect(parseParam(def("stoch", "k_width"), 5)).toBeNull();
+    expect(parseParam(def("stoch", "show_bands"), "hide")).toBe("hide");
+    expect(parseParam(def("stoch", "show_bands"), "maybe")).toBeNull();
   });
 
   it("RSI length must be at least 2; sources must be known", () => {
@@ -107,6 +126,12 @@ describe("instances", () => {
       "MACD (12, 26, 9, close)",
     );
     expect(indicatorName({ type: "vwap", params: { source: "hlc3" } })).toBe("VWAP (hlc3)");
+    expect(indicatorName({ type: "stoch", params: { k_length: 14, k_smoothing: 1, d_smoothing: 3 } })).toBe(
+      "Stochastic (14, 1, 3)",
+    );
+    expect(indicatorName({ type: "stoch", params: { k_length: 5, k_smoothing: 3, d_smoothing: 3 } })).toBe(
+      "Stochastic (5, 3, 3)",
+    );
   });
 });
 

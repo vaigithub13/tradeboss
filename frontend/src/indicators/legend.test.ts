@@ -45,6 +45,23 @@ describe("legendRows", () => {
     expect([up?.label, up?.color]).toEqual(["up", st.colors["up"]]);
   });
 
+  it("Stochastic shows %K and %D at the hovered bar", () => {
+    const stoch = createInstance("stoch", []);
+    const entry: IndicatorEntry = { times, outputs: { k: [null, 80.5, 62.25], d: [null, null, 71.5] } };
+    const row = legendRows({
+      ...base,
+      items: [stoch],
+      entryFor: () => entry,
+      time: 1600,
+    })[0];
+    expect(row?.name).toBe("Stochastic (14, 1, 3)");
+    expect(row?.entries.map((e) => [e.label, e.text, e.color])).toEqual([
+      ["%K", "62.25", stoch.colors["k"]],
+      ["%D", "71.50", stoch.colors["d"]],
+    ]);
+    expect(legendRows({ ...base, items: [stoch], entryFor: () => entry, time: 1300 })[0]?.entries[1]?.text).toBe("–");
+  });
+
   it("MACD shows macd / signal / hist and colours the histogram by sign", () => {
     const entries = legendRows({ ...base, items: [macd], time: 1600 })[0]?.entries ?? [];
     expect(entries.map((e) => [e.label, e.text])).toEqual([["macd", "-2.00"], ["signal", "-1.00"], ["hist", "-1.00"]]);

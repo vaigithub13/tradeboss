@@ -1,6 +1,6 @@
 import type { Timeframe } from "../api/client";
 
-export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap", "fvg"] as const;
+export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "fvg"] as const;
 export type IndicatorType = (typeof INDICATOR_TYPES)[number];
 
 export const SOURCES = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"] as const;
@@ -100,6 +100,34 @@ export const CATALOG: Record<IndicatorType, IndicatorDef> = {
     type: "rsi", label: "RSI", pane: "separate", params: [length(14, 2), source()],
     colors: [{ key: "line", label: "Line", default: "#b388ff" }],
     outputs: ["rsi"],
+  },
+  stoch: {
+    type: "stoch", label: "Stochastic", pane: "separate",
+    params: [
+      { key: "k_length", label: "%K Length", kind: "int", default: 14, min: 1, max: MAX_LENGTH, step: 1 },
+      { key: "k_smoothing", label: "%K Smoothing", kind: "int", default: 1, min: 1, max: MAX_LENGTH, step: 1 },
+      { key: "d_smoothing", label: "%D Smoothing", kind: "int", default: 3, min: 1, max: MAX_LENGTH, step: 1 },
+      { key: "upper", label: "Upper band", kind: "int", default: 80, min: 0, max: 100, step: 1 },
+      { key: "middle", label: "Middle band", kind: "int", default: 50, min: 0, max: 100, step: 1 },
+      { key: "lower", label: "Lower band", kind: "int", default: 20, min: 0, max: 100, step: 1 },
+      {
+        key: "show_bands", label: "Bands", kind: "choice", default: "show",
+        options: [{ value: "show", label: "Show" }, { value: "hide", label: "Hide" }],
+      },
+      {
+        key: "show_background", label: "Background", kind: "choice", default: "show",
+        options: [{ value: "show", label: "Show" }, { value: "hide", label: "Hide" }],
+      },
+      { key: "k_width", label: "%K width", kind: "int", default: 1, min: 1, max: 4, step: 1 },
+      { key: "d_width", label: "%D width", kind: "int", default: 1, min: 1, max: 4, step: 1 },
+      { key: "band_width", label: "Band width", kind: "int", default: 1, min: 1, max: 4, step: 1 },
+    ],
+    colors: [
+      { key: "k", label: "%K", default: "#2962ff" },
+      { key: "d", label: "%D", default: "#ff6d00" },
+      { key: "band", label: "Bands", default: "#787b86" },
+    ],
+    outputs: ["k", "d"],
   },
   macd: {
     type: "macd", label: "MACD", pane: "separate",
@@ -242,6 +270,8 @@ export function indicatorName(inst: Pick<IndicatorInstance, "type" | "params">):
     case "ema":
     case "rsi":
       return `${label} (${fmtNum(p["length"])}, ${fmtNum(p["source"])})`;
+    case "stoch":
+      return `${label} (${fmtNum(p["k_length"])}, ${fmtNum(p["k_smoothing"])}, ${fmtNum(p["d_smoothing"])})`;
     case "bb":
       return `BB (${fmtNum(p["length"])}, ${fmtNum(p["mult"])}, ${fmtNum(p["source"])})`;
     case "supertrend":

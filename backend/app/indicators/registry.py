@@ -15,15 +15,15 @@ import pandas as pd
 
 from app.indicators.basic import SOURCES, bollinger, ema, sma, source_series
 from app.indicators.fvg import compute_fvg, validate_fvg_params
-from app.indicators.momentum import macd, rsi
+from app.indicators.momentum import macd, rsi, stochastic
 from app.indicators.volatility import supertrend
 from app.indicators.volume import vwap
 
-INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "macd", "vwap", "fvg")
+INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "fvg")
 
 PANES: dict[str, str] = {
     "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price",
-    "rsi": "separate", "macd": "separate", "fvg": "price",
+    "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price",
 }  # fmt: skip
 
 OUTPUTS: dict[str, list[str]] = {
@@ -32,6 +32,7 @@ OUTPUTS: dict[str, list[str]] = {
     "bb": ["basis", "upper", "lower"],
     "supertrend": ["supertrend", "direction"],
     "rsi": ["rsi"],
+    "stoch": ["k", "d"],
     "macd": ["macd", "signal", "hist"],
     "vwap": ["vwap"],
     "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
@@ -45,10 +46,11 @@ MAX_MULTIPLIER = 100.0
 
 @dataclass(frozen=True)
 class ParamSpec:
-    kind: str  # "int" | "float" | "source"
+    kind: str  # "int" | "float" | "source" | "choice"
     default: Any
     minimum: float = 1
     maximum: float = MAX_LENGTH
+    options: tuple[str, ...] = ()
 
 
 _LENGTH = ParamSpec("int", 20, 1, MAX_LENGTH)
@@ -67,6 +69,19 @@ PARAMS: dict[str, dict[str, ParamSpec]] = {
         "multiplier": ParamSpec("float", 3.0, 0, MAX_MULTIPLIER),
     },
     "rsi": {"length": ParamSpec("int", 14, 2, MAX_LENGTH), "source": _SOURCE},
+    "stoch": {
+        "k_length": ParamSpec("int", 14, 1, MAX_LENGTH),
+        "k_smoothing": ParamSpec("int", 1, 1, MAX_LENGTH),
+        "d_smoothing": ParamSpec("int", 3, 1, MAX_LENGTH),
+        "upper": ParamSpec("int", 80, 0, 100),
+        "middle": ParamSpec("int", 50, 0, 100),
+        "lower": ParamSpec("int", 20, 0, 100),
+        "show_bands": ParamSpec("choice", "show", options=("show", "hide")),
+        "show_background": ParamSpec("choice", "show", options=("show", "hide")),
+        "k_width": ParamSpec("int", 1, 1, 4),
+        "d_width": ParamSpec("int", 1, 1, 4),
+        "band_width": ParamSpec("int", 1, 1, 4),
+    },
     "macd": {
         "fast": ParamSpec("int", 12, 1, MAX_LENGTH),
         "slow": ParamSpec("int", 26, 1, MAX_LENGTH),
@@ -78,6 +93,10 @@ PARAMS: dict[str, dict[str, ParamSpec]] = {
 
 
 def _coerce(name: str, spec: ParamSpec, value: Any) -> Any:
+    if spec.kind == "choice":
+        if value not in spec.options:
+            raise ValueError(f"{name}: expected one of {list(spec.options)}, got {value!r}")
+        return value
     if spec.kind == "source":
         if value not in SOURCES:
             raise ValueError(f"{name}: unknown source {value!r}; expected one of {list(SOURCES)}")
@@ -127,6 +146,9 @@ def warmup_bars(itype: str, params: Mapping[str, Any], bar_minutes: int) -> int:
         rule = 8 * (params["length"] + 1)  # seed error shrinks by e^-16
     elif itype == "rsi":
         rule = 10 * params["length"]  # Wilder smoothing, seeded with an SMA
+    elif itype == "stoch":
+        # Finite window: the bar needs this many bars before it. No recursive state.
+        rule = params["k_length"] + params["k_smoothing"] + params["d_smoothing"] - 3
     elif itype == "supertrend":
         rule = 10 * params["atr_length"]
     elif itype == "macd":
@@ -155,6 +177,9 @@ def compute(df: pd.DataFrame, itype: str, params: Mapping[str, Any]) -> dict[str
         series = {name: st[name] for name in OUTPUTS["supertrend"]}
     elif itype == "rsi":
         series = {"rsi": rsi(source_series(df, params["source"]), params["length"])}
+    elif itype == "stoch":
+        st = stochastic(df, params["k_length"], params["k_smoothing"], params["d_smoothing"])
+        series = {name: st[name] for name in OUTPUTS["stoch"]}
     elif itype == "macd":
         m = macd(source_series(df, params["source"]), params["fast"], params["slow"], params["signal"])
         series = {name: m[name] for name in OUTPUTS["macd"]}

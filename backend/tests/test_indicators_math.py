@@ -28,7 +28,7 @@ import pandas as pd
 import pytest
 
 from app.indicators.basic import bollinger, ema, rma, sma, source_series, stdev
-from app.indicators.momentum import macd, rsi
+from app.indicators.momentum import macd, rsi, stochastic
 from app.indicators.volatility import atr, supertrend, true_range
 from app.indicators.volume import VolumeRequired, vwap
 from tests.conftest import ist_ts
@@ -163,6 +163,47 @@ def test_macd_hand_computed() -> None:
     check(m["macd"], [0, 0.166667, 0.305556, 0.393519])
     check(m["signal"], [0, 0.111111, 0.240741, 0.342593])
     check(m["hist"], [0, 0.055556, 0.064815, 0.050926])
+
+
+# --------------------------------------------------------------------------- Stochastic (TradingView built-in)
+# raw %K = 100 * (close - lowest(low, k)) / (highest(high, k) - lowest(low, k))
+# %K = SMA(raw, kSmoothing); %D = SMA(%K, dSmoothing). highest == lowest -> na.
+# Bars (high, low, close), k length 3:
+#   idx2 lowest 7, highest 12, close 8  -> 100 * 1/5 = 20
+#   idx3 lowest 7, highest 13, close 12 -> 100 * 5/6 = 83.333333
+#   idx4 lowest 7, highest 14, close 13 -> 100 * 6/7 = 85.714286
+#   idx5 lowest 10, highest 14, close 12 -> 100 * 2/4 = 50
+_STOCH = bars([(10, 8, 9), (12, 9, 11), (11, 7, 8), (13, 10, 12), (14, 11, 13), (12, 10, 12)])
+_RAW = [NAN, NAN, 20, 83.333333, 85.714286, 50]
+
+
+def test_stochastic_hand_computed_raw_then_smoothed() -> None:
+    smooth_1 = stochastic(_STOCH, k_length=3, k_smoothing=1, d_smoothing=1)
+    check(smooth_1["k"], _RAW)
+    check(smooth_1["d"], _RAW)
+    # %D length 3: idx4 = (20 + 500/6 + 600/7) / 3 = 3970/63; idx5 = (500/6 + 600/7 + 50) / 3 = 4600/63
+    smoothed = stochastic(_STOCH, k_length=3, k_smoothing=1, d_smoothing=3)
+    check(smoothed["k"], _RAW)
+    check(smoothed["d"], [NAN, NAN, NAN, NAN, 63.015873, 73.015873])
+
+
+def test_stochastic_k_smoothing_3_moves_the_first_value() -> None:
+    # SMA of three raw values: same 63.015873 and 73.015873, now on %K. %D length 1 copies %K.
+    out = stochastic(_STOCH, k_length=3, k_smoothing=3, d_smoothing=1)
+    check(out["k"], [NAN, NAN, NAN, NAN, 63.015873, 73.015873])
+    check(out["d"], [NAN, NAN, NAN, NAN, 63.015873, 73.015873])
+
+
+def test_stochastic_flat_range_is_na_and_poisons_the_smoothing_window() -> None:
+    flat = bars([(5, 5, 5), (5, 5, 5), (5, 5, 5)])
+    out = stochastic(flat, k_length=3, k_smoothing=1, d_smoothing=1)
+    check(out["k"], [NAN, NAN, NAN])
+    check(out["d"], [NAN, NAN, NAN])
+    # k length 2: raw = [na, 50, 0, na]. A flat bar makes that raw na, and the SMA that includes it is na.
+    mixed = bars([(10, 8, 9), (10, 8, 9), (7, 7, 7), (7, 7, 7)])
+    poisoned = stochastic(mixed, k_length=2, k_smoothing=2, d_smoothing=1)
+    check(poisoned["k"], [NAN, NAN, 25, NAN])
+    check(poisoned["d"], [NAN, NAN, 25, NAN])
 
 
 # --------------------------------------------------------------------------- Supertrend
