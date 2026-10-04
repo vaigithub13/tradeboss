@@ -3,6 +3,7 @@
  * Anchors stay { time, price }. The screen position is computed when drawing.
  */
 import type { Timeframe } from "../api/client";
+import type { PositionSettings } from "./position";
 
 export interface Anchor {
   time: number;
@@ -26,7 +27,9 @@ export type DrawTool =
   | "rectangle"
   | "fib"
   | "text"
-  | "measure";
+  | "measure"
+  | "long_position"
+  | "short_position";
 
 export type LineStyleName = "solid" | "dashed" | "dotted";
 
@@ -53,6 +56,8 @@ export interface Drawing {
   locked: boolean;
   text: string;
   style: DrawStyle;
+  /** Long and short position settings. Absent on every other tool. */
+  position?: PositionSettings;
 }
 
 export interface DrawDoc {
@@ -90,7 +95,7 @@ export const LABEL_GAP_PX = 12;
 /** A collapsed drawing is still selectable inside this radius. */
 export const MIN_HIT_PX = 8;
 
-const META_KEYS = new Set(["hidden", "locked", "showOn"]);
+const META_KEYS = new Set(["hidden", "locked", "showOn", "position"]);
 
 export const TWO_ANCHOR: ReadonlySet<DrawTool> = new Set([
   "trend",

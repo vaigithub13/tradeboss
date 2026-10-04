@@ -12,6 +12,7 @@ import {
   type DrawTool,
   type Drawing,
 } from "./model";
+import { defaultPositionAnchors, defaultPositionSettings, isPositionTool } from "./position";
 
 export type DrawMode = DrawTool | "cursor" | "eraser";
 
@@ -112,6 +113,13 @@ export const useDrawStore = create<DrawState>((set, get) => {
       if (!s.ready || s.lockAll) return;
       const tool = s.tool;
       if (tool === "cursor" || tool === "eraser") return;
+      if (isPositionTool(tool)) {
+        const side = tool === "long_position" ? "long" : "short";
+        const drawing = make(tool, defaultPositionAnchors(side, anchor, drawnOn, s.holidays), knownAt, drawnOn);
+        drawing.position = defaultPositionSettings();
+        commit({ drawings: [...s.drawings, drawing], selectedId: drawing.id });
+        return;
+      }
       if (!TWO_ANCHOR.has(tool)) {
         const drawing = make(tool, [anchor], knownAt, drawnOn);
         commit({ drawings: [...s.drawings, drawing], selectedId: drawing.id });

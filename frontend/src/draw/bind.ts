@@ -2,6 +2,7 @@ import type { IChartApi, ISeriesApi, MouseEventParams, Time } from "lightweight-
 
 import type { Candle, Timeframe } from "../api/client";
 import { barStart, setAnchor, snapPrice, whitespaceTimes, type Anchor, type Drawing } from "./model";
+import { isPositionTool, movePositionHandle, type PositionHandle } from "./position";
 import type { DrawPrimitive } from "./primitive";
 import { useDrawStore } from "./store";
 
@@ -110,6 +111,8 @@ export function bindDrawings(
       store.remember();
       gesture.pushed = true;
     }
+    const handles: PositionHandle[] = ["entry", "target", "stop", "right"];
+    const named = gesture.handle == null ? null : handles[gesture.handle];
     const moved =
       gesture.handle == null
         ? {
@@ -119,7 +122,9 @@ export function bindDrawings(
               price: anchor.price + (next.price - start.price),
             })),
           }
-        : setAnchor(gesture.origin, gesture.handle, next);
+        : isPositionTool(gesture.origin.tool) && named
+          ? { ...gesture.origin, anchors: movePositionHandle(gesture.origin.anchors, named, next) }
+          : setAnchor(gesture.origin, gesture.handle, next);
     const drawings = useDrawStore.getState().drawings.map((item) => (item.id === gesture?.id ? moved : item));
     store.preview(drawings);
   };

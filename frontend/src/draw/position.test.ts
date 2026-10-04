@@ -1,7 +1,7 @@
 /**
  * Long and short position drawings. See PROJECT_PLAN.md, "Long position and short position".
  *
- * Public API under test (frontend/src/draw/position.ts, not written yet):
+ * Public API under test (frontend/src/draw/position.ts):
  *
  *   defaultPositionSettings() -> account 1000000, risk 1%, rupee risk 10000, lot null,
  *     price mode, green #089981, red #f23645, compact and options off
@@ -30,6 +30,7 @@ import {
   positionLevels,
   positionOutcome,
   positionSize,
+  quantityNote,
   positionToolLabel,
   positionZones,
   priceOf,
@@ -105,7 +106,14 @@ describe("defaults, handles, and size", () => {
     expect(levels.ratio).toBe(2);
     const size = positionSize(levels, sized(), 75);
     expect(size).toMatchObject({ riskBudget: 10_000, lotSize: 65, lots: 1, quantity: 65, rewardRupees: 13_000, riskRupees: 6_500 });
-    expect(positionSize(levels, sized(65, 5_000), 65).lots).toBe(0);
+    const tooSmall = positionSize(levels, sized(65, 5_000), 65);
+    expect(tooSmall.lots).toBe(0);
+    expect(quantityNote(tooSmall.lots, tooSmall.riskPerLot, tooSmall.riskBudget)).toBe(
+      "0 lots: risk per lot Rs 6500.00 exceeds budget Rs 5000.00",
+    );
+    expect(positionLabels(levels, tooSmall, { status: "pending", endTime: null, exitPrice: null, pnlPoints: null, pnlRupees: null, activatedAt: null, targetTime: null, stopTime: null }, true).map((label) => label.text)).toContain(
+      "0 lots: risk per lot Rs 6500.00 exceeds budget Rs 5000.00",
+    );
     expect(positionSize(levels, { ...defaultPositionSettings(), lotSize: null }, 65).lotSize).toBe(65);
     const flat = positionLevels("long", [entry, { time: T_1300, price: 24_200 }, { time: T_1300, price: 24_000 }]);
     expect(flat.ratio).toBeNull();
@@ -155,7 +163,7 @@ describe("defaults, handles, and size", () => {
       { time: T_1300, price: 23_800 },
       { time: T_1300, price: 24_100 },
     ]);
-    expect(positionLabels(shortLevels, size, { status: "pending", endTime: null, exitPrice: null, pnlPoints: null, pnlRupees: null }, false).map((label) => label.text)).toEqual([
+    expect(positionLabels(shortLevels, size, { status: "pending", endTime: null, exitPrice: null, pnlPoints: null, pnlRupees: null, activatedAt: null, targetTime: null, stopTime: null }, false).map((label) => label.text)).toEqual([
       "23800.00 (-200.00, -0.83%) 2.00R ₹13000.00",
       "24100.00 (+100.00, +0.42%) ₹6500.00",
     ]);
@@ -240,6 +248,27 @@ describe("outcome", () => {
     expect(positionToolLabel("long_position")).toBe("Long position");
     expect(positionToolLabel("short_position")).toBe("Short position");
     expect(objectTreeRows([drawing])[0]).toMatchObject({ tool: "long_position", drawnOn: "15m", createdAt: T_0945 });
+  });
+
+  it("stays pending until price trades the entry, and is not entered if the right edge passes", () => {
+    const missed = [
+      bar(T_0915, 24_100, 24_150, 24_080, 24_120),
+      bar(T_0930, 24_120, 24_180, 24_100, 24_140),
+    ];
+    const edge = [entry, { time: T_0930, price: 24_200 }, { time: T_0930, price: 23_900 }] as const;
+    expect(positionOutcome("long", edge, missed, [], null, qty)).toMatchObject({ status: "not_entered", endTime: T_0930, pnlPoints: null });
+    expect(positionOutcome("long", anchors, [missed[0]!], [], null, qty).status).toBe("pending");
+    expect(positionOutcome("long", anchors, missed, [], T_1300, qty).status).toBe("not_entered");
+    const stopFirst = [
+      bar(T_0915, 23_800, 23_850, 23_700, 23_820),
+      bar(T_0930, 23_950, 24_020, 23_940, 24_010),
+    ];
+    const after = positionOutcome("long", anchors, stopFirst, [], null, qty);
+    expect(after.status).toBe("open");
+    expect(after.activatedAt).toBe(T_0930);
+    expect(positionLabels(positionLevels("long", edge), positionSize(positionLevels("long", edge), sized(), 65), positionOutcome("long", edge, missed, [], null, qty), true).map((label) => label.text)).toContain(
+      "not entered",
+    );
   });
 
   it("stops at the right edge and still allows a settings change while locked", () => {

@@ -18,7 +18,22 @@ TOOLS = (
     "fib",
     "text",
     "measure",
+    "long_position",
+    "short_position",
 )
+_POSITION = ("long_position", "short_position")
+_POSITION_DEFAULT = {
+    "accountSize": 1000000,
+    "riskMode": "percent",
+    "riskPercent": 1,
+    "riskRupees": 10000,
+    "lotSize": None,
+    "priceMode": "price",
+    "profitColor": "#089981",
+    "stopColor": "#f23645",
+    "compact": False,
+    "options": False,
+}
 _LINE = ("solid", "dashed", "dotted")
 _TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h", "1D", "1W")
 
@@ -62,6 +77,8 @@ def _drawing(raw: Any) -> dict[str, Any]:
         if isinstance(time, bool) or not isinstance(time, int):
             raise ValueError("anchor time must be a whole number of seconds")
         clean.append({"time": time, "price": _number(anchor["price"], "price")})
+    if tool in _POSITION and len(clean) != 3:
+        raise ValueError("long and short position need 3 anchors")
     known = raw.get("knownAt")
     if isinstance(known, bool) or not isinstance(known, int):
         raise ValueError("knownAt must be a whole number of seconds")
@@ -69,7 +86,7 @@ def _drawing(raw: Any) -> dict[str, Any]:
     if not isinstance(drawing_id, str) or drawing_id == "":
         raise ValueError("drawing id is required")
     text = raw.get("text")
-    return {
+    drawing = {
         "id": drawing_id,
         "tool": tool,
         "anchors": clean,
@@ -81,6 +98,9 @@ def _drawing(raw: Any) -> dict[str, Any]:
         "text": text if isinstance(text, str) else "",
         "style": _style(raw.get("style")),
     }
+    if tool in _POSITION:
+        drawing["position"] = _position(raw.get("position"))
+    return drawing
 
 
 def _drawn_on(raw: dict[str, Any]) -> str:
@@ -105,6 +125,37 @@ def _show_on(raw: dict[str, Any]) -> list[str] | None:
         if tf not in clean:
             clean.append(tf)
     return clean
+
+
+def _position(raw: Any) -> dict[str, Any]:
+    src = raw if isinstance(raw, dict) else {}
+    out = dict(_POSITION_DEFAULT)
+    if "accountSize" in src:
+        out["accountSize"] = _number(src["accountSize"], "accountSize")
+    mode = src.get("riskMode", out["riskMode"])
+    if mode not in ("percent", "rupees"):
+        raise ValueError("riskMode must be percent or rupees")
+    out["riskMode"] = mode
+    if "riskPercent" in src:
+        out["riskPercent"] = _number(src["riskPercent"], "riskPercent")
+    if "riskRupees" in src:
+        out["riskRupees"] = _number(src["riskRupees"], "riskRupees")
+    if "lotSize" in src and src["lotSize"] is not None:
+        lot = src["lotSize"]
+        if isinstance(lot, bool) or not isinstance(lot, int) or lot < 1:
+            raise ValueError("lotSize must be a positive whole number or null")
+        out["lotSize"] = lot
+    price_mode = src.get("priceMode", out["priceMode"])
+    if price_mode not in ("price", "points"):
+        raise ValueError("priceMode must be price or points")
+    out["priceMode"] = price_mode
+    if isinstance(src.get("profitColor"), str):
+        out["profitColor"] = src["profitColor"]
+    if isinstance(src.get("stopColor"), str):
+        out["stopColor"] = src["stopColor"]
+    out["compact"] = bool(src.get("compact", out["compact"]))
+    out["options"] = bool(src.get("options", out["options"]))
+    return out
 
 
 class DrawingStore:

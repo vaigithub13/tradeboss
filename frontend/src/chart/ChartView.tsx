@@ -49,6 +49,8 @@ import { fetchFvg } from "../draw/api";
 import { bindDrawings, type DrawBag } from "../draw/bind";
 import { DrawPrimitive, FvgPrimitive } from "../draw/primitive";
 import { whitespaceTimes } from "../draw/model";
+import { loadOptionNotes, loadPositionLots, loadPositionMinutes, positionViews, publishPositionViews } from "../draw/positionFeed";
+import { isPositionTool } from "../draw/position";
 import { useDrawStore } from "../draw/store";
 import { useChartStore } from "../store/chartStore";
 
@@ -141,6 +143,24 @@ export function ChartView({
   const drawHover = useDrawStore((s) => s.hover);
   const drawTool = useDrawStore((s) => s.tool);
   const drawZoom = useDrawStore((s) => s.zoom);
+  const [positionMinutes, setPositionMinutes] = useState<readonly { time: number; open: number; high: number; low: number; close: number }[]>([]);
+  const [positionLots, setPositionLots] = useState<Readonly<Record<string, number>>>({});
+  const [positionNotes, setPositionNotes] = useState<Readonly<Record<string, string>>>({});
+  const positionKey = drawDrawings
+    .filter((item) => isPositionTool(item.tool))
+    .map((item) => `${item.id}:${item.anchors[0]?.time ?? 0}:${item.anchors[1]?.time ?? 0}`)
+    .join("|");
+  const optionKey = drawDrawings
+    .filter((item) => isPositionTool(item.tool) && item.position?.options)
+    .map((item) => `${item.id}:${item.anchors.map((anchor) => `${anchor.time},${anchor.price}`).join(";")}:${item.position?.riskMode}:${item.position?.accountSize}:${item.position?.riskPercent}:${item.position?.riskRupees}`)
+    .join("|");
+  const views = useMemo(
+    () => positionViews(drawDrawings, candles, positionMinutes, positionLots, positionNotes, cursor),
+    [drawDrawings, candles, positionMinutes, positionLots, positionNotes, cursor],
+  );
+  const outcomeKey = views.map((view) => `${view.id}:${view.outcome.status}:${view.outcome.endTime ?? ""}:${view.outcome.exitPrice ?? ""}`).join("|");
+  const viewsRef = useRef(views);
+  viewsRef.current = views;
   drawBagRef.current = { candles, timeframe, cursor };
 
   const volumeVisible = useMemo(() => hasVolume(candles), [candles]);
@@ -405,6 +425,39 @@ export function ChartView({
   }, [candles, timeframe, holidays]);
 
   useEffect(() => {
+    publishPositionViews(views);
+  }, [views]);
+
+  useEffect(() => {
+    if (!positionKey) {
+      setPositionMinutes([]);
+      setPositionLots({});
+      return;
+    }
+    const ac = new AbortController();
+    const drawings = useDrawStore.getState().drawings;
+    void loadPositionMinutes(symbol, drawings, cursor, ac.signal).then(setPositionMinutes).catch(() => {});
+    void loadPositionLots(symbol, drawings, ac.signal).then(setPositionLots).catch(() => {});
+    return () => ac.abort();
+  }, [positionKey, symbol, cursor]);
+
+  useEffect(() => {
+    if (!optionKey) {
+      setPositionNotes({});
+      return;
+    }
+    const ac = new AbortController();
+    const timer = setTimeout(() => {
+      const drawings = useDrawStore.getState().drawings;
+      void loadOptionNotes(symbol, viewsRef.current, drawings, cursor, ac.signal).then(setPositionNotes).catch(() => {});
+    }, 250);
+    return () => {
+      clearTimeout(timer);
+      ac.abort();
+    };
+  }, [optionKey, outcomeKey, symbol, cursor]);
+
+  useEffect(() => {
     drawPrimitiveRef.current?.setScene({
       drawings: drawDrawings,
       timeframe,
@@ -416,8 +469,21 @@ export function ChartView({
       tool: drawTool,
       holidays,
       weekendSessions,
+      views: views.map((view) => ({
+        id: view.id,
+        labels: view.labels,
+        endTime: view.outcome.endTime,
+        status: view.outcome.status,
+        entryTime: view.entryTime,
+        rightTime: view.rightTime,
+        entry: view.entry,
+        target: view.target,
+        stop: view.stop,
+        profitColor: view.profitColor,
+        stopColor: view.stopColor,
+      })),
     });
-  }, [drawDrawings, timeframe, cursor, drawHide, drawSelected, drawDraft, drawHover, drawTool, holidays, weekendSessions]);
+  }, [drawDrawings, timeframe, cursor, drawHide, drawSelected, drawDraft, drawHover, drawTool, holidays, weekendSessions, views]);
 
   const fvgKey = items
     .filter((item) => item.type === "fvg" && item.visible)

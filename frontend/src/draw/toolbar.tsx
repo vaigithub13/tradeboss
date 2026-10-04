@@ -4,6 +4,8 @@ import { getJson, TIMEFRAMES } from "../api/client";
 import { formatCrosshairTime } from "../chart/format";
 import { useChartStore } from "../store/chartStore";
 import { measure, objectTreeRows, type Drawing, type DrawTool, type LineStyleName } from "./model";
+import { usePositionViews } from "./positionFeed";
+import { defaultPositionSettings, pointsOf, positionToolLabel, priceOf, type PositionSettings } from "./position";
 import { useDrawStore, type DrawMode } from "./store";
 
 const TOOL_LABEL: Record<DrawTool, string> = {
@@ -17,6 +19,8 @@ const TOOL_LABEL: Record<DrawTool, string> = {
   fib: "Fibonacci",
   text: "Text",
   measure: "Measure",
+  long_position: "Long position",
+  short_position: "Short position",
 };
 
 const TOOLS: { id: DrawMode; label: string; title: string }[] = [
@@ -31,6 +35,8 @@ const TOOLS: { id: DrawMode; label: string; title: string }[] = [
   { id: "fib", label: "Fib", title: "Fibonacci retracement" },
   { id: "text", label: "T", title: "Text" },
   { id: "measure", label: "↕", title: "Measure" },
+  { id: "long_position", label: "L", title: "Long position" },
+  { id: "short_position", label: "S", title: "Short position" },
   { id: "eraser", label: "⌫", title: "Eraser" },
 ];
 
@@ -257,7 +263,7 @@ function Properties({ drawing, timeframe, treeOpen }: { drawing: Drawing; timefr
   const b = drawing.anchors[1];
   return (
     <div className={`absolute top-2 z-30 w-56 rounded border border-white/15 bg-[#0b0e14] p-2 text-[11px] text-white/80 shadow-lg ${treeOpen ? "left-[21rem]" : "left-11"}`} data-testid="draw-properties">
-      <div className="mb-1 font-medium text-white">{drawing.tool}</div>
+      <div className="mb-1 font-medium text-white">{drawing.tool === "long_position" || drawing.tool === "short_position" ? positionToolLabel(drawing.tool) : drawing.tool}</div>
       <label className="mb-1 flex items-center justify-between gap-2">
         Colour
         <input type="color" value={toHex(style.color)} onChange={(ev) => setStyle({ color: ev.target.value })} />
@@ -312,6 +318,7 @@ function Properties({ drawing, timeframe, treeOpen }: { drawing: Drawing; timefr
         />
       )}
       {drawing.tool === "measure" && a && b && <MeasureReadout a={a} b={b} timeframe={timeframe} />}
+      {(drawing.tool === "long_position" || drawing.tool === "short_position") && <PositionFields drawing={drawing} />}
       <fieldset className="mt-2 border-t border-white/10 pt-1" data-testid="draw-timeframes">
         <legend className="mb-1 text-white/60">Show on</legend>
         <div className="grid grid-cols-4 gap-1">
@@ -336,6 +343,96 @@ function Properties({ drawing, timeframe, treeOpen }: { drawing: Drawing; timefr
           })}
         </div>
       </fieldset>
+    </div>
+  );
+}
+
+function PositionFields({ drawing }: { drawing: Drawing }) {
+  const settings = drawing.position ?? defaultPositionSettings();
+  const side = drawing.tool === "short_position" ? "short" : "long";
+  const entry = drawing.anchors[0]?.price ?? 0;
+  const views = usePositionViews();
+  const view = views.find((item) => item.id === drawing.id);
+  const write = (position: PositionSettings): void => useDrawStore.getState().changeSelected({ position });
+  const setPrice = (role: "target" | "stop", points: number): void => {
+    const index = role === "target" ? 1 : 2;
+    const current = drawing.anchors[index];
+    if (!current) return;
+    const anchors = drawing.anchors.map((anchor, i) => (i === index ? { time: anchor.time, price: priceOf(side, entry, points, role) } : anchor));
+    useDrawStore.getState().changeSelected({ anchors });
+  };
+  return (
+    <div className="mt-1 border-t border-white/10 pt-1" data-testid="position-settings">
+      <label className="mb-1 flex items-center justify-between gap-2">
+        Account
+        <input type="number" value={settings.accountSize} onChange={(ev) => write({ ...settings, accountSize: Number(ev.target.value) || 0 })} className="w-24 rounded border border-white/15 bg-transparent px-1 py-0.5" />
+      </label>
+      <label className="mb-1 flex items-center justify-between gap-2">
+        Risk
+        <select value={settings.riskMode} onChange={(ev) => write({ ...settings, riskMode: ev.target.value as PositionSettings["riskMode"] })} className="rounded border border-white/15 bg-[#0b0e14] px-1 py-0.5">
+          <option value="percent">Percent</option>
+          <option value="rupees">Rupees</option>
+        </select>
+      </label>
+      {settings.riskMode === "percent" ? (
+        <label className="mb-1 flex items-center justify-between gap-2">
+          Risk %
+          <input type="number" value={settings.riskPercent} onChange={(ev) => write({ ...settings, riskPercent: Number(ev.target.value) || 0 })} className="w-16 rounded border border-white/15 bg-transparent px-1 py-0.5" />
+        </label>
+      ) : (
+        <label className="mb-1 flex items-center justify-between gap-2">
+          Risk ₹
+          <input type="number" value={settings.riskRupees} onChange={(ev) => write({ ...settings, riskRupees: Number(ev.target.value) || 0 })} className="w-24 rounded border border-white/15 bg-transparent px-1 py-0.5" />
+        </label>
+      )}
+      <label className="mb-1 flex items-center justify-between gap-2">
+        Lot
+        <input
+          type="number"
+          placeholder="table"
+          value={settings.lotSize ?? ""}
+          onChange={(ev) => write({ ...settings, lotSize: ev.target.value === "" ? null : Math.max(1, Math.floor(Number(ev.target.value) || 1)) })}
+          className="w-16 rounded border border-white/15 bg-transparent px-1 py-0.5"
+        />
+      </label>
+      <label className="mb-1 flex items-center justify-between gap-2">
+        Levels
+        <select value={settings.priceMode} onChange={(ev) => write({ ...settings, priceMode: ev.target.value as PositionSettings["priceMode"] })} className="rounded border border-white/15 bg-[#0b0e14] px-1 py-0.5">
+          <option value="price">Price</option>
+          <option value="points">Points</option>
+        </select>
+      </label>
+      {settings.priceMode === "points" && (
+        <>
+          <label className="mb-1 flex items-center justify-between gap-2">
+            Target pts
+            <input type="number" value={pointsOf(side, entry, drawing.anchors[1]?.price ?? entry, "target")} onChange={(ev) => setPrice("target", Number(ev.target.value) || 0)} className="w-20 rounded border border-white/15 bg-transparent px-1 py-0.5" />
+          </label>
+          <label className="mb-1 flex items-center justify-between gap-2">
+            Stop pts
+            <input type="number" value={pointsOf(side, entry, drawing.anchors[2]?.price ?? entry, "stop")} onChange={(ev) => setPrice("stop", Number(ev.target.value) || 0)} className="w-20 rounded border border-white/15 bg-transparent px-1 py-0.5" />
+          </label>
+        </>
+      )}
+      <label className="mb-1 flex items-center justify-between gap-2">
+        Profit
+        <input type="color" value={toHex(settings.profitColor)} onChange={(ev) => write({ ...settings, profitColor: ev.target.value })} />
+      </label>
+      <label className="mb-1 flex items-center justify-between gap-2">
+        Stop
+        <input type="color" value={toHex(settings.stopColor)} onChange={(ev) => write({ ...settings, stopColor: ev.target.value })} />
+      </label>
+      <label className="mb-1 flex items-center gap-2">
+        <input type="checkbox" checked={settings.compact} onChange={(ev) => write({ ...settings, compact: ev.target.checked })} />
+        Compact
+      </label>
+      <label className="mb-1 flex items-center gap-2">
+        <input type="checkbox" checked={settings.options} onChange={(ev) => write({ ...settings, options: ev.target.checked })} />
+        Options
+      </label>
+      <div className="mt-1 whitespace-pre-wrap break-words text-white/90" data-testid="position-readout">
+        {(view?.labels ?? []).map((label) => label.text).join("\n") || "pending"}
+      </div>
     </div>
   );
 }

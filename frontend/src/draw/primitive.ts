@@ -40,6 +40,19 @@ export interface DrawScene {
   tool: string;
   holidays: readonly string[];
   weekendSessions: readonly string[];
+  views: readonly {
+    id: string;
+    labels: { role: string; text: string }[];
+    endTime: number | null;
+    status: string;
+    entryTime: number;
+    rightTime: number;
+    entry: number;
+    target: number;
+    stop: number;
+    profitColor: string;
+    stopColor: string;
+  }[];
 }
 
 interface Seg {
@@ -49,12 +62,21 @@ interface Seg {
   y2: number;
 }
 
+interface Zone {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  color: string;
+}
+
 interface Shape {
   id: string;
   style: DrawStyle;
   segments: Seg[];
   handles: { x: number; y: number; index: number }[];
   fill: { x: number; y: number; w: number; h: number } | null;
+  fills: Zone[];
   labels: { x: number; y: number; text: string }[];
 }
 
@@ -87,6 +109,19 @@ class DrawRenderer implements IPrimitivePaneRenderer {
         ctx.strokeStyle = shape.style.color;
         ctx.fillStyle = shape.style.color;
         ctx.setLineDash(dash(shape.style.lineStyle));
+        for (const zone of shape.fills) {
+          const left = Math.max(0, zone.x);
+          const right = Math.min(mediaSize.width, zone.x + zone.w);
+          const top = Math.max(0, zone.y);
+          const bottom = Math.min(mediaSize.height, zone.y + zone.h);
+          if (right > left && bottom > top) {
+            ctx.save();
+            ctx.globalAlpha = 0.18;
+            ctx.fillStyle = zone.color;
+            ctx.fillRect(left, top, right - left, bottom - top);
+            ctx.restore();
+          }
+        }
         if (shape.fill && shape.style.fill) {
           const left = Math.max(0, shape.fill.x);
           const right = Math.min(mediaSize.width, shape.fill.x + shape.fill.w);
@@ -139,6 +174,7 @@ export class DrawPrimitive implements ISeriesPrimitive {
     tool: "cursor",
     holidays: [],
     weekendSessions: [],
+    views: [],
   };
 
   private chart: Chart | null = null;
@@ -185,6 +221,9 @@ export class DrawPrimitive implements ISeriesPrimitive {
         const dist = distanceToSegment(x, y, paddedSegment(seg));
         if (dist <= HIT && (best === null || dist < best.dist)) best = { id: shape.id, dist };
       }
+      for (const zone of shape.fills) {
+        if (hitsBox(x, y, zone.x, zone.y, zone.w, zone.h) && (best === null || 0 < best.dist)) best = { id: shape.id, dist: 0 };
+      }
       if (shape.fill && hitsBox(x, y, shape.fill.x, shape.fill.y, shape.fill.w, shape.fill.h)) {
         if (best === null || 0 < best.dist) best = { id: shape.id, dist: 0 };
       }
@@ -222,6 +261,60 @@ export class DrawPrimitive implements ISeriesPrimitive {
       locked: false,
       text: "",
       style: { ...{ color: "#2962ff", width: 1, lineStyle: "dashed" as const, extendLeft: false, extendRight: false, fill: null } },
+    };
+  }
+
+  private positionShape(drawing: Drawing, base: Shape): Shape | null {
+    const view = this.scene.views.find((item) => item.id === drawing.id);
+    const entryAnchor = drawing.anchors[0];
+    const targetAnchor = drawing.anchors[1];
+    const stopAnchor = drawing.anchors[2];
+    if (!view || !entryAnchor || !targetAnchor || !stopAnchor) return null;
+    const closed = view.status === "target" || view.status === "stop" || view.status === "ambiguous" || view.status === "open";
+    const zoneEnd = closed && view.endTime != null ? view.endTime : view.rightTime;
+    const entry = this.xy(entryAnchor);
+    const end = this.xy({ time: zoneEnd, price: entryAnchor.price });
+    const target = this.xy({ time: entryAnchor.time, price: view.target });
+    const stop = this.xy({ time: entryAnchor.time, price: view.stop });
+    const edge = this.xy({ time: targetAnchor.time, price: entryAnchor.price });
+    const targetHandle = this.xy(targetAnchor);
+    const stopHandle = this.xy(stopAnchor);
+    if (!entry || !end || !target || !stop || !edge || !targetHandle || !stopHandle) return null;
+    const x = Math.min(entry.x, end.x);
+    const w = Math.max(8, Math.abs(end.x - entry.x));
+    const zone = (yPrice: number, color: string): Shape["fills"][number] => ({
+      x,
+      y: Math.min(entry.y, yPrice),
+      w,
+      h: Math.max(1, Math.abs(yPrice - entry.y)),
+      color,
+    });
+    const fills = [zone(target.y, view.profitColor), zone(stop.y, view.stopColor)];
+    const top = Math.min(...fills.map((item) => item.y));
+    const bottom = Math.max(...fills.map((item) => item.y + item.h));
+    const placed = labelsForWidth(
+      drawing.tool,
+      w,
+      view.labels.map((label) => ({
+        y: label.role === "stop" ? stop.y : label.role === "target" ? target.y : entry.y,
+        text: label.text,
+      })),
+    );
+    return {
+      ...base,
+      handles: [
+        { ...entry, index: 0 },
+        { ...targetHandle, index: 1 },
+        { ...stopHandle, index: 2 },
+        { ...edge, index: 3 },
+      ],
+      fill: { x, y: top, w, h: Math.max(1, bottom - top) },
+      fills,
+      segments: fills.flatMap((item) => [
+        { x1: item.x, y1: item.y, x2: item.x + item.w, y2: item.y },
+        { x1: item.x, y1: item.y + item.h, x2: item.x + item.w, y2: item.y + item.h },
+      ]),
+      labels: placed.map((label) => ({ x: x + w + 6, y: label.y, text: label.text })),
     };
   }
 
@@ -275,7 +368,8 @@ export class DrawPrimitive implements ISeriesPrimitive {
       const p = this.xy(anchor);
       return p ? [{ ...p, index }] : [];
     });
-    const base = { id: drawing.id, style, handles, fill: null, labels: [] as Shape["labels"] };
+    const base: Shape = { id: drawing.id, style, handles, fill: null, fills: [], segments: [], labels: [] };
+    if (drawing.tool === "long_position" || drawing.tool === "short_position") return this.positionShape(drawing, base);
 
     if (drawing.tool === "horizontal" || drawing.tool === "horizontal_ray") {
       const y = series.priceToCoordinate(a.price);

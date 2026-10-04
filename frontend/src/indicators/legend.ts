@@ -58,7 +58,7 @@ export function legendRows(args: {
           break;
         case "vwap_fut": {
           const flags = entry.outputs["fallback"] ?? [];
-          const fallback = flags.reduce((sum, v) => sum + (v === 1 ? 1 : 0), 0);
+          const fallback = flags.reduce((sum: number, v) => sum + (v === 1 ? 1 : 0), 0);
           row.entries.push(
             { label: "", text: fmt(at("vwap")), color: color("line") },
             { label: "fallback", text: String(fallback), color: "#f59e0b" },
