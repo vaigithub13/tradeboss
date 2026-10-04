@@ -13,8 +13,14 @@ import type {
 import type { FvgBox } from "./api";
 import {
   fibPrices,
+  distanceToSegment,
+  hitsBox,
+  labelsForWidth,
   mapAnchor,
   measure,
+  NARROW_PX,
+  paddedBox,
+  paddedSegment,
   shownDrawings,
   type Anchor,
   type Drawing,
@@ -57,15 +63,6 @@ type Chart = IChartApi;
 type Series = ISeriesApi<"Candlestick">;
 
 const HIT = 6;
-
-function distToSeg(px: number, py: number, s: Seg): number {
-  const dx = s.x2 - s.x1;
-  const dy = s.y2 - s.y1;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return Math.hypot(px - s.x1, py - s.y1);
-  const t = Math.max(0, Math.min(1, ((px - s.x1) * dx + (py - s.y1) * dy) / len2));
-  return Math.hypot(px - (s.x1 + t * dx), py - (s.y1 + t * dy));
-}
 
 function dash(style: DrawStyle["lineStyle"]): number[] {
   if (style === "dashed") return [6, 4];
@@ -171,14 +168,11 @@ export class DrawPrimitive implements ISeriesPrimitive {
     for (const shape of shapes) {
       if (shape.id === "draft") continue;
       for (const seg of shape.segments) {
-        const dist = distToSeg(x, y, seg);
+        const dist = distanceToSegment(x, y, paddedSegment(seg));
         if (dist <= HIT && (best === null || dist < best.dist)) best = { id: shape.id, dist };
       }
-      if (shape.fill) {
-        const { x: fx, y: fy, w, h } = shape.fill;
-        if (x >= fx && x <= fx + w && y >= fy && y <= fy + h && (best === null || 0 < best.dist)) {
-          best = { id: shape.id, dist: 0 };
-        }
+      if (shape.fill && hitsBox(x, y, shape.fill.x, shape.fill.y, shape.fill.w, shape.fill.h)) {
+        if (best === null || 0 < best.dist) best = { id: shape.id, dist: 0 };
       }
     }
     return best ? { id: best.id, handle: null } : null;
@@ -191,7 +185,7 @@ export class DrawPrimitive implements ISeriesPrimitive {
   }
 
   shapes(width: number, height: number): Shape[] {
-    const visible = shownDrawings(this.scene.drawings, this.scene.cursor, this.scene.hideAll);
+    const visible = shownDrawings(this.scene.drawings, this.scene.cursor, this.scene.hideAll, this.scene.timeframe);
     const ghost = this.ghost();
     const list = ghost ? [...visible, ghost] : visible;
     return list.flatMap((drawing) => {
@@ -208,6 +202,10 @@ export class DrawPrimitive implements ISeriesPrimitive {
       tool: tool as Drawing["tool"],
       anchors: [draft, hover],
       knownAt: 0,
+      drawnOn: "",
+      showOn: null,
+      hidden: false,
+      locked: false,
       text: "",
       style: { ...{ color: "#2962ff", width: 1, lineStyle: "dashed" as const, extendLeft: false, extendRight: false, fill: null } },
     };
@@ -265,42 +263,58 @@ export class DrawPrimitive implements ISeriesPrimitive {
     if (drawing.tool === "rectangle") {
       const x = Math.min(pa.x, pb.x);
       const y = Math.min(pa.y, pb.y);
-      const w = Math.abs(pb.x - pa.x);
-      const h = Math.abs(pb.y - pa.y);
+      const box = paddedBox(x, y, Math.abs(pb.x - pa.x), Math.abs(pb.y - pa.y), NARROW_PX);
       return {
         ...base,
-        fill: { x, y, w, h },
+        fill: box,
         segments: [
-          { x1: x, y1: y, x2: x + w, y2: y },
-          { x1: x + w, y1: y, x2: x + w, y2: y + h },
-          { x1: x + w, y1: y + h, x2: x, y2: y + h },
-          { x1: x, y1: y + h, x2: x, y2: y },
+          { x1: box.x, y1: box.y, x2: box.x + box.w, y2: box.y },
+          { x1: box.x + box.w, y1: box.y, x2: box.x + box.w, y2: box.y + box.h },
+          { x1: box.x + box.w, y1: box.y + box.h, x2: box.x, y2: box.y + box.h },
+          { x1: box.x, y1: box.y + box.h, x2: box.x, y2: box.y },
         ],
       };
     }
     if (drawing.tool === "fib" && b) {
       const levels = fibPrices(a, b);
+      const rawWidth = Math.abs(pb.x - pa.x);
       const x1 = Math.min(pa.x, pb.x);
       const x2 = Math.max(pa.x, pb.x);
+      const span = paddedSegment({ x1, y1: 0, x2, y2: 0 }, NARROW_PX);
       const segments: Seg[] = [];
-      const labels: Shape["labels"] = [];
+      const placed: { y: number; text: string }[] = [];
       for (const level of levels) {
         const y = series.priceToCoordinate(level.price);
         if (y == null) continue;
-        segments.push({ x1, y1: y, x2, y2: y });
-        labels.push({ x: x2 + 4, y: y + 4, text: `${level.ratio}  ${level.price.toFixed(2)}` });
+        segments.push(paddedSegment({ x1: span.x1, y1: y, x2: span.x2, y2: y }, NARROW_PX));
+        placed.push({ y, text: `${level.ratio}  ${level.price.toFixed(2)}` });
       }
+      const labels = labelsForWidth("fib", rawWidth, placed).map((label) => ({
+        x: span.x2 + 4,
+        y: label.y + 4,
+        text: label.text,
+      }));
       return { ...base, segments, labels };
     }
     if (drawing.tool === "measure" && b) {
       const m = measure(a, b, this.scene.timeframe);
+      const rawWidth = Math.abs(pb.x - pa.x);
+      const text = `${m.price.toFixed(2)} (${m.percent.toFixed(2)}%)  ${m.bars} bars`;
+      const labels = labelsForWidth("measure", rawWidth, [{ y: pb.y, text }]).map((label) => ({
+        x: pb.x + 6,
+        y: label.y,
+        text: label.text,
+      }));
       return {
         ...base,
-        segments: [{ x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y }],
-        labels: [{ x: pb.x + 6, y: pb.y, text: `${m.price.toFixed(2)} (${m.percent.toFixed(2)}%)  ${m.bars} bars` }],
+        segments: [paddedSegment({ x1: pa.x, y1: pa.y, x2: pb.x, y2: pb.y }, NARROW_PX)],
+        labels,
       };
     }
-    return { ...base, segments: [extendLine(pa, pb, width, style.extendLeft, style.extendRight)] };
+    return {
+      ...base,
+      segments: [paddedSegment(extendLine(pa, pb, width, style.extendLeft, style.extendRight), NARROW_PX)],
+    };
   }
 }
 

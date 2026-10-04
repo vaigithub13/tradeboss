@@ -29,6 +29,7 @@ import { useIndicatorStore } from "../store/indicatorStore";
 import { formatCrosshairTime, formatTick, legendValues, type TickKind } from "./format";
 import { IndicatorLayer } from "./indicatorLayer";
 import { jumpWindow } from "../backtest/present";
+import { zoomLogical } from "../draw/model";
 import {
   indexOfTime,
   initialRange,
@@ -132,6 +133,7 @@ export function ChartView({
   const drawDraft = useDrawStore((s) => s.draft);
   const drawHover = useDrawStore((s) => s.hover);
   const drawTool = useDrawStore((s) => s.tool);
+  const drawZoom = useDrawStore((s) => s.zoom);
   drawBagRef.current = { candles, timeframe, cursor };
 
   const volumeVisible = useMemo(() => hasVolume(candles), [candles]);
@@ -352,6 +354,16 @@ export function ChartView({
     appliedFocus.current = focus.token;
     chart.timeScale().setVisibleLogicalRange({ from: placed.from, to: placed.to });
   }, [focus, candles]);
+
+  const appliedZoom = useRef(0);
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart || !drawZoom || appliedZoom.current === drawZoom.token) return;
+    const range = zoomLogical(candles.map((c) => c.time), drawZoom.from, drawZoom.to);
+    if (!range) return;
+    appliedZoom.current = drawZoom.token;
+    chart.timeScale().setVisibleLogicalRange(range);
+  }, [drawZoom, candles]);
 
   // ---- indicators: draw what is cached for this data set (nothing stale can be here: the cache is keyed by scope)
   useEffect(() => {

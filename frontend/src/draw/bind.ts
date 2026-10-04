@@ -64,7 +64,7 @@ export function bindDrawings(
       return;
     }
     const anchor = resolve(point.x, point.y);
-    if (anchor) store.place(anchor, knownAt());
+    if (anchor) store.place(anchor, knownAt(), bag.current.timeframe);
   };
 
   const onMove = (param: MouseEventParams<Time>): void => {
@@ -93,6 +93,7 @@ export function bindDrawings(
     const origin = store.drawings.find((item) => item.id === hit.id);
     if (!origin) return;
     store.setSelected(hit.id);
+    if (store.lockAll || origin.locked) return;
     gesture = { id: hit.id, handle: hit.handle, origin, x, y, pushed: false };
   };
 

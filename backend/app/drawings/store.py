@@ -20,6 +20,7 @@ TOOLS = (
     "measure",
 )
 _LINE = ("solid", "dashed", "dotted")
+_TIMEFRAMES = ("1m", "3m", "5m", "15m", "30m", "1h", "1D", "1W")
 
 
 def _number(value: Any, name: str) -> float:
@@ -73,9 +74,37 @@ def _drawing(raw: Any) -> dict[str, Any]:
         "tool": tool,
         "anchors": clean,
         "knownAt": known,
+        "drawnOn": _drawn_on(raw),
+        "showOn": _show_on(raw),
+        "hidden": bool(raw.get("hidden", False)),
+        "locked": bool(raw.get("locked", False)),
         "text": text if isinstance(text, str) else "",
         "style": _style(raw.get("style")),
     }
+
+
+def _drawn_on(raw: dict[str, Any]) -> str:
+    drawn = raw.get("drawnOn", "")
+    if drawn is None:
+        return ""
+    if not isinstance(drawn, str) or (drawn != "" and drawn not in _TIMEFRAMES):
+        raise ValueError("drawnOn must be a timeframe or empty")
+    return drawn
+
+
+def _show_on(raw: dict[str, Any]) -> list[str] | None:
+    if "showOn" not in raw or raw.get("showOn") is None:
+        return None
+    show = raw["showOn"]
+    if not isinstance(show, list):
+        raise ValueError("showOn must be a list of timeframes or null")
+    clean: list[str] = []
+    for tf in show:
+        if tf not in _TIMEFRAMES:
+            raise ValueError(f"unknown timeframe {tf!r}")
+        if tf not in clean:
+            clean.append(tf)
+    return clean
 
 
 class DrawingStore:

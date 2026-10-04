@@ -246,6 +246,12 @@ Drawings are per symbol, not per timeframe, in SQLite at `data/drawings.sqlite` 
 
 Each drawing has `knownAt`. A drawing made during replay is stamped with the replay cursor, so it stays visible at that cursor. A drawing made live is stamped with the last candle's time. While a replay cursor is set, a drawing whose `knownAt` is after that cursor is not drawn. A later live drawing is hidden in an earlier replay. With no cursor, age does not hide anything. New live candles do not change stored anchors. The lines are a Lightweight Charts v5 series primitive on the candlestick series, so they move with the scale.
 
+Each drawing also stores `drawnOn` (the timeframe on screen when it was created; empty on older rows), `showOn` (the timeframes it is drawn on; `null` means every timeframe, which is the default), and per-drawing `hidden` and `locked`. A missing `showOn` still means every timeframe. Lock all and a locked drawing both refuse a move and a delete. Hide, lock, and `showOn` can still be changed from the object tree.
+
+The object tree lists every drawing for the symbol: tool, the timeframe it was drawn on, and `knownAt`. Select, hide, lock, delete, and zoom to work from that list when the drawing is on another timeframe or only a few pixels wide. Zoom to puts both anchor times in the visible range, including two intraday times that land on the same daily bar.
+
+A drawing whose screen width is under 10px draws its lines and no text. Fibonacci keeps a label only when it sits at least 12px from the previous label. A segment or box shorter than 8px is hit-tested as 8px, so a Fibonacci that collapses onto one daily bar can still be selected and erased.
+
 ### Automatic fair value gap
 
 `fvg_boxes` in `app.indicators.fvg` is the function the chart and a backtest both call. `fvg` is also a registry type (`validate_params` / `compute`), pane `price`, so a strategy goes through the same indicator hub as EMA. The boxes are drawn with a series primitive, not a line series.

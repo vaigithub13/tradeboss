@@ -5,6 +5,7 @@ import {
   TWO_ANCHOR,
   defaultStyle,
   editDrawing,
+  normalizeDrawing,
   removeDrawing,
   type Anchor,
   type DrawDoc,
@@ -31,12 +32,15 @@ interface DrawState extends Snap {
   hover: Anchor | null;
   holidays: string[];
   ready: boolean;
+  zoom: { from: number; to: number; token: number } | null;
   setTool: (tool: DrawMode) => void;
   setMagnet: (on: boolean) => void;
   setHover: (anchor: Anchor | null) => void;
   setSelected: (id: string | null) => void;
   setHolidays: (days: string[]) => void;
-  place: (anchor: Anchor, knownAt: number) => void;
+  place: (anchor: Anchor, knownAt: number, drawnOn: string) => void;
+  patchDrawing: (id: string, patch: Partial<Drawing>) => void;
+  requestZoom: (id: string) => void;
   preview: (drawings: Drawing[]) => void;
   remember: () => void;
   remove: (id: string) => void;
@@ -52,12 +56,16 @@ interface DrawState extends Snap {
 
 let loadToken = 0;
 
-function make(tool: DrawTool, anchors: Anchor[], knownAt: number): Drawing {
+function make(tool: DrawTool, anchors: Anchor[], knownAt: number, drawnOn: string): Drawing {
   return {
     id: `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
     tool,
     anchors,
     knownAt,
+    drawnOn,
+    showOn: null,
+    hidden: false,
+    locked: false,
     text: tool === "text" ? "Text" : "",
     style: defaultStyle(tool),
   };
@@ -91,18 +99,19 @@ export const useDrawStore = create<DrawState>((set, get) => {
     hover: null,
     holidays: [],
     ready: false,
+    zoom: null,
     setTool: (tool) => set({ tool, draft: null, hover: null }),
     setMagnet: (on) => set({ magnet: on }),
     setHover: (hover) => set({ hover }),
     setSelected: (selectedId) => set({ selectedId }),
     setHolidays: (holidays) => set({ holidays }),
-    place: (anchor, knownAt) => {
+    place: (anchor, knownAt, drawnOn) => {
       const s = get();
       if (!s.ready || s.lockAll) return;
       const tool = s.tool;
       if (tool === "cursor" || tool === "eraser") return;
       if (!TWO_ANCHOR.has(tool)) {
-        const drawing = make(tool, [anchor], knownAt);
+        const drawing = make(tool, [anchor], knownAt, drawnOn);
         commit({ drawings: [...s.drawings, drawing], selectedId: drawing.id });
         return;
       }
@@ -110,7 +119,7 @@ export const useDrawStore = create<DrawState>((set, get) => {
         set({ draft: anchor });
         return;
       }
-      const drawing = make(tool, [s.draft, anchor], knownAt);
+      const drawing = make(tool, [s.draft, anchor], knownAt, drawnOn);
       commit({ drawings: [...s.drawings, drawing], selectedId: drawing.id, draft: null });
       set({ hover: null });
     },
@@ -129,10 +138,26 @@ export const useDrawStore = create<DrawState>((set, get) => {
     changeSelected: (patch) => {
       const s = get();
       if (!s.selectedId) return;
-      const current = docOf(s);
-      const next = editDrawing(current, s.selectedId, patch);
+      get().patchDrawing(s.selectedId, patch);
+    },
+    patchDrawing: (id, patch) => {
+      const current = docOf(get());
+      const next = editDrawing(current, id, patch);
       if (next === current) return;
       commit({ drawings: next.drawings });
+    },
+    requestZoom: (id) => {
+      const drawing = get().drawings.find((item) => item.id === id);
+      if (!drawing || drawing.anchors.length === 0) return;
+      const times = drawing.anchors.map((anchor) => anchor.time);
+      const from = Math.min(...times);
+      const to = Math.max(...times);
+      const pad = Math.max(60, Math.floor((to - from) * 0.25));
+      set({
+        selectedId: id,
+        tool: "cursor",
+        zoom: { from: from - pad, to: to + pad, token: Date.now() },
+      });
     },
     toggleLock: () => commit({ lockAll: !get().lockAll }),
     toggleHide: () => commit({ hideAll: !get().hideAll }),
@@ -177,7 +202,7 @@ export const useDrawStore = create<DrawState>((set, get) => {
       try {
         const payload = await fetchDrawings(symbol);
         if (token !== loadToken) return;
-        set({ drawings: payload.drawings, ready: true });
+        set({ drawings: payload.drawings.map((item) => normalizeDrawing(item)), ready: true });
       } catch {
         if (token !== loadToken) return;
         set({ ready: false });
@@ -191,7 +216,7 @@ export const useDrawStore = create<DrawState>((set, get) => {
     importJson: async (payload) => {
       const saved = await importDrawings(payload as { symbol: string; drawings: Drawing[] });
       if (saved.symbol === get().symbol) {
-        set({ drawings: saved.drawings, past: [], future: [], selectedId: null, draft: null, ready: true });
+        set({ drawings: saved.drawings.map((item) => normalizeDrawing(item)), past: [], future: [], selectedId: null, draft: null, ready: true });
       }
     },
   };

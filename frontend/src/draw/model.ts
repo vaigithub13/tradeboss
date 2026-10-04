@@ -45,6 +45,12 @@ export interface Drawing {
   anchors: Anchor[];
   /** Replay cursor when the drawing was made, or the last bar's time when it was made live. */
   knownAt: number;
+  /** Timeframe on screen when the drawing was created. Empty on older rows. */
+  drawnOn: string;
+  /** Timeframes this drawing is drawn on. Null means every timeframe. */
+  showOn: readonly string[] | null;
+  hidden: boolean;
+  locked: boolean;
   text: string;
   style: DrawStyle;
 }
@@ -76,6 +82,15 @@ const CLOSE_MIN = 15 * 60 + 30;
 const INTRADAY: Record<string, number> = { "1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60 };
 
 export const FIB_RATIOS = [0, 0.236, 0.382, 0.5, 0.618, 0.786, 1] as const;
+
+/** Hide text when the drawing is narrower than this on the current timeframe. */
+export const NARROW_PX = 10;
+/** Keep a Fibonacci label only when it sits at least this far from the previous one. */
+export const LABEL_GAP_PX = 12;
+/** A collapsed drawing is still selectable inside this radius. */
+export const MIN_HIT_PX = 8;
+
+const META_KEYS = new Set(["hidden", "locked", "showOn"]);
 
 export const TWO_ANCHOR: ReadonlySet<DrawTool> = new Set([
   "trend",
@@ -179,10 +194,172 @@ export function snapPrice(price: number, bar: BarPrices): number {
   return best;
 }
 
-export function shownDrawings(drawings: readonly Drawing[], cursor: number | null, hideAll: boolean): Drawing[] {
+/** Null or a missing list means every timeframe. An empty list means none. */
+export function visibleOnTimeframe(drawing: Drawing, timeframe: string): boolean {
+  if (drawing.showOn == null) return true;
+  return drawing.showOn.includes(timeframe);
+}
+
+export function shownDrawings(
+  drawings: readonly Drawing[],
+  cursor: number | null,
+  hideAll: boolean,
+  timeframe?: string,
+): Drawing[] {
   if (hideAll) return [];
-  if (cursor == null) return [...drawings];
-  return drawings.filter((item) => item.knownAt <= cursor);
+  return drawings.filter((item) => {
+    if (item.hidden) return false;
+    if (cursor != null && item.knownAt > cursor) return false;
+    if (timeframe != null && !visibleOnTimeframe(item, timeframe)) return false;
+    return true;
+  });
+}
+
+export interface TreeRow {
+  id: string;
+  tool: DrawTool;
+  drawnOn: string;
+  createdAt: number;
+  hidden: boolean;
+  locked: boolean;
+}
+
+/** Every drawing for the symbol, including ones hidden on the current timeframe. */
+export function objectTreeRows(drawings: readonly Drawing[]): TreeRow[] {
+  return drawings.map((item) => ({
+    id: item.id,
+    tool: item.tool,
+    drawnOn: item.drawnOn || "",
+    createdAt: item.knownAt,
+    hidden: item.hidden === true,
+    locked: item.locked === true,
+  }));
+}
+
+export interface PlacedLabel {
+  y: number;
+  text: string;
+}
+
+/** Under ~10px, draw lines only. A wider Fibonacci keeps the labels that do not overlap. */
+export function labelsForWidth(
+  tool: DrawTool,
+  widthPx: number,
+  labels: readonly PlacedLabel[],
+  gapPx = LABEL_GAP_PX,
+): PlacedLabel[] {
+  if (widthPx < NARROW_PX) return [];
+  if (tool !== "fib") return [...labels];
+  const sorted = [...labels].sort((a, b) => a.y - b.y);
+  const kept: PlacedLabel[] = [];
+  for (const label of sorted) {
+    const prev = kept[kept.length - 1];
+    if (!prev || label.y - prev.y >= gapPx) kept.push(label);
+  }
+  return kept;
+}
+
+export interface Segment {
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+}
+
+export function paddedSegment(seg: Segment, minPx = MIN_HIT_PX): Segment {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len = Math.hypot(dx, dy);
+  if (len >= minPx) return seg;
+  if (len === 0) return { x1: seg.x1 - minPx / 2, y1: seg.y1, x2: seg.x1 + minPx / 2, y2: seg.y1 };
+  const scale = (minPx / len) / 2;
+  const cx = (seg.x1 + seg.x2) / 2;
+  const cy = (seg.y1 + seg.y2) / 2;
+  return { x1: cx - dx * scale, y1: cy - dy * scale, x2: cx + dx * scale, y2: cy + dy * scale };
+}
+
+export function paddedBox(
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  minPx = MIN_HIT_PX,
+): { x: number; y: number; w: number; h: number } {
+  const width = Math.max(w, minPx);
+  const height = Math.max(h, minPx);
+  return { x: x - (width - w) / 2, y: y - (height - h) / 2, w: width, h: height };
+}
+
+export function distanceToSegment(px: number, py: number, seg: Segment): number {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(px - seg.x1, py - seg.y1);
+  const t = Math.max(0, Math.min(1, ((px - seg.x1) * dx + (py - seg.y1) * dy) / len2));
+  return Math.hypot(px - (seg.x1 + t * dx), py - (seg.y1 + t * dy));
+}
+
+/** True when the point is within `radius` of the segment, after a collapsed segment is padded. */
+export function hitsSegment(px: number, py: number, seg: Segment, radius = 6, minPx = MIN_HIT_PX): boolean {
+  return distanceToSegment(px, py, paddedSegment(seg, minPx)) <= radius;
+}
+
+export function hitsBox(px: number, py: number, x: number, y: number, w: number, h: number, minPx = MIN_HIT_PX): boolean {
+  const box = paddedBox(x, y, w, h, minPx);
+  return px >= box.x && px <= box.x + box.w && py >= box.y && py <= box.y + box.h;
+}
+
+/** Logical range that puts both anchor times on screen, including two times that share one daily bar. */
+export function zoomLogical(
+  barTimes: readonly number[],
+  fromTime: number,
+  toTime: number,
+  visible = 80,
+): { from: number; to: number } | null {
+  if (barTimes.length === 0) return null;
+  const nearest = (target: number): number => {
+    let best = 0;
+    let bestDist = Infinity;
+    for (let i = 0; i < barTimes.length; i += 1) {
+      const dist = Math.abs((barTimes[i] ?? 0) - target);
+      if (dist < bestDist) {
+        best = i;
+        bestDist = dist;
+      }
+    }
+    return best;
+  };
+  const lo = Math.min(nearest(fromTime), nearest(toTime));
+  const hi = Math.max(nearest(fromTime), nearest(toTime));
+  const span = Math.max(visible, hi - lo + 20);
+  let from = lo - Math.floor(span / 3);
+  let to = from + span;
+  if (from < 0) {
+    to -= from;
+    from = 0;
+  }
+  const lastTime = barTimes[barTimes.length - 1] ?? 0;
+  const pastLast = fromTime > lastTime || toTime > lastTime;
+  if (to > barTimes.length) {
+    if (pastLast) {
+      to = Math.max(barTimes.length + 8, hi + 8);
+      from = Math.max(0, to - span);
+    } else {
+      from = Math.max(0, from - (to - barTimes.length));
+      to = barTimes.length;
+    }
+  }
+  return { from, to };
+}
+
+export function normalizeDrawing(raw: Drawing): Drawing {
+  return {
+    ...raw,
+    drawnOn: typeof raw.drawnOn === "string" ? raw.drawnOn : "",
+    showOn: Array.isArray(raw.showOn) ? raw.showOn : null,
+    hidden: raw.hidden === true,
+    locked: raw.locked === true,
+  };
 }
 
 /** Replay stamps the cursor. A live drawing stamps the last bar, so a later live drawing stays hidden in replay. */
@@ -216,8 +393,16 @@ export function createHistory(initial: DrawDoc): History {
   };
 }
 
+function isMetaPatch(patch: Partial<Drawing>): boolean {
+  const keys = Object.keys(patch);
+  return keys.length > 0 && keys.every((key) => META_KEYS.has(key));
+}
+
 export function editDrawing(doc: DrawDoc, id: string, patch: Partial<Drawing>): DrawDoc {
-  if (doc.lockAll) return doc;
+  const current = doc.drawings.find((item) => item.id === id);
+  if (!current) return doc;
+  const meta = isMetaPatch(patch);
+  if ((doc.lockAll || current.locked) && !meta) return doc;
   return {
     ...doc,
     drawings: doc.drawings.map((item) => (item.id === id ? { ...item, ...patch } : item)),
@@ -226,6 +411,8 @@ export function editDrawing(doc: DrawDoc, id: string, patch: Partial<Drawing>): 
 
 export function removeDrawing(doc: DrawDoc, id: string): DrawDoc {
   if (doc.lockAll) return doc;
+  const current = doc.drawings.find((item) => item.id === id);
+  if (!current || current.locked) return doc;
   return { ...doc, drawings: doc.drawings.filter((item) => item.id !== id) };
 }
 

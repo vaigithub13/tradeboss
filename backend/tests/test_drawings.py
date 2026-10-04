@@ -61,6 +61,33 @@ def test_export_and_import_round_trip_one_symbol(tmp_path) -> None:
     assert [row["id"] for row in store.load("RELIANCE")] == ["b"]
 
 
+def test_timeframe_visibility_and_object_flags_survive_a_restart(tmp_path) -> None:
+    path = tmp_path / "drawings.sqlite"
+    line = _line("fib")
+    line["tool"] = "fib"
+    line["drawnOn"] = "15m"
+    line["showOn"] = ["15m", "1h"]
+    line["hidden"] = True
+    line["locked"] = True
+    DrawingStore(path).replace("NIFTY50", [line])
+
+    again = DrawingStore(path).load("NIFTY50")[0]
+    assert again["drawnOn"] == "15m"
+    assert again["showOn"] == ["15m", "1h"]
+    assert again["hidden"] is True
+    assert again["locked"] is True
+
+
+def test_a_drawing_without_timeframe_fields_shows_on_every_timeframe(tmp_path) -> None:
+    path = tmp_path / "drawings.sqlite"
+    DrawingStore(path).replace("NIFTY50", [_line("a")])
+    row = DrawingStore(path).load("NIFTY50")[0]
+    assert row["drawnOn"] == ""
+    assert row["showOn"] is None
+    assert row["hidden"] is False
+    assert row["locked"] is False
+
+
 def test_bad_drawings_are_rejected(tmp_path) -> None:
     store = DrawingStore(tmp_path / "drawings.sqlite")
     bad = _line("a")
@@ -73,3 +100,7 @@ def test_bad_drawings_are_rejected(tmp_path) -> None:
         store.replace("NIFTY50", [missing])
     with pytest.raises(ValueError):
         store.import_payload({"drawings": []})
+    unknown = _line("a")
+    unknown["showOn"] = ["2h"]
+    with pytest.raises(ValueError):
+        store.replace("NIFTY50", [unknown])

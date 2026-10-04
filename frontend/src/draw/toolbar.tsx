@@ -1,9 +1,23 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
-import { getJson } from "../api/client";
+import { getJson, TIMEFRAMES } from "../api/client";
+import { formatCrosshairTime } from "../chart/format";
 import { useChartStore } from "../store/chartStore";
-import { measure, type Drawing, type LineStyleName } from "./model";
+import { measure, objectTreeRows, type Drawing, type DrawTool, type LineStyleName } from "./model";
 import { useDrawStore, type DrawMode } from "./store";
+
+const TOOL_LABEL: Record<DrawTool, string> = {
+  trend: "Trend line",
+  ray: "Ray",
+  extended: "Extended line",
+  horizontal: "Horizontal line",
+  horizontal_ray: "Horizontal ray",
+  vertical: "Vertical line",
+  rectangle: "Rectangle",
+  fib: "Fibonacci",
+  text: "Text",
+  measure: "Measure",
+};
 
 const TOOLS: { id: DrawMode; label: string; title: string }[] = [
   { id: "cursor", label: "↖", title: "Cursor" },
@@ -81,6 +95,7 @@ export function DrawToolbar() {
   const selectedId = useDrawStore((s) => s.selectedId);
   const drawings = useDrawStore((s) => s.drawings);
   const fileRef = useRef<HTMLInputElement>(null);
+  const [treeOpen, setTreeOpen] = useState(false);
   const selected = drawings.find((item) => item.id === selectedId) ?? null;
   const timeframe = useChartStore((s) => s.timeframe);
 
@@ -95,6 +110,7 @@ export function DrawToolbar() {
         <ToolButton label="👁" title={hideAll ? "Show drawings" : "Hide all"} active={hideAll} onClick={() => useDrawStore.getState().toggleHide()} testId="draw-hide" />
         <ToolButton label="↶" title="Undo" active={false} onClick={() => useDrawStore.getState().undo()} testId="draw-undo" />
         <ToolButton label="↷" title="Redo" active={false} onClick={() => useDrawStore.getState().redo()} testId="draw-redo" />
+        <ToolButton label="☰" title="Object tree" active={treeOpen} onClick={() => setTreeOpen((open) => !open)} testId="draw-tree" />
         <ToolButton label="⇩" title="Export drawings" active={false} onClick={() => exportDrawings()} testId="draw-export" />
         <ToolButton label="⇧" title="Import drawings" active={false} onClick={() => fileRef.current?.click()} testId="draw-import" />
         <input
@@ -110,7 +126,8 @@ export function DrawToolbar() {
           }}
         />
       </div>
-      {selected && <Properties drawing={selected} timeframe={timeframe} />}
+      {treeOpen && <ObjectTree selectedId={selectedId} />}
+      {selected && <Properties drawing={selected} timeframe={timeframe} treeOpen={treeOpen} />}
     </aside>
   );
 }
@@ -144,14 +161,100 @@ function ToolButton({
   );
 }
 
-function Properties({ drawing, timeframe }: { drawing: Drawing; timeframe: string }) {
+function ObjectTree({ selectedId }: { selectedId: string | null }) {
+  const drawings = useDrawStore((s) => s.drawings);
+  const rows = objectTreeRows(drawings);
+  return (
+    <div
+      className="absolute left-11 top-2 z-30 max-h-[70vh] w-72 overflow-y-auto rounded border border-white/15 bg-[#0b0e14] p-2 text-[11px] text-white/80 shadow-lg"
+      data-testid="object-tree"
+    >
+      <div className="mb-1 font-medium text-white">Object tree</div>
+      {rows.length === 0 && <p className="text-white/40">No drawings on this symbol.</p>}
+      <ul className="flex flex-col gap-1">
+        {rows.map((row) => (
+          <li
+            key={row.id}
+            data-testid={`tree-row-${row.id}`}
+            className={`rounded px-1 py-1 ${row.id === selectedId ? "bg-white/10" : ""} ${row.hidden ? "opacity-50" : ""}`}
+          >
+            <button
+              type="button"
+              className="block w-full text-left"
+              data-testid={`tree-select-${row.id}`}
+              onClick={() => {
+                useDrawStore.getState().setSelected(row.id);
+                useDrawStore.getState().setTool("cursor");
+              }}
+            >
+              <span className="text-white">{TOOL_LABEL[row.tool]}</span>
+              <span className="ml-2 text-white/50">{row.drawnOn || "—"}</span>
+              <span className="ml-2 text-white/50">{formatCrosshairTime(row.createdAt, "15m")}</span>
+            </button>
+            <div className="mt-1 flex gap-1">
+              <TreeAction
+                testId={`tree-hide-${row.id}`}
+                title={row.hidden ? "Show" : "Hide"}
+                label={row.hidden ? "show" : "hide"}
+                onClick={() => useDrawStore.getState().patchDrawing(row.id, { hidden: !row.hidden })}
+              />
+              <TreeAction
+                testId={`tree-lock-${row.id}`}
+                title={row.locked ? "Unlock" : "Lock"}
+                label={row.locked ? "unlock" : "lock"}
+                onClick={() => useDrawStore.getState().patchDrawing(row.id, { locked: !row.locked })}
+              />
+              <TreeAction testId={`tree-zoom-${row.id}`} title="Zoom to" label="zoom" onClick={() => useDrawStore.getState().requestZoom(row.id)} />
+              <TreeAction
+                testId={`tree-delete-${row.id}`}
+                title="Delete"
+                label="delete"
+                disabled={row.locked}
+                onClick={() => useDrawStore.getState().remove(row.id)}
+              />
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+function TreeAction({
+  testId,
+  title,
+  label,
+  disabled,
+  onClick,
+}: {
+  testId: string;
+  title: string;
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      data-testid={testId}
+      disabled={disabled}
+      onClick={onClick}
+      className="rounded px-1 text-white/70 hover:bg-white/10 disabled:opacity-30"
+    >
+      {label}
+    </button>
+  );
+}
+
+function Properties({ drawing, timeframe, treeOpen }: { drawing: Drawing; timeframe: string; treeOpen: boolean }) {
   const update = (patch: Partial<Drawing>): void => useDrawStore.getState().changeSelected(patch);
   const style = drawing.style;
   const setStyle = (partial: Partial<Drawing["style"]>): void => update({ style: { ...style, ...partial } });
   const a = drawing.anchors[0];
   const b = drawing.anchors[1];
   return (
-    <div className="absolute left-11 top-2 z-30 w-56 rounded border border-white/15 bg-[#0b0e14] p-2 text-[11px] text-white/80 shadow-lg" data-testid="draw-properties">
+    <div className={`absolute top-2 z-30 w-56 rounded border border-white/15 bg-[#0b0e14] p-2 text-[11px] text-white/80 shadow-lg ${treeOpen ? "left-[21rem]" : "left-11"}`} data-testid="draw-properties">
       <div className="mb-1 font-medium text-white">{drawing.tool}</div>
       <label className="mb-1 flex items-center justify-between gap-2">
         Colour
@@ -207,6 +310,30 @@ function Properties({ drawing, timeframe }: { drawing: Drawing; timeframe: strin
         />
       )}
       {drawing.tool === "measure" && a && b && <MeasureReadout a={a} b={b} timeframe={timeframe} />}
+      <fieldset className="mt-2 border-t border-white/10 pt-1" data-testid="draw-timeframes">
+        <legend className="mb-1 text-white/60">Show on</legend>
+        <div className="grid grid-cols-4 gap-1">
+          {TIMEFRAMES.map((tf) => {
+            const checked = drawing.showOn == null || drawing.showOn.includes(tf);
+            return (
+              <label key={tf} className="flex items-center gap-1">
+                <input
+                  type="checkbox"
+                  checked={checked}
+                  data-testid={`draw-tf-${tf}`}
+                  onChange={() => {
+                    const current = drawing.showOn == null ? [...TIMEFRAMES] : [...drawing.showOn];
+                    const next = current.includes(tf) ? current.filter((item) => item !== tf) : [...current, tf];
+                    const all = TIMEFRAMES.every((item) => next.includes(item));
+                    update({ showOn: all ? null : next });
+                  }}
+                />
+                {tf}
+              </label>
+            );
+          })}
+        </div>
+      </fieldset>
     </div>
   );
 }
