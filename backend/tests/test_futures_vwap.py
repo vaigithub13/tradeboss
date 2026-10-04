@@ -107,13 +107,13 @@ def test_volume_roll_is_sticky_for_the_session_and_does_not_look_ahead() -> None
     full = active_volumes(
         times, {front: october, nxt: november},
         front_and_next=_pair, is_trading_day=CAL.is_trading_day, roll_days=2, roll_on_volume=True,
-    )
+    ).weight
     # minute 2: cum next 22 > cum current 11, so that minute and the rest of the day use November
     np.testing.assert_array_equal(full, [5, 5, 20, 0])
     earlier = active_volumes(
         times[:2], {front: october, nxt: november},
         front_and_next=_pair, is_trading_day=CAL.is_trading_day, roll_days=2, roll_on_volume=True,
-    )
+    ).weight
     np.testing.assert_array_equal(earlier, full[:2])
 
 
@@ -129,7 +129,8 @@ def test_calendar_roll_uses_the_next_month_for_the_whole_session() -> None:
         times, volumes,
         front_and_next=_pair, is_trading_day=CAL.is_trading_day, roll_days=2, roll_on_volume=True,
     )
-    np.testing.assert_array_equal(got, [3, 4])
+    np.testing.assert_array_equal(got.weight, [3, 4])
+    assert not got.fallback.any()
 
 
 def test_volume_roll_off_stays_on_the_current_month() -> None:
@@ -141,7 +142,7 @@ def test_volume_roll_off_stays_on_the_current_month() -> None:
         times, volumes,
         front_and_next=_pair, is_trading_day=CAL.is_trading_day, roll_days=2, roll_on_volume=False,
     )
-    assert got[0] == 1
+    assert got.weight[0] == 1 and not got.fallback[0]
 
 
 def _write_minute(store_dir: Path, symbol: str, bars: list[dict], instrument: dict) -> None:
@@ -325,7 +326,95 @@ def test_an_expired_future_with_no_candles_does_not_leave_a_parquet(tmp_path: Pa
     folder = tmp_path / symbol_dir_name(key)
     assert not (folder / "1m.parquet").exists()
     assert list(folder.glob("*.tmp")) == []
-    assert read_meta(folder).covered  # the empty range is remembered, so it is not fetched again
+    meta = read_meta(folder)
+    assert meta.covered == []
+    assert meta.source_empty
+    assert all(row.tried == date(2026, 10, 4) for row in meta.source_empty)
+
+    class Counting(Empty):
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def expired_historical_candles(self, key: str, start: date, end: date, interval: str = "1minute"):
+            self.calls += 1
+            return []
+
+    same_week = Counting()
+    sync_expired_future(
+        same_week, tmp_path, expiry=date(2024, 12, 26), expired_key=key,
+        symbol="NIFTY FUT 26 DEC 24", now_date=date(2026, 10, 4),
+    )
+    assert same_week.calls == 0
+    later = Counting()
+    sync_expired_future(
+        later, tmp_path, expiry=date(2024, 12, 26), expired_key=key,
+        symbol="NIFTY FUT 26 DEC 24", now_date=date(2026, 10, 11),
+    )
+    assert later.calls > 0
+
+
+def test_a_minute_neither_contract_has_is_empty_instead_of_carried() -> None:
+    start = ist_ts(2026, 10, 1, 9, 15)
+    df = _minute_frame(start, [(10, 1), (99, 0), (16, 1)])
+    got = session_vwap(df, np.array([1.0, np.nan, 1.0])).to_numpy()
+    assert got[0] == pytest.approx(10)
+    assert np.isnan(got[1])
+    assert got[2] == pytest.approx(13)  # (10 + 16) / 2, the hole added nothing
+
+
+def test_december_2024_with_no_front_month_uses_the_next_month_and_counts_fallback(tmp_path: Path) -> None:
+    """The Dec 2024 future has no Upstox tape. VWAP uses January's volume and says so."""
+    day = date(2024, 12, 2)
+    front, nxt = _pair(day)
+    assert front.month == 12 and nxt.month == 1
+    assert day < roll_start(front, 2, CAL.is_trading_day)
+    start = ist_ts(2024, 12, 2, 9, 15)
+    index = [
+        {"t": (start + 60 * i) * 1000, "open": p, "high": p, "low": p, "close": p, "volume": 0}
+        for i, p in enumerate((100.0, 110.0, 120.0))
+    ]
+    january = [{"t": start * 1000, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 4, "oi": 1}]
+    december = [{"t": (start + 120) * 1000, "open": 1, "high": 1, "low": 1, "close": 1, "volume": 2, "oi": 1}]
+    root = tmp_path / "candles"
+    _write_minute(root, "NIFTY50", index, {"instrument_key": "NSE_INDEX|Nifty 50", "kind": "index", "name": "NIFTY"})
+    _write_minute(
+        root, "DEC", december,
+        {
+            "instrument_key": "NSE_FO|35005|26-12-2024", "symbol": "NIFTY FUT 26 DEC 24", "name": "NIFTY",
+            "kind": "future", "instrument_type": "FUT", "expiry": front.isoformat(),
+            "underlying_key": "NSE_INDEX|Nifty 50",
+        },
+    )
+    _write_minute(
+        root, "JAN", january,
+        {
+            "instrument_key": "NSE_FO|JAN", "symbol": "NIFTY FUT JAN 25", "name": "NIFTY",
+            "kind": "future", "instrument_type": "FUT", "expiry": nxt.isoformat(),
+            "underlying_key": "NSE_INDEX|Nifty 50",
+        },
+    )
+    store = CandleStore(root)
+    spec = IndicatorSpec("v", "vwap_fut", validate_params("vwap_fut", {}))
+    got = compute_indicators(
+        store, "NIFTY50", "1m", [spec], from_time=start, to_time=start + 120,
+        session_types=("normal", "special_short"),
+    )
+    vwap = got.indicators[0].outputs["vwap"]
+    flags = got.indicators[0].outputs["fallback"]
+    assert vwap[0] == pytest.approx(100)  # January's volume, the only tape that minute
+    assert vwap[1] is None  # neither contract
+    assert vwap[2] == pytest.approx((100 * 4 + 120 * 2) / 6)  # December is back; the hole added nothing
+    assert flags == [1, 0, 0]
+
+    from app.backtest.engine import run_backtest
+    from app.backtest.sources import StoreSource
+    from tests.bt_helpers import Scripted, cfg
+
+    result = run_backtest(
+        Scripted(), StoreSource(store, "NIFTY50"),
+        cfg(timeframe="1m", session_types=("normal", "special_short"), warmup_bars=0),
+    )
+    assert any(line == "VWAP (futures volume): fallback 1" for line in result.warnings)
 
 
 def test_registry_rejects_a_bad_roll_setting() -> None:

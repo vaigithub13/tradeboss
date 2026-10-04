@@ -53,10 +53,18 @@ export function legendRows(args: {
         case "sma":
         case "ema":
         case "vwap":
-        case "vwap_fut":
         case "rsi":
-          row.entries.push({ label: "", text: fmt(at(item.type === "vwap_fut" ? "vwap" : item.type)), color: color("line") });
+          row.entries.push({ label: "", text: fmt(at(item.type)), color: color("line") });
           break;
+        case "vwap_fut": {
+          const flags = entry.outputs["fallback"] ?? [];
+          const fallback = flags.reduce((sum, v) => sum + (v === 1 ? 1 : 0), 0);
+          row.entries.push(
+            { label: "", text: fmt(at("vwap")), color: color("line") },
+            { label: "fallback", text: String(fallback), color: "#f59e0b" },
+          );
+          break;
+        }
         case "stoch":
           row.entries.push(
             { label: "%K", text: fmt(at("k")), color: color("k") },

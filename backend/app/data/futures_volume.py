@@ -15,8 +15,10 @@ from pathlib import Path
 from app.backtest.expiry import ExpiryCalendar, load_default_calendar
 from app.data.history import (
     SyncResult,
+    clip_source_empty,
     merge_window,
-    missing_ranges,
+    note_source_empty,
+    ranges_to_fetch,
     read_meta,
     read_parquet,
     split_windows,
@@ -88,16 +90,20 @@ def sync_expired_future(
         "lot_size": lot_size,
         "underlying_key": NIFTY_INDEX_KEY,
     }
-    gaps = missing_ranges(meta.covered, start, end)
+    gaps = ranges_to_fetch(meta.covered, meta.source_empty, start, end, today)
     windows = [w for gap in gaps for w in split_windows(gap)]
     windows.sort(reverse=True)
     fetched = 0
     for window in windows:
         rows = client.expired_historical_candles(expired_key, window[0], window[1])
         new, _ = build_frame(parse_candles(rows), bar_minutes=1, keep_oi=True, in_progress_date=None)
-        merged = merge_window(read_parquet(parquet), new, window)
-        write_parquet_atomic(merged, parquet)
-        meta.covered = [*meta.covered, window]
+        if len(new) == 0:
+            meta.source_empty = note_source_empty(meta.source_empty, window, today)
+        else:
+            merged = merge_window(read_parquet(parquet), new, window)
+            write_parquet_atomic(merged, parquet)
+            meta.covered = [*meta.covered, window]
+            meta.source_empty = clip_source_empty(meta.source_empty, window)
         write_meta(sdir, meta)
         fetched += 1
     if not windows:

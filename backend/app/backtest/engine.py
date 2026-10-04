@@ -217,6 +217,27 @@ def _build_series(cfg: BacktestConfig, source: CandleSource) -> tuple[_Series, i
     return _Series(bars[lo:hi], out_subs, ends, lasts, first - lo, coarse), base, warnings
 
 
+def _note_vwap_fallback(warnings: list[str], store: Any, symbol: str, cfg: BacktestConfig, series: _Series) -> None:
+    """Count signal bars whose futures VWAP used the other contract, and say so on the result."""
+    tf_min = INTRADAY_MIN.get(cfg.timeframe)
+    if store is None or symbol != "NIFTY50" or tf_min is None or not series.bars:
+        return
+    from app.data.service import TimeframeUnavailable
+    from app.indicators.futures_vwap import values_for_chart
+    from app.indicators.registry import validate_params
+
+    try:
+        _values, flags = values_for_chart(
+            store, series.bars, validate_params("vwap_fut", {}), cfg.session_types, tf_min * 60,
+            to_time=None, cursor=None,
+        )
+    except TimeframeUnavailable:
+        return
+    count = int(np.sum(flags))
+    if count:
+        warnings.append(f"VWAP (futures volume): fallback {count}")
+
+
 def _ist_midnight(d: date) -> int:
     return (d.toordinal() - date(1970, 1, 1).toordinal()) * DAY_S - IST_OFFSET_S
 
@@ -240,6 +261,8 @@ def run_backtest(
     """`replay_cursor` drops source minutes after that time and does not flatten a position
     merely because the clipped series ends mid-session."""
     cfg = config or BacktestConfig()
+    candle_store = getattr(source, "store", None)
+    candle_symbol = getattr(source, "symbol", "")
     data_continues = False
     if replay_cursor is not None:
         cursor = replay_cursor
@@ -266,6 +289,7 @@ def run_backtest(
         raise ConfigError("give a lot_size, or a lot_table and an underlying (lot sizes are dated, never assumed)")
 
     series, base, warnings = _build_series(cfg, source)
+    _note_vwap_fallback(warnings, candle_store, candle_symbol, cfg, series)
     base_s = base * 60
     sq = cfg.square_off_minute()
     sq_active = sq is not None and intraday

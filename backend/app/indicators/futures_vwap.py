@@ -12,15 +12,19 @@ The weight for a minute is the 1m volume of one futures contract:
   cumulative volume exceeds the current month's. That choice stays for the rest of the session.
   The decision at a minute uses only volume through that minute.
 
-A minute with no futures volume keeps the previous VWAP. Before the day's first positive weight
-the value is empty. Higher-timeframe bars show the VWAP of the last 1m bar inside them.
+The contract in force is the front month, or the next month once the roll has started. If that
+contract has no bar for a minute, the other contract's volume is used and the minute is flagged
+fallback. If neither contract has a bar, that minute is empty: the previous VWAP is not carried
+across the hole. A bar that exists with zero volume still keeps the previous value. Before the
+day's first positive weight the value is empty. Higher-timeframe bars show the VWAP of the last
+1m bar inside them.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -64,20 +68,23 @@ def roll_start(expiry: date, roll_days: int, is_trading_day: Callable[[date], bo
 def session_vwap(df: pd.DataFrame, weights: np.ndarray, source: str = "hlc3") -> pd.Series:
     """cumulative(source × weight) / cumulative(weight), reset at each IST midnight.
 
-    A zero or missing weight adds nothing, so the value stays where it was. Empty until the
-    day's cumulative weight is positive.
+    A zero weight adds nothing, so the value stays where it was. A NaN weight is a minute neither
+    contract had a bar for: that minute is empty and does not carry the previous value. Empty
+    until the day's cumulative weight is positive.
     """
     src = source_series(df, source).to_numpy(dtype=float)
-    w = np.asarray(weights, dtype=float)
-    if len(w) != len(df):
-        raise ValueError(f"fut_volume length {len(w)} does not match {len(df)} bars")
-    w = np.where(np.isfinite(w) & (w > 0), w, 0.0)
+    raw = np.asarray(weights, dtype=float)
+    if len(raw) != len(df):
+        raise ValueError(f"fut_volume length {len(raw)} does not match {len(df)} bars")
+    missing = ~np.isfinite(raw)
+    w = np.where((~missing) & (raw > 0), raw, 0.0)
     day = (df["time"].to_numpy(dtype="int64") + IST_OFFSET_S) // DAY_S
     frame = pd.DataFrame({"day": day, "pv": src * w, "v": w})
     cum = frame.groupby("day", sort=False)[["pv", "v"]].cumsum()
     cum_v = cum["v"].to_numpy()
     with np.errstate(divide="ignore", invalid="ignore"):
         out = np.where(cum_v > 0, cum["pv"].to_numpy() / cum_v, np.nan)
+    out = np.where(missing, np.nan, out)
     return pd.Series(out, index=df.index)
 
 
@@ -96,6 +103,13 @@ def project_to_bars(
     return out
 
 
+class ActiveVolume(NamedTuple):
+    """Per-minute weight, and whether it came from the other contract because the one in force had no bar."""
+
+    weight: np.ndarray
+    fallback: np.ndarray
+
+
 def active_volumes(
     times: np.ndarray,
     volume_by_expiry: Mapping[date, Mapping[int, float]],
@@ -104,9 +118,15 @@ def active_volumes(
     is_trading_day: Callable[[date], bool],
     roll_days: int,
     roll_on_volume: bool,
-) -> np.ndarray:
-    """Per-minute futures volume of the contract in force. `times` must be ascending."""
-    out = np.zeros(len(times), dtype=float)
+) -> ActiveVolume:
+    """Per-minute futures volume of the contract in force. `times` must be ascending.
+
+    A missing minute (no bar stored) is not a zero-volume bar. If the contract in force has no
+    bar and the other contract does, with a positive volume, that other volume is the weight and
+    the minute is fallback. If neither has a bar, the weight is NaN.
+    """
+    weight = np.zeros(len(times), dtype=float)
+    fallback = np.zeros(len(times), dtype=bool)
     i = 0
     n = len(times)
     while i < n:
@@ -119,15 +139,31 @@ def active_volumes(
         following = volume_by_expiry.get(nxt, {})
         while i < n and ist_day(int(times[i])) == day:
             t = int(times[i])
-            vc = float(current.get(t, 0.0) or 0.0)
-            vn = float(following.get(t, 0.0) or 0.0)
-            cum_current += vc
-            cum_next += vn
-            if roll_on_volume and not sticky and cum_next > cum_current:
+            has_front = t in current
+            has_next = t in following
+            vc = float(current[t]) if has_front else 0.0
+            vn = float(following[t]) if has_next else 0.0
+            # A missing front month is not a zero print. The volume roll only compares
+            # minutes both contracts actually printed.
+            if has_front:
+                cum_current += vc
+            if has_next:
+                cum_next += vn
+            if roll_on_volume and not sticky and has_front and has_next and cum_next > cum_current:
                 sticky = True
-            out[i] = vn if sticky else vc
+            primary_has = has_next if sticky else has_front
+            primary = vn if sticky else vc
+            other_has = has_front if sticky else has_next
+            other = vc if sticky else vn
+            if primary_has:
+                weight[i] = primary
+            elif other_has and other > 0:
+                weight[i] = other
+                fallback[i] = True
+            else:
+                weight[i] = np.nan
             i += 1
-    return out
+    return ActiveVolume(weight, fallback)
 
 
 def calendar_front_and_next(calendar: ExpiryCalendar, day: date) -> tuple[date, date]:
@@ -187,10 +223,11 @@ def values_for_chart(
     to_time: int | None,
     cursor: int | None,
     calendar: ExpiryCalendar | None = None,
-) -> np.ndarray:
-    """Session VWAP aligned to `chart_candles` (warm-up bars included)."""
+) -> tuple[np.ndarray, np.ndarray]:
+    """Session VWAP and a 1/0 fallback flag, aligned to `chart_candles` (warm-up bars included)."""
     if not chart_candles:
-        return np.zeros(0, dtype=float)
+        empty = np.zeros(0, dtype=float)
+        return empty, empty
     calendar = calendar or load_default_calendar()
     start = day_start_ts(ist_day(int(chart_candles[0]["time"])))
     # A chart bar's start is the API bound, but its VWAP uses every 1m bar inside it.
@@ -208,9 +245,9 @@ def values_for_chart(
     ).candles
     frame = candles_to_frame(minutes)
     if frame.empty:
-        return np.full(len(chart_candles), np.nan)
+        return np.full(len(chart_candles), np.nan), np.zeros(len(chart_candles), dtype=float)
     volumes = load_future_volumes(store, start, last_minute, session_types, cursor=cursor)
-    weights = active_volumes(
+    chosen = active_volumes(
         frame["time"].to_numpy(),
         volumes,
         front_and_next=lambda day: calendar_front_and_next(calendar, day),
@@ -218,6 +255,10 @@ def values_for_chart(
         roll_days=int(params["roll_days"]),
         roll_on_volume=params["roll_on_volume"] == "on",
     )
-    minute_vwap = session_vwap(frame, weights, str(params["source"])).to_numpy(dtype=float)
+    minute_times = frame["time"].to_numpy(dtype="int64")
+    minute_vwap = session_vwap(frame, chosen.weight, str(params["source"])).to_numpy(dtype=float)
     bar_times = np.array([int(c["time"]) for c in chart_candles], dtype="int64")
-    return project_to_bars(frame["time"].to_numpy(dtype="int64"), minute_vwap, bar_times, bar_seconds)
+    values = project_to_bars(minute_times, minute_vwap, bar_times, bar_seconds)
+    used_fallback = project_to_bars(minute_times, chosen.fallback.astype(float), bar_times, bar_seconds)
+    fallback = np.where(np.isfinite(values) & (used_fallback > 0), 1.0, 0.0)
+    return values, fallback

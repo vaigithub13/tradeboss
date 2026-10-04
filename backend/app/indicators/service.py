@@ -87,10 +87,10 @@ def compute_indicators(
     outputs: list[IndicatorOutput] = []
     for s in specs:
         if s.type == "vwap_fut":
-            projected = values_for_chart(
+            projected, fallback = values_for_chart(
                 store, candles, s.params, types, bar_minutes * 60, to_time=to_time, cursor=cursor,
             )
-            values = {"vwap": projected}
+            values = {"vwap": projected, "fallback": fallback}
         else:
             values = compute(frame, s.type, s.params)  # may raise VolumeRequired
         outputs.append(

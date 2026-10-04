@@ -160,19 +160,27 @@ def test_coverage_is_saved_after_each_window_so_an_interrupted_run_resumes(tmp_p
     assert resume.historical_calls[-1][1] == D(2026, 5, 1)
 
 
-def test_holidays_and_empty_windows_still_count_as_covered(tmp_path: Path) -> None:
+def test_an_empty_window_is_a_hole_retried_after_a_week_not_covered(tmp_path: Path) -> None:
     class Empty(FakeClient):
         def historical_candles(self, key, from_date, to_date, **kw):  # noqa: ANN001
             self.historical_calls.append((key, from_date, to_date))
             return []
 
     sync_symbol(Empty(), tmp_path, FUT, from_date=D(2026, 9, 1), now=NOW)
-    again = FakeClient()
-    sync_symbol(again, tmp_path, FUT, from_date=D(2026, 9, 1), now=NOW)
-    assert again.historical_calls == []
+    meta = read_meta(tmp_path / symbol_dir_name(FUT.key))
+    assert meta.covered == []
+    assert meta.source_empty
+    assert all(row.tried == NOW.date() for row in meta.source_empty)
     parquet = tmp_path / symbol_dir_name(FUT.key) / "1m.parquet"
     assert not parquet.exists()
-    assert not parquet.with_name(parquet.name + ".tmp").exists()
+
+    again = FakeClient()
+    sync_symbol(again, tmp_path, FUT, from_date=D(2026, 9, 1), now=NOW)
+    assert again.historical_calls == []  # tried today: wait a week
+
+    later = FakeClient()
+    sync_symbol(later, tmp_path, FUT, from_date=D(2026, 9, 1), now=NOW + timedelta(days=7))
+    assert later.historical_calls  # the hole is asked again
 
 
 def test_an_empty_download_does_not_create_or_wipe_a_candle_file(tmp_path: Path) -> None:
@@ -202,6 +210,39 @@ def test_an_interrupted_candle_write_keeps_the_previous_file(tmp_path: Path, mon
         write_parquet_atomic(frame(D(2026, 9, 30), 6), path)
     assert path.read_bytes() == kept
     assert not path.with_name(path.name + ".tmp").exists()
+
+
+def test_the_source_empty_report_lists_a_hole_and_reclassifies_an_empty_file(tmp_path: Path) -> None:
+    from app.data.history import SymbolMeta, source_empty_report, write_meta
+    from app.data.importer import write_parquet
+
+    folder = tmp_path / "NSE_FO_35005_26_12_2024"
+    write_parquet(pd.DataFrame({"time": pd.Series([], dtype="int64")}), folder / "1m.parquet", allow_empty=True)
+    write_meta(
+        folder,
+        SymbolMeta(
+            instrument={
+                "instrument_key": "NSE_FO|35005|26-12-2024",
+                "symbol": "NIFTY FUT 26 DEC 24",
+                "expiry": "2024-12-26",
+            },
+            covered=[(D(2024, 10, 1), D(2024, 12, 26))],
+        ),
+    )
+    rows = source_empty_report(tmp_path, today=D(2026, 10, 4))
+    assert rows == [
+        {
+            "symbol": "NSE_FO_35005_26_12_2024",
+            "instrument_key": "NSE_FO|35005|26-12-2024",
+            "name": "NIFTY FUT 26 DEC 24",
+            "expiry": "2024-12-26",
+            "from": "2024-10-01",
+            "to": "2024-12-26",
+            "tried": rows[0]["tried"],
+        }
+    ]
+    assert not (folder / "1m.parquet").exists()
+    assert read_meta(folder).covered == []
 
 
 def test_history_never_goes_before_january_2022(tmp_path: Path) -> None:

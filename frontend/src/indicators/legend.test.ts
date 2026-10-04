@@ -72,6 +72,16 @@ describe("legendRows", () => {
     expect(legendRows({ ...base, items: [{ ...ema, visible: false }], time: 1600 })).toEqual([]);
   });
 
+  it("VWAP (futures volume) shows the value and how many bars used the other contract", () => {
+    const fut = createInstance("vwap_fut", []);
+    const entry: IndicatorEntry = { times, outputs: { vwap: [100, 101, 102], fallback: [1, 0, 1] } };
+    const row = legendRows({ ...base, items: [fut], entryFor: () => entry, time: 1600, symbol: "NIFTY50" })[0];
+    expect(row?.entries.map((e) => [e.label, e.text])).toEqual([
+      ["", "102.00"],
+      ["fallback", "2"],
+    ]);
+  });
+
   it("VWAP on zero-volume data is listed as unavailable, with no values", () => {
     const zero = candles.map((c) => ({ ...c, volume: 0 }));
     const [row] = legendRows({ ...base, candles: zero, items: [vwap], time: 1600 });

@@ -4,8 +4,9 @@ Layout:  <candles>/<symbol_dir>/1m.parquet   candles (see importer.COLUMNS)
          <candles>/<symbol_dir>/meta.json    instrument info + the IST date ranges already fetched
 
 * 1m is the single source of truth; every other timeframe is resampled from it.
-* A fetched window is whole IST days. A day with no bars (holiday / not listed yet) still counts
-  as covered, so it is never asked for again.
+* A fetched window is whole IST days. A window that returns bars is covered, including the holidays
+  inside it. A window that returns nothing is source_empty (the date it was tried), not covered,
+  and is asked again after a week.
 * "Today" is never marked covered (the day is not finished): it is refreshed from the intraday
   endpoint every time. Everything before today comes from the historical endpoint, in windows of
   at most WINDOW_DAYS (Upstox allows one month per request for 1-15 minute data).
@@ -37,6 +38,8 @@ MIN_HISTORY_DATE = date(2022, 1, 1)
 WINDOW_DAYS = 28
 #: the session is considered "still running" until shortly after the 15:30 close
 SESSION_DONE_AFTER = time(15, 45)
+#: an empty Upstox answer is tried again after this many days, and not sooner
+EMPTY_RETRY = timedelta(days=7)
 
 #: keep the folder of the original Nifty sample so it stays a fixture and cross-check source
 DIR_ALIASES = {NIFTY_INDEX_KEY: "NIFTY50"}
@@ -141,14 +144,41 @@ def merge_window(existing: pd.DataFrame, new: pd.DataFrame, window: DateRange) -
     return merged[COLUMNS]
 
 
+@dataclass(frozen=True)
+class SourceEmpty:
+    """A window Upstox answered with no candles, and the IST date that answer was received."""
+
+    start: date
+    end: date
+    tried: date
+
+
 @dataclass
 class SymbolMeta:
     instrument: dict[str, Any] = field(default_factory=dict)
-    covered: list[DateRange] = field(default_factory=list)  # 1m date ranges already fetched
+    covered: list[DateRange] = field(default_factory=list)  # 1m date ranges that returned bars
+    source_empty: list[SourceEmpty] = field(default_factory=list)
 
 
 def meta_path(symbol_dir: Path) -> Path:
     return symbol_dir / "meta.json"
+
+
+def _parse_source_empty(raw: object) -> list[SourceEmpty]:
+    out: list[SourceEmpty] = []
+    if not isinstance(raw, list):
+        return out
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        out.append(
+            SourceEmpty(
+                date.fromisoformat(str(item["from"])),
+                date.fromisoformat(str(item["to"])),
+                date.fromisoformat(str(item["tried"])),
+            )
+        )
+    return _merge_source_empty(out)
 
 
 def read_meta(symbol_dir: Path) -> SymbolMeta:
@@ -158,7 +188,11 @@ def read_meta(symbol_dir: Path) -> SymbolMeta:
     try:
         raw = json.loads(p.read_text())
         covered = [(date.fromisoformat(a), date.fromisoformat(b)) for a, b in raw.get("covered_1m", [])]
-        return SymbolMeta(instrument=dict(raw.get("instrument", {})), covered=merge_ranges(covered))
+        return SymbolMeta(
+            instrument=dict(raw.get("instrument", {})),
+            covered=merge_ranges(covered),
+            source_empty=_parse_source_empty(raw.get("source_empty", [])),
+        )
     except (ValueError, TypeError, KeyError):
         return SymbolMeta()  # unreadable bookkeeping: refetch rather than trust it
 
@@ -167,16 +201,120 @@ def write_meta(symbol_dir: Path, meta: SymbolMeta) -> None:
     symbol_dir.mkdir(parents=True, exist_ok=True)
     p = meta_path(symbol_dir)
     tmp = p.with_name(p.name + ".tmp")
+    rows = _merge_source_empty(meta.source_empty)
     tmp.write_text(
         json.dumps(
             {
                 "instrument": meta.instrument,
                 "covered_1m": [[a.isoformat(), b.isoformat()] for a, b in merge_ranges(meta.covered)],
+                "source_empty": [
+                    {"from": r.start.isoformat(), "to": r.end.isoformat(), "tried": r.tried.isoformat()} for r in rows
+                ],
             },
             indent=1,
         )
     )
     os.replace(tmp, p)
+
+
+def _merge_source_empty(rows: Iterable[SourceEmpty]) -> list[SourceEmpty]:
+    """Join overlapping or adjacent holes that were tried on the same day."""
+    out: list[SourceEmpty] = []
+    for row in sorted(rows, key=lambda r: (r.tried, r.start, r.end)):
+        if row.start > row.end:
+            continue
+        if out and out[-1].tried == row.tried and row.start <= out[-1].end + timedelta(days=1):
+            if row.end > out[-1].end:
+                out[-1] = SourceEmpty(out[-1].start, row.end, row.tried)
+        else:
+            out.append(row)
+    return sorted(out, key=lambda r: (r.start, r.end, r.tried))
+
+
+def clip_source_empty(rows: Iterable[SourceEmpty], window: DateRange) -> list[SourceEmpty]:
+    """Drop the part of each hole that `window` now covers."""
+    a, b = window
+    out: list[SourceEmpty] = []
+    for row in rows:
+        if row.end < a or row.start > b:
+            out.append(row)
+            continue
+        if row.start < a:
+            out.append(SourceEmpty(row.start, a - timedelta(days=1), row.tried))
+        if row.end > b:
+            out.append(SourceEmpty(b + timedelta(days=1), row.end, row.tried))
+    return _merge_source_empty(out)
+
+
+def note_source_empty(rows: Iterable[SourceEmpty], window: DateRange, tried: date) -> list[SourceEmpty]:
+    """Remember that `window` came back empty on `tried`."""
+    return _merge_source_empty([*clip_source_empty(rows, window), SourceEmpty(window[0], window[1], tried)])
+
+
+def ranges_to_fetch(
+    covered: Iterable[DateRange],
+    source_empty: Iterable[SourceEmpty],
+    start: date,
+    end: date,
+    today: date,
+) -> list[DateRange]:
+    """Gaps still worth asking for. A hole tried less than a week ago waits."""
+    held = list(covered)
+    for row in source_empty:
+        if today < row.tried + EMPTY_RETRY:
+            held.append((row.start, row.end))
+    return missing_ranges(held, start, end)
+
+
+def reclassify_empty_coverage(symbol_dir: Path, today: date) -> SymbolMeta:
+    """A covered range with no candles was an empty answer stored as success. Record it as a hole.
+
+    A real file (any rows) is left alone: holidays inside a window that returned bars stay covered.
+    """
+    meta = read_meta(symbol_dir)
+    if not meta.covered:
+        return meta
+    parquet = symbol_dir / "1m.parquet"
+    if parquet.is_file() and parquet.stat().st_size >= 4096:
+        return meta
+    rows = len(read_parquet(parquet)) if parquet.is_file() else 0
+    if rows > 0:
+        return meta
+    tried = today
+    stamp = parquet if parquet.is_file() else meta_path(symbol_dir)
+    if stamp.is_file():
+        tried = datetime.fromtimestamp(stamp.stat().st_mtime, IST).date()
+    for start, end in meta.covered:
+        meta.source_empty = note_source_empty(meta.source_empty, (start, end), tried)
+    meta.covered = []
+    write_meta(symbol_dir, meta)
+    if parquet.is_file():
+        parquet.unlink()
+    return read_meta(symbol_dir)
+
+
+def source_empty_report(candles_dir: Path, *, today: date | None = None) -> list[dict[str, str]]:
+    """Every contract whose 1m coverage is a hole, after empty files are reclassified."""
+    when = today or datetime.now(IST).date()
+    out: list[dict[str, str]] = []
+    if not candles_dir.is_dir():
+        return out
+    for symbol_dir in sorted(p for p in candles_dir.iterdir() if p.is_dir()):
+        meta = reclassify_empty_coverage(symbol_dir, when)
+        inst = meta.instrument
+        for row in meta.source_empty:
+            out.append(
+                {
+                    "symbol": symbol_dir.name,
+                    "instrument_key": str(inst.get("instrument_key") or ""),
+                    "name": str(inst.get("symbol") or symbol_dir.name),
+                    "expiry": str(inst.get("expiry") or ""),
+                    "from": row.start.isoformat(),
+                    "to": row.end.isoformat(),
+                    "tried": row.tried.isoformat(),
+                }
+            )
+    return out
 
 
 # ------------------------------------------------------------------ sync
@@ -224,7 +362,7 @@ def sync_symbol(
     meta.instrument = instrument.as_dict()
 
     historical_end = min(end, today - timedelta(days=1))
-    gaps = missing_ranges(meta.covered, start, historical_end)
+    gaps = ranges_to_fetch(meta.covered, meta.source_empty, start, historical_end, today)
     windows: list[DateRange] = [w for g in gaps for w in split_windows(g)]
     windows.sort(reverse=True)  # newest first: the most useful data lands first
     do_today = end >= today and start <= today
@@ -244,9 +382,13 @@ def sync_symbol(
         new, _ = build_frame(
             parse_candles(rows), bar_minutes=1, keep_oi=instrument.has_oi, in_progress_date=in_progress_date
         )
-        merged = merge_window(read_parquet(parquet), new, window)
-        write_parquet_atomic(merged, parquet)
-        meta.covered = merge_ranges([*meta.covered, window])
+        if len(new) == 0:
+            meta.source_empty = note_source_empty(meta.source_empty, window, today)
+        else:
+            merged = merge_window(read_parquet(parquet), new, window)
+            write_parquet_atomic(merged, parquet)
+            meta.covered = merge_ranges([*meta.covered, window])
+            meta.source_empty = clip_source_empty(meta.source_empty, window)
         write_meta(sdir, meta)  # resumable
         fetched += 1
         progress.windows_done += 1
