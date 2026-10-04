@@ -23,6 +23,7 @@ from typing import Any, Protocol
 import duckdb
 import pandas as pd
 
+from app.data.history import EMPTY_RETRY
 from app.data.importer import parquet_rows
 from app.data.publish import publish_file
 from app.options.strikes import KINDS, atm_strike
@@ -71,7 +72,11 @@ class OptionHistorySource(Protocol):
 
 # ------------------------------------------------------------------------------------------ store
 class OptionHistoryStore:
-    """<base>/NIFTY_<expiry>.parquet (all candles of that expiry) + NIFTY_<expiry>.done.json (what was asked)."""
+    """<base>/NIFTY_<expiry>.parquet (all candles of that expiry) + NIFTY_<expiry>.done.json (what was asked).
+
+    A contract that came back with candles is "done". One Upstox does not list is "not_listed".
+    An empty answer is source_empty (the dates asked, and the day they were asked) and is tried again after a week.
+    """
 
     COLUMNS = ["time", "strike", "kind", "open", "high", "low", "close", "volume", "oi", "source", "key", "symbol", "lot_size"]
 
@@ -85,9 +90,17 @@ class OptionHistoryStore:
     def _ledger(self, expiry: date) -> Path:
         return self.base_dir / f"NIFTY_{expiry.isoformat()}.done.json"
 
-    def _read_ledger(self, expiry: date) -> dict[str, str]:
+    def _read_ledger(self, expiry: date) -> dict[str, Any]:
         p = self._ledger(expiry)
         return json.loads(p.read_text()) if p.exists() else {}
+
+    def _write_ledger(self, expiry: date, ledger: dict[str, Any]) -> None:
+        payload = json.dumps(ledger, sort_keys=True)
+
+        def _write(p: Path) -> None:
+            p.write_text(payload)
+
+        self._atomic(self._ledger(expiry), _write)
 
     def _atomic(self, path: Path, write: Callable[[Path], None]) -> None:
         """Replace ``path`` only when the temp file is non-empty. A parquet also needs rows."""
@@ -104,25 +117,40 @@ class OptionHistoryStore:
     def _lk(strike: float, kind: str) -> str:
         return f"{strike:g}|{kind}"
 
-    def have(self, expiry: date) -> set[tuple[float, str]]:
-        out = set()
-        for k in self._read_ledger(expiry):
-            s, kind = k.split("|")
-            out.add((float(s), kind))
+    def have(self, expiry: date, *, today: date | None = None) -> set[tuple[float, str]]:
+        """Contracts not worth asking again. A hole tried less than a week ago waits; an older hole does not."""
+        when = today or datetime.now(IST).date()
+        out: set[tuple[float, str]] = set()
+        for key, value in self._read_ledger(expiry).items():
+            if "|" not in key or not _held(value, when):
+                continue
+            strike, kind = key.split("|", 1)
+            out.add((float(strike), kind))
         return out
 
     def mark(self, expiry: date, strike: float, kind: str, status: str) -> None:
         ledger = self._read_ledger(expiry)
         ledger[self._lk(strike, kind)] = status
-        payload = json.dumps(ledger, sort_keys=True)
+        self._write_ledger(expiry, ledger)
 
-        def _write(p: Path) -> None:
-            p.write_text(payload)
-
-        self._atomic(self._ledger(expiry), _write)
+    def note_source_empty(self, expiry: date, strike: float, kind: str, start: date, end: date, tried: date) -> None:
+        """Remember that this contract's candles for [start, end] came back empty on `tried`."""
+        ledger = self._read_ledger(expiry)
+        ledger[self._lk(strike, kind)] = {
+            "status": "source_empty",
+            "from": start.isoformat(),
+            "to": end.isoformat(),
+            "tried": tried.isoformat(),
+        }
+        self._write_ledger(expiry, ledger)
 
     def write(self, expiry: date, ref: ContractRef, bars: Sequence[dict[str, Any]], source: str) -> None:
-        """Store the candles of one contract (replacing any stored earlier for it) and remember it was done."""
+        """Store the candles of one contract (replacing any stored earlier for it) and remember it was done.
+
+        An empty answer is not stored and is not marked done. The caller records it with note_source_empty.
+        """
+        if not bars:
+            return
         old = self._frame(expiry)
         if len(old):
             old = old[~((old["strike"] == ref.strike) & (old["kind"] == ref.kind))]
@@ -330,11 +358,16 @@ class FetchStats:
 
 
 def fetch_expiry(source: Any, store: OptionHistoryStore, expiry: date, strikes: Sequence[float], days: Sequence[date],
-                 kinds: Sequence[str] = KINDS) -> FetchStats:
-    """Fetch every wanted (strike, kind) of one expiry that the store does not have yet."""
+                 kinds: Sequence[str] = KINDS, *, today: date | None = None) -> FetchStats:
+    """Fetch every wanted (strike, kind) of one expiry that the store does not have yet.
+
+    An empty answer is source_empty for the dates asked, and is skipped until a week after `today`.
+    """
+    when = today or datetime.now(IST).date()
+    reclassify_empty_option_contracts(store)
     stats = FetchStats()
     wanted = [(s, k) for s in strikes for k in kinds]
-    done = store.have(expiry)
+    done = store.have(expiry, today=when)
     todo = [w for w in wanted if w not in done]
     stats.skipped = len(wanted) - len(todo)
     if not todo:
@@ -353,9 +386,12 @@ def fetch_expiry(source: Any, store: OptionHistoryStore, expiry: date, strikes: 
             log.warning("fetch %s %s %s failed: %s", expiry, strike, kind, type(exc).__name__)
             stats.failed += 1
             continue
+        if not bars:
+            store.note_source_empty(expiry, strike, kind, days[0], days[-1], when)
+            stats.empty += 1
+            continue
         store.write(expiry, ref, bars, label)
         stats.fetched += 1
-        stats.empty += 0 if bars else 1
     return stats
 
 
@@ -367,12 +403,15 @@ def capture_listed_day(
     strikes: Sequence[float],
     *,
     label: str = "live-recorded",
+    today: date | None = None,
 ) -> FetchStats:
     """One session of currently listed contracts (source b). Merges into what the store already has.
 
     The live feed is not touched: this is the end-of-day / historical-API path that starts growing
     the recorded store from Monday. The same `store.write` is what a later live recorder would call.
+    An empty answer for a contract we have no candles for is source_empty for that day.
     """
+    when = today or datetime.now(IST).date()
     stats = FetchStats()
     listed = {(r.strike, r.kind): r for r in source.contracts(expiry)}
     for strike in strikes:
@@ -394,6 +433,10 @@ def capture_listed_day(
             ]
             seen = {b["t"] for b in existing}
             merged = existing + [b for b in bars if b["t"] not in seen]
+            if not merged:
+                store.note_source_empty(expiry, ref.strike, ref.kind, day, day, when)
+                stats.empty += 1
+                continue
             store.write(expiry, ref, merged, label)
             stats.fetched += 1
             stats.empty += 0 if bars else 1
@@ -403,6 +446,115 @@ def capture_listed_day(
 def default_history_store() -> OptionHistoryStore:
     """`data/option_history` next to the repo root."""
     return OptionHistoryStore(Path(__file__).resolve().parents[3] / "data" / "option_history")
+
+
+def _held(value: Any, today: date) -> bool:
+    """True when this ledger entry should not be fetched again on `today`."""
+    if isinstance(value, dict) and value.get("status") == "source_empty":
+        raw = value.get("tried")
+        try:
+            tried = date.fromisoformat(str(raw))
+        except (TypeError, ValueError):
+            return False
+        return today < tried + EMPTY_RETRY
+    return True
+
+
+def _ledger_status(value: Any) -> str:
+    if isinstance(value, dict):
+        return str(value.get("status") or "")
+    return str(value)
+
+
+def _contracts_with_rows(store: OptionHistoryStore, expiry: date) -> set[tuple[float, str]]:
+    frame = store._frame(expiry)
+    if not len(frame):
+        return set()
+    picked = frame.drop_duplicates(["strike", "kind"])
+    return {(float(row.strike), str(row.kind)) for row in picked.itertuples(index=False)}
+
+
+def reclassify_empty_option_contracts(store: OptionHistoryStore) -> None:
+    """A "done" contract with no candles was an empty answer stored as success. Record it as a hole.
+
+    The dates are the expiry week that calibration asks for (seven trading days through the expiry).
+    The tried date is the day the ledger file was written. A contract that has candles stays done.
+    """
+    if not store.base_dir.is_dir():
+        return
+    pending: list[tuple[date, dict[str, Any], list[str], date]] = []
+    for path in sorted(store.base_dir.glob("NIFTY_*.done.json")):
+        name = path.name
+        if not name.endswith(".done.json"):
+            continue
+        try:
+            expiry = date.fromisoformat(name[len("NIFTY_") : -len(".done.json")])
+        except ValueError:
+            continue
+        ledger = store._read_ledger(expiry)
+        present = _contracts_with_rows(store, expiry)
+        holes = []
+        for key, value in ledger.items():
+            if _ledger_status(value) != "done" or "|" not in key:
+                continue
+            strike, kind = key.split("|", 1)
+            if (float(strike), kind) in present:
+                continue
+            holes.append(key)
+        if not holes:
+            continue
+        tried = datetime.fromtimestamp(path.stat().st_mtime, IST).date()
+        pending.append((expiry, ledger, holes, tried))
+    if not pending:
+        return
+    from app.backtest.expiry import load_default_calendar
+
+    is_trading_day = load_default_calendar().is_trading_day
+    for expiry, ledger, holes, tried in pending:
+        days = trading_days_before(expiry, 7, is_trading_day) or [expiry]
+        start, end = days[0], days[-1]
+        for key in holes:
+            ledger[key] = {
+                "status": "source_empty",
+                "from": start.isoformat(),
+                "to": end.isoformat(),
+                "tried": tried.isoformat(),
+            }
+        store._write_ledger(expiry, ledger)
+
+
+def option_source_empty_report(base_dir: Path) -> list[dict[str, str]]:
+    """Every option contract recorded as an empty Upstox answer, after done-but-empty ledgers are reclassified."""
+    store = OptionHistoryStore(base_dir)
+    reclassify_empty_option_contracts(store)
+    if not base_dir.is_dir():
+        return []
+    rows: list[dict[str, str]] = []
+    for path in sorted(base_dir.glob("NIFTY_*.done.json")):
+        name = path.name
+        if not name.endswith(".done.json"):
+            continue
+        try:
+            expiry = date.fromisoformat(name[len("NIFTY_") : -len(".done.json")])
+        except ValueError:
+            continue
+        for key, value in store._read_ledger(expiry).items():
+            if not isinstance(value, dict) or value.get("status") != "source_empty" or "|" not in key:
+                continue
+            strike, kind = key.split("|", 1)
+            rows.append(
+                {
+                    "symbol": f"NIFTY_{expiry.isoformat()}",
+                    "instrument_key": f"NIFTY|{float(strike):g}|{kind}|{expiry.isoformat()}",
+                    "name": f"NIFTY {float(strike):g} {kind}",
+                    "expiry": expiry.isoformat(),
+                    "from": str(value.get("from") or ""),
+                    "to": str(value.get("to") or ""),
+                    "tried": str(value.get("tried") or ""),
+                }
+            )
+    rows.sort(key=lambda row: (row["expiry"], row["instrument_key"]))
+    return rows
 
 
 def ingest_recorded_bars(

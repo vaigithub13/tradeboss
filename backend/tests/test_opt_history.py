@@ -3,6 +3,7 @@ a recorded source, resumable fetching. Everything runs on fakes - no network, no
 
 from __future__ import annotations
 
+import os
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from app.options.history import (
     capture_listed_day,
     fetch_expiry,
     ingest_recorded_bars,
+    option_source_empty_report,
     plan_strikes,
     trading_days_before,
 )
@@ -170,12 +172,14 @@ def test_the_store_round_trips_and_remembers_what_it_has(tmp_path: Path) -> None
     assert store.expiries() == [D("2026-09-29")]
 
 
-def test_an_empty_answer_and_an_unlisted_strike_are_remembered_too(tmp_path: Path) -> None:
+def test_an_empty_answer_is_a_hole_and_an_unlisted_strike_stays_skipped(tmp_path: Path) -> None:
     store = OptionHistoryStore(tmp_path)
     ref = ContractRef(25000.0, "PE", "NSE_FO|2|29-09-2026", "x", 65)
-    store.write(D("2026-09-29"), ref, [], "upstox-expired")
+    store.write(D("2026-09-29"), ref, [], "upstox-expired")  # nothing to store, and not a hole by itself
+    store.note_source_empty(D("2026-09-29"), 25000.0, "PE", D("2026-09-23"), D("2026-09-29"), D("2026-10-04"))
     store.mark(D("2026-09-29"), 99999.0, "CE", "not_listed")
-    assert store.have(D("2026-09-29")) == {(25000.0, "PE"), (99999.0, "CE")}
+    assert store.have(D("2026-09-29"), today=D("2026-10-04")) == {(25000.0, "PE"), (99999.0, "CE")}
+    assert store.have(D("2026-09-29"), today=D("2026-10-11")) == {(99999.0, "CE")}
     assert store.read(D("2026-09-29")) == []
 
 
@@ -204,6 +208,85 @@ def test_fetch_expiry_fetches_each_wanted_contract_once_and_resumes(tmp_path: Pa
     n_calls = len(fake.calls)
     again = fetch_expiry(src, store, D("2026-09-29"), [25000.0, 25050.0], days)
     assert (again.fetched, again.skipped) == (0, 4) and len(fake.calls) == n_calls  # nothing asked twice, not even the list
+
+
+def test_an_empty_option_fetch_is_a_hole_retried_after_a_week(tmp_path: Path) -> None:
+    class Empty(FakeExpiredClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.empty = True
+
+        def expired_historical_candles(self, key, from_date, to_date, interval="1minute"):  # noqa: ANN001, ANN201
+            self.calls.append(("expired_candles", key, from_date, to_date))
+            if self.empty:
+                return []
+            return rows_for(to_date.isoformat())
+
+    fake = Empty()
+    src = UpstoxHistorySource(fake, None, today=D("2026-10-04"))  # type: ignore[arg-type]
+    store = OptionHistoryStore(tmp_path)
+    exp = D("2024-12-26")
+    days = [D("2024-12-20"), D("2024-12-23"), D("2024-12-26")]
+    when = D("2026-10-04")
+    stats = fetch_expiry(src, store, exp, [25000.0], days, today=when)
+    assert (stats.fetched, stats.empty, stats.skipped) == (0, 2, 0)
+    assert store.read(exp) == []
+    assert not (tmp_path / "NIFTY_2024-12-26.parquet").exists()
+
+    def candle_calls() -> list[tuple[Any, ...]]:
+        return [c for c in fake.calls if c[0] == "expired_candles"]
+
+    assert len(candle_calls()) == 2
+    again = fetch_expiry(src, store, exp, [25000.0], days, today=when)
+    assert (again.fetched, again.empty, again.skipped) == (0, 0, 2)
+    assert len(candle_calls()) == 2  # tried today: wait a week
+    rows = option_source_empty_report(tmp_path)
+    assert {(r["instrument_key"], r["from"], r["to"], r["tried"], r["name"]) for r in rows} == {
+        ("NIFTY|25000|CE|2024-12-26", "2024-12-20", "2024-12-26", "2026-10-04", "NIFTY 25000 CE"),
+        ("NIFTY|25000|PE|2024-12-26", "2024-12-20", "2024-12-26", "2026-10-04", "NIFTY 25000 PE"),
+    }
+    fake.empty = False
+    got = fetch_expiry(src, store, exp, [25000.0], days, today=when + timedelta(days=7))
+    assert got.fetched == 2 and got.empty == 0 and len(candle_calls()) == 4
+    assert {(b.strike, b.kind) for b in store.read(exp)} == {(25000.0, "CE"), (25000.0, "PE")}
+    assert option_source_empty_report(tmp_path) == []
+    assert store.have(exp, today=when + timedelta(days=7)) == {(25000.0, "CE"), (25000.0, "PE")}
+
+
+def test_the_option_source_empty_report_reclassifies_done_contracts_with_no_candles(tmp_path: Path) -> None:
+    store = OptionHistoryStore(tmp_path)
+    exp = D("2024-12-26")
+    ref = ContractRef(25000.0, "CE", "NSE_FO|1|26-12-2024", "NIFTY 25000 CE", 25)
+    store.write(exp, ref, bars("2024-12-26"), "upstox-expired")
+    store.mark(exp, 23500.0, "CE", "done")
+    store.mark(exp, 23500.0, "PE", "done")
+    store.mark(exp, 99999.0, "PE", "not_listed")
+    stamp = datetime(2026, 10, 3, 12, 0, tzinfo=IST).timestamp()
+    os.utime(tmp_path / "NIFTY_2024-12-26.done.json", (stamp, stamp))
+    week = trading_days_before(exp, 7, CAL.is_trading_day)
+    rows = option_source_empty_report(tmp_path)
+    assert [(r["instrument_key"], r["from"], r["to"], r["tried"]) for r in rows] == [
+        (f"NIFTY|23500|CE|{exp.isoformat()}", week[0].isoformat(), week[-1].isoformat(), "2026-10-03"),
+        (f"NIFTY|23500|PE|{exp.isoformat()}", week[0].isoformat(), week[-1].isoformat(), "2026-10-03"),
+    ]
+    assert store.have(exp, today=D("2026-10-04")) == {(25000.0, "CE"), (23500.0, "CE"), (23500.0, "PE"), (99999.0, "PE")}
+    assert store.have(exp, today=D("2026-10-10")) == {(25000.0, "CE"), (99999.0, "PE")}
+    assert option_source_empty_report(tmp_path) == rows  # a second look does not move the tried date
+
+
+def test_an_empty_listed_day_is_a_hole_for_that_day(tmp_path: Path) -> None:
+    class Empty(FakeExpiredClient):
+        def expired_historical_candles(self, key, from_date, to_date, interval="1minute"):  # noqa: ANN001, ANN201
+            self.calls.append(("expired_candles", key, from_date, to_date))
+            return []
+
+    src = UpstoxHistorySource(Empty(), None, today=D("2026-10-04"))  # type: ignore[arg-type]
+    store = OptionHistoryStore(tmp_path)
+    stats = capture_listed_day(src, store, D("2026-09-29"), D("2026-09-29"), [25000.0], today=D("2026-10-04"))
+    assert (stats.fetched, stats.empty) == (0, 2)
+    assert store.have(D("2026-09-29"), today=D("2026-10-04")) == {(25000.0, "CE"), (25000.0, "PE")}
+    rows = option_source_empty_report(tmp_path)
+    assert {r["from"] for r in rows} == {"2026-09-29"} and {r["to"] for r in rows} == {"2026-09-29"}
 
 
 def test_a_failing_contract_is_reported_and_retried_later_not_remembered(tmp_path: Path) -> None:
