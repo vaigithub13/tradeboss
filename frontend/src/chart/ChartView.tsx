@@ -29,7 +29,7 @@ import { useIndicatorStore } from "../store/indicatorStore";
 import { formatCrosshairTime, formatTick, legendValues, type TickKind } from "./format";
 import { IndicatorLayer } from "./indicatorLayer";
 import { jumpWindow } from "../backtest/present";
-import { zoomLogical } from "../draw/model";
+import { historyForZoom, zoomLogical } from "../draw/model";
 import {
   indexOfTime,
   initialRange,
@@ -117,6 +117,12 @@ export function ChartView({
   const layerRef = useRef<IndicatorLayer | null>(null);
   const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const priceLinesRef = useRef<IPriceLine[]>([]);
+  const appliedZoom = useRef(0);
+  /** Zoom token whose history fetch has been started. */
+  const zoomFetch = useRef(0);
+  /** Zoom token whose history fetch has settled (loaded, or there was nothing older to load). */
+  const zoomSettled = useRef(0);
+  const [zoomTick, setZoomTick] = useState(0);
   const onPickTimeRef = useRef(onPickTime);
   onPickTimeRef.current = onPickTime;
   /** start time of the candle under the crosshair (null = latest candle) */
@@ -127,6 +133,7 @@ export function ChartView({
   const cached = useIndicatorStore((s) => s.data[scope]);
   const sessions = useChartStore((s) => s.loaded?.sessions);
   const holidays = useDrawStore((s) => s.holidays);
+  const weekendSessions = useDrawStore((s) => s.weekendSessions);
   const drawDrawings = useDrawStore((s) => s.drawings);
   const drawHide = useDrawStore((s) => s.hideAll);
   const drawSelected = useDrawStore((s) => s.selectedId);
@@ -334,6 +341,9 @@ export function ChartView({
     }
 
     // Everything above ran synchronously in this tick, so the chart never paints an intermediate state.
+    // A drawing zoom that still needs these candles sets its own range once they are on the chart.
+    const zoomWaiting = drawZoom != null && appliedZoom.current !== drawZoom.token;
+    if (zoomWaiting) return;
     if (savedRange && shift !== null) {
       chart.timeScale().setVisibleLogicalRange(shiftRange(savedRange, shift));
     } else if (candles.length > 0) {
@@ -355,15 +365,27 @@ export function ChartView({
     chart.timeScale().setVisibleLogicalRange({ from: placed.from, to: placed.to });
   }, [focus, candles]);
 
-  const appliedZoom = useRef(0);
   useEffect(() => {
     const chart = chartRef.current;
     if (!chart || !drawZoom || appliedZoom.current === drawZoom.token) return;
-    const range = zoomLogical(candles.map((c) => c.time), drawZoom.from, drawZoom.to);
+    const times = candles.map((c) => c.time);
+    const missing = historyForZoom(times, drawZoom.from, drawZoom.to);
+    if (missing && zoomSettled.current !== drawZoom.token) {
+      if (zoomFetch.current !== drawZoom.token) {
+        zoomFetch.current = drawZoom.token;
+        const token = drawZoom.token;
+        void useChartStore.getState().showRange(missing.from, missing.to).finally(() => {
+          zoomSettled.current = token;
+          setZoomTick((n) => n + 1);
+        });
+      }
+      return;
+    }
+    const range = zoomLogical(times, drawZoom.from, drawZoom.to);
     if (!range) return;
     appliedZoom.current = drawZoom.token;
     chart.timeScale().setVisibleLogicalRange(range);
-  }, [drawZoom, candles]);
+  }, [drawZoom, candles, zoomTick]);
 
   // ---- indicators: draw what is cached for this data set (nothing stale can be here: the cache is keyed by scope)
   useEffect(() => {
@@ -392,8 +414,10 @@ export function ChartView({
       draft: drawDraft,
       hover: drawHover,
       tool: drawTool,
+      holidays,
+      weekendSessions,
     });
-  }, [drawDrawings, timeframe, cursor, drawHide, drawSelected, drawDraft, drawHover, drawTool]);
+  }, [drawDrawings, timeframe, cursor, drawHide, drawSelected, drawDraft, drawHover, drawTool, holidays, weekendSessions]);
 
   const fvgKey = items
     .filter((item) => item.type === "fvg" && item.visible)

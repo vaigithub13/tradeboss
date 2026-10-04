@@ -26,6 +26,10 @@ import {
   labelsForWidth,
   mapAnchor,
   measure,
+  anchorLogical,
+  barsBetween,
+  clipSegment,
+  historyForZoom,
   objectTreeRows,
   removeDrawing,
   setAnchor,
@@ -250,5 +254,118 @@ describe("narrow drawings", () => {
     expect(hitsSegment(50, 40, { x1: 0, y1: 40, x2: 100, y2: 40 })).toBe(true);
     expect(hitsBox(100, 50, 100, 50, 0, 0)).toBe(true);
     expect(hitsBox(120, 50, 100, 50, 0, 0)).toBe(false);
+  });
+});
+
+const IST_OFFSET = 19_800;
+const DAY_SECONDS = 86_400;
+const SESSION_OPEN = 9 * 60 + 15;
+const SESSION_CLOSE = 15 * 60 + 30;
+const MINUTE_BARS = SESSION_CLOSE - SESSION_OPEN;
+
+function dayIndex(year: number, month: number, date: number): number {
+  const unix = Date.UTC(year, month - 1, date, 3, 45, 0) / 1000;
+  return Math.floor((unix + IST_OFFSET) / DAY_SECONDS);
+}
+
+function dateOf(day: number): string {
+  const noon = new Date((day * DAY_SECONDS - IST_OFFSET + 12 * 3600) * 1000);
+  const month = String(noon.getUTCMonth() + 1).padStart(2, "0");
+  const date = String(noon.getUTCDate()).padStart(2, "0");
+  return `${noon.getUTCFullYear()}-${month}-${date}`;
+}
+
+function weekendDay(day: number): boolean {
+  return (day + 3) % 7 >= 5;
+}
+
+/** 1m bar starts, built without barsBetween, so the calendar count can be checked against it. */
+function minuteTape(startDay: number, sessions: number, holidays: readonly string[] = []): number[] {
+  const closed = new Set(holidays);
+  const out: number[] = [];
+  let day = startDay;
+  let found = 0;
+  while (found < sessions && day < startDay + 80) {
+    if (!weekendDay(day) && !closed.has(dateOf(day))) {
+      for (let minute = SESSION_OPEN; minute < SESSION_CLOSE; minute += 1) {
+        out.push(day * DAY_SECONDS - IST_OFFSET + minute * 60);
+      }
+      found += 1;
+    }
+    day += 1;
+  }
+  return out;
+}
+
+describe("an anchor before the loaded bars still has a place on the chart", () => {
+  const monday = dayIndex(2026, 1, 5);
+
+  function eightSessions() {
+    const all = minuteTape(monday, 8);
+    const loaded = all.slice(3 * MINUTE_BARS);
+    return { all, loaded, start: all[0] ?? 0, end: all[all.length - 1] ?? 0 };
+  }
+
+  /** Pixel x while the screen shows the last 150 loaded bars. */
+  function place(loaded: readonly number[], time: number, width = 800, visible = 150): number {
+    const logical = anchorLogical(time, loaded, "1m");
+    if (logical == null) throw new Error("anchor has no logical index");
+    const from = loaded.length - visible;
+    return ((logical - from) * width) / visible;
+  }
+
+  it("counts five weekday sessions, and not the weekend, between two Mondays", () => {
+    expect((monday + 3) % 7).toBe(0);
+    const nextMonday = dayIndex(2026, 1, 12);
+    const open = (day: number) => day * DAY_SECONDS - IST_OFFSET + SESSION_OPEN * 60;
+    expect(barsBetween(open(monday), open(nextMonday), "1m")).toBe(5 * MINUTE_BARS);
+  });
+
+  it("draws a 15m rectangle on 1m when only the last 5 of 8 sessions are loaded", () => {
+    const { loaded, start, end } = eightSessions();
+    expect(loaded[0]).toBeGreaterThan(start);
+    expect(anchorLogical(start, loaded, "1m")).toBe(-3 * MINUTE_BARS);
+    const x1 = place(loaded, start);
+    const x2 = place(loaded, end);
+    expect(x1).toBeLessThan(0);
+    expect(x2).toBeGreaterThan(0);
+    expect(x2).toBeLessThan(800);
+    const edge = clipSegment({ x1, y1: 120, x2, y2: 80 }, 800, 400);
+    expect(edge?.x1).toBe(0);
+    expect(edge && edge.x2).toBeGreaterThan(0);
+  });
+
+  it("draws a trend line on 1m when its start is before the loaded bars", () => {
+    const { loaded, start, end } = eightSessions();
+    const edge = clipSegment({ x1: place(loaded, start), y1: 40, x2: place(loaded, end), y2: 300 }, 800, 400);
+    expect(edge?.x1).toBe(0);
+    expect(edge && edge.x2).toBeGreaterThan(0);
+    expect(edge && edge.y2).not.toBe(edge?.y1);
+  });
+
+  it("draws a Fibonacci on 1m when its start is before the loaded bars", () => {
+    const { loaded, start, end } = eightSessions();
+    const x1 = place(loaded, start);
+    const x2 = place(loaded, end);
+    const level = clipSegment({ x1: Math.min(x1, x2), y1: 160, x2: Math.max(x1, x2), y2: 160 }, 800, 400);
+    expect(level?.x1).toBe(0);
+    expect(level?.y1).toBe(160);
+    expect(level && level.x2).toBeGreaterThan(0);
+  });
+
+  it("Zoom to loads history when the drawing start is not in the window, then scrolls to both anchors", () => {
+    const { all, loaded, start, end } = eightSessions();
+    expect(historyForZoom(loaded, start, end)).toEqual({ from: start, to: end });
+    expect(historyForZoom(all, start, end)).toBeNull();
+    const range = zoomLogical(all, start, end);
+    expect(range?.from).toBeLessThanOrEqual(0);
+    expect(range && range.to).toBeGreaterThanOrEqual(all.length - 1);
+  });
+
+  it("skips an NSE holiday when placing an anchor before the loaded window", () => {
+    const holiday = dateOf(monday + 1);
+    const tape = minuteTape(monday, 4, [holiday]);
+    const loaded = tape.slice(MINUTE_BARS);
+    expect(anchorLogical(tape[0] ?? 0, loaded, "1m", { holidays: [holiday] })).toBe(-MINUTE_BARS);
   });
 });

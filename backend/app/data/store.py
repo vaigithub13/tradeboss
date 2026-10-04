@@ -177,7 +177,8 @@ class CandleStore:
             ).fetchone()
         finally:
             con.close()
-        assert row is not None
+        if row is None or row[0] is None or row[1] is None:
+            raise SymbolNotFound(symbol)
         first, last = int(row[0]), int(row[1])
         live = _overlay_rows(symbol, self.base_minutes(symbol))
         if live:

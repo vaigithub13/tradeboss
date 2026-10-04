@@ -46,8 +46,10 @@ export function DrawSync({ symbol }: { symbol: string }) {
 
   useEffect(() => {
     let cancel = false;
-    void getJson<{ holidays?: string[] }>("/api/ai/settings").then((settings) => {
-      if (!cancel && settings.holidays) useDrawStore.getState().setHolidays(settings.holidays);
+    void getJson<{ holidays?: string[]; weekend_sessions?: string[] }>("/api/ai/settings").then((settings) => {
+      if (!cancel && settings.holidays) {
+        useDrawStore.getState().setHolidays(settings.holidays, settings.weekend_sessions ?? []);
+      }
     }).catch(() => {});
     return () => {
       cancel = true;

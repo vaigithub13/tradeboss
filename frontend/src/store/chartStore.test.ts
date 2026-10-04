@@ -453,3 +453,23 @@ describe("caching loaded chunks", () => {
     expect(candleCalls(f).map((u) => u.searchParams.get("timeframe"))).toEqual(["15m", "30m"]);
   });
 });
+
+describe("showRange", () => {
+  it("replaces the window with the candles covering a drawing that starts before the loaded bars", async () => {
+    const f = stubApi({
+      candles: (u) => {
+        if (u.searchParams.get("from") === "10") return candlesBody("15m", [candle(10), candle(20), candle(50)]);
+        return candlesBody("15m", [candle(100), candle(200)]);
+      },
+    });
+    await useChartStore.getState().init();
+    expect(useChartStore.getState().candles.map((c) => c.time)).toEqual([100, 200]);
+    await useChartStore.getState().showRange(50, 10);
+    const call = candleCalls(f).at(-1);
+    expect(call?.searchParams.get("from")).toBe("10");
+    expect(call?.searchParams.get("to")).toBe("50");
+    expect(call?.searchParams.get("limit")).toBeNull();
+    expect(useChartStore.getState().candles.map((c) => c.time)).toEqual([10, 20, 50]);
+    expect(useChartStore.getState().hasMoreOlder).toBe(true);
+  });
+});

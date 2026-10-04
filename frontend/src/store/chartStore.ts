@@ -156,6 +156,8 @@ interface ChartState {
   toggleSession: (type: SessionType) => Promise<void>;
   /** Replace the loaded window with bars around a unix time (a trade jump). */
   showAround: (time: number) => Promise<void>;
+  /** Replace the loaded window with every bar from `from` through `to` (a drawing zoom). */
+  showRange: (from: number, to: number) => Promise<void>;
   /**
    * Fold live candles (the newest 1-2 of a timeframe) into the loaded window. Ignored unless that
    * symbol / timeframe is on screen AND the window ends at the newest bar (nothing newer was
@@ -425,6 +427,42 @@ export const useChartStore = create<ChartState>((set, get) => ({
     cachePut(key, { candles: joined.candles, hasMore: (base?.hasMore ?? get().hasMoreOlder) || joined.droppedOlder, hasMoreNewer: false });
     set({ candles: joined.candles, hasMoreOlder: get().hasMoreOlder || joined.droppedOlder });
     return true;
+  },
+
+  showRange: async (from, to) => {
+    const { symbol, timeframe, sessions } = get();
+    if (!symbol) return;
+    const start = Math.min(from, to);
+    const end = Math.max(from, to);
+    try {
+      inflight?.abort();
+      const seq = ++requestSeq;
+      const replayTo = replayCursor();
+      const res = await fetchCandles(
+        replayTo == null
+          ? { symbol, timeframe, sessions, from: start, to: end }
+          : capCandlesQuery({ symbol, timeframe, sessions, from: start, to: end }, replayTo),
+      );
+      if (seq !== requestSeq) return;
+      const shown = replayTo == null ? res.candles : acceptBars(res.candles, replayTo);
+      const key = scopeKey(symbol, timeframe, sessions);
+      if (replayTo == null) cachePut(key, { candles: shown, hasMore: true, hasMoreNewer: true });
+      const cur = get();
+      if (cur.symbol !== symbol || cur.timeframe !== timeframe) return;
+      set({
+        candles: shown,
+        hasMoreOlder: true,
+        hasMoreNewer: replayTo == null,
+        loadingOlder: false,
+        loadingNewer: false,
+        loaded: { symbol, timeframe, sessions },
+        status: "ready",
+        error: null,
+      });
+    } catch (e) {
+      if (isAbort(e)) return;
+      set({ error: message(e) });
+    }
   },
 
   showAround: async (time) => {

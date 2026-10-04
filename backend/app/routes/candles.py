@@ -166,7 +166,10 @@ def symbols(store: StoreDep, default_sessions: DefaultSessionsDep) -> SymbolsRes
     infos: list[SymbolInfo] = []
     for sym in store.symbols():
         base = store.base_minutes(sym)
-        first, last = store.time_range(sym)
+        try:
+            first, last = store.time_range(sym)
+        except SymbolNotFound:
+            continue
         inst = store.meta(sym).instrument
         infos.append(
             SymbolInfo(

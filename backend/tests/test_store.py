@@ -5,6 +5,7 @@ from __future__ import annotations
 from datetime import date
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
 from app.data.importer import build_frame, write_parquet
@@ -73,6 +74,14 @@ def test_dates_of_type(store: CandleStore) -> None:
     assert store.dates_of_type("NIFTY50", "normal") == {
         date(2024, 10, 28), date(2024, 10, 29), date(2024, 11, 4),
     }  # fmt: skip
+
+
+def test_an_empty_parquet_has_no_time_range(tmp_path: Path) -> None:
+    write_parquet(pd.DataFrame({"time": pd.Series([], dtype="int64")}), tmp_path / "EMPTY" / "1m.parquet")
+    store = CandleStore(tmp_path)
+    assert store.symbols() == ["EMPTY"]
+    with pytest.raises(SymbolNotFound):
+        store.time_range("EMPTY")
 
 
 def test_time_range_of_symbol_covers_all_bars(store: CandleStore) -> None:

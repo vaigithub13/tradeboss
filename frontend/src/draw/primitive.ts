@@ -13,6 +13,8 @@ import type {
 import type { FvgBox } from "./api";
 import {
   fibPrices,
+  anchorLogical,
+  clipSegment,
   distanceToSegment,
   hitsBox,
   labelsForWidth,
@@ -36,6 +38,8 @@ export interface DrawScene {
   draft: Anchor | null;
   hover: Anchor | null;
   tool: string;
+  holidays: readonly string[];
+  weekendSessions: readonly string[];
 }
 
 interface Seg {
@@ -84,16 +88,24 @@ class DrawRenderer implements IPrimitivePaneRenderer {
         ctx.fillStyle = shape.style.color;
         ctx.setLineDash(dash(shape.style.lineStyle));
         if (shape.fill && shape.style.fill) {
-          ctx.save();
-          ctx.globalAlpha = 0.16;
-          ctx.fillStyle = shape.style.fill;
-          ctx.fillRect(shape.fill.x, shape.fill.y, shape.fill.w, shape.fill.h);
-          ctx.restore();
+          const left = Math.max(0, shape.fill.x);
+          const right = Math.min(mediaSize.width, shape.fill.x + shape.fill.w);
+          const top = Math.max(0, shape.fill.y);
+          const bottom = Math.min(mediaSize.height, shape.fill.y + shape.fill.h);
+          if (right > left && bottom > top) {
+            ctx.save();
+            ctx.globalAlpha = 0.16;
+            ctx.fillStyle = shape.style.fill;
+            ctx.fillRect(left, top, right - left, bottom - top);
+            ctx.restore();
+          }
         }
         ctx.beginPath();
         for (const seg of shape.segments) {
-          ctx.moveTo(seg.x1, seg.y1);
-          ctx.lineTo(seg.x2, seg.y2);
+          const visible = clipSegment(seg, mediaSize.width, mediaSize.height);
+          if (!visible) continue;
+          ctx.moveTo(visible.x1, visible.y1);
+          ctx.lineTo(visible.x2, visible.y2);
         }
         ctx.stroke();
         ctx.setLineDash([]);
@@ -125,6 +137,8 @@ export class DrawPrimitive implements ISeriesPrimitive {
     draft: null,
     hover: null,
     tool: "cursor",
+    holidays: [],
+    weekendSessions: [],
   };
 
   private chart: Chart | null = null;
@@ -216,10 +230,36 @@ export class DrawPrimitive implements ISeriesPrimitive {
     const series = this.series;
     if (!chart || !series) return null;
     const mapped = mapAnchor(anchor, this.scene.timeframe);
-    const x = chart.timeScale().timeToCoordinate(mapped.time as UTCTimestamp);
     const y = series.priceToCoordinate(mapped.price);
-    if (x == null || y == null) return null;
+    if (y == null) return null;
+    const known = chart.timeScale().timeToCoordinate(mapped.time as UTCTimestamp);
+    if (known != null) return { x: known, y };
+    const x = this.xOutsideLoaded(mapped.time);
+    if (x == null) return null;
     return { x, y };
+  }
+
+  /** X of a bar the chart has not loaded, counted on the NSE session calendar from the first loaded bar. */
+  private xOutsideLoaded(time: number): number | null {
+    const chart = this.chart;
+    const series = this.series;
+    if (!chart || !series) return null;
+    const data = series.data();
+    const first = data[0];
+    if (!first || typeof first.time !== "number") return null;
+    const origin = chart.timeScale().timeToCoordinate(first.time);
+    const spacing = chart.timeScale().options().barSpacing;
+    if (origin == null || !Number.isFinite(spacing) || spacing === 0) return null;
+    const times: number[] = [];
+    for (const bar of data) {
+      if (typeof bar.time === "number") times.push(bar.time);
+    }
+    const logical = anchorLogical(time, times, this.scene.timeframe, {
+      holidays: this.scene.holidays,
+      weekendSessions: this.scene.weekendSessions,
+    });
+    if (logical == null) return null;
+    return origin + logical * spacing;
   }
 
   private shapeFor(drawing: Drawing, width: number, height: number): Shape | null {

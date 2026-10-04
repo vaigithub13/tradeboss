@@ -179,6 +179,160 @@ export function whitespaceTimes(
   return out;
 }
 
+export interface TradingCalendar {
+  holidays?: readonly string[];
+  /** Full weekend sessions (budget Sunday and the like) that trade 09:15–15:30. */
+  weekendSessions?: readonly string[];
+}
+
+function sessionDay(day: number, closed: ReadonlySet<string>, weekends: ReadonlySet<string>): boolean {
+  const date = istDate(day);
+  if (closed.has(date)) return false;
+  if (weekends.has(date)) return true;
+  return !isWeekend(day);
+}
+
+function barsOnDay(step: number, fromMinute: number, toMinute: number): number {
+  let count = 0;
+  for (let minute = fromMinute; minute < toMinute; minute += step) count += 1;
+  return count;
+}
+
+/**
+ * How many `timeframe` bars start in [from, to). Nights, weekends, and NSE holidays are not bars.
+ * A listed weekend session is a full session. The result is negative when `from` is after `to`.
+ */
+export function barsBetween(
+  fromTime: number,
+  toTime: number,
+  timeframe: string,
+  calendar: TradingCalendar = {},
+): number {
+  const from = barStart(fromTime, timeframe);
+  const to = barStart(toTime, timeframe);
+  if (from === to) return 0;
+  const sign = from < to ? 1 : -1;
+  const start = Math.min(from, to);
+  const end = Math.max(from, to);
+  const closed = new Set(calendar.holidays ?? []);
+  const weekends = new Set(calendar.weekendSessions ?? []);
+  const open = (day: number) => sessionDay(day, closed, weekends);
+  const dayA = Math.floor((start + IST) / DAY);
+  const dayB = Math.floor((end + IST) / DAY);
+  let count = 0;
+  if (timeframe === "1W") {
+    const seen = new Set<number>();
+    for (let day = dayA; day <= dayB; day += 1) {
+      const week = Math.floor((day + 3) / 7);
+      if (seen.has(week)) continue;
+      seen.add(week);
+      const dow = (day + 3) % 7;
+      const monday = day - dow;
+      let bar: number | null = null;
+      for (let cursor = monday; cursor < monday + 7; cursor += 1) {
+        if (!open(cursor)) continue;
+        bar = cursor * DAY - IST + OPEN_MIN * 60;
+        break;
+      }
+      if (bar != null && bar >= start && bar < end) count += 1;
+    }
+    return sign * count;
+  }
+  const step = timeframe === "1D" ? CLOSE_MIN - OPEN_MIN : (INTRADAY[timeframe] ?? 15);
+  for (let day = dayA; day <= dayB; day += 1) {
+    if (!open(day)) continue;
+    const minuteOf = (time: number) => Math.floor(((time + IST) % DAY) / 60);
+    if (timeframe === "1D") {
+      const bar = day * DAY - IST + OPEN_MIN * 60;
+      if (bar >= start && bar < end) count += 1;
+      continue;
+    }
+    const fromMinute = day === dayA ? minuteOf(start) : OPEN_MIN;
+    const toMinute = day === dayB ? minuteOf(end) : CLOSE_MIN;
+    if (toMinute > fromMinute) count += barsOnDay(step, Math.max(fromMinute, OPEN_MIN), Math.min(toMinute, CLOSE_MIN));
+  }
+  return sign * count;
+}
+
+/**
+ * Logical index of `time` on the loaded bars. 0 is the first loaded bar.
+ * A bar before that window is negative: the session-bar count back to it.
+ */
+export function anchorLogical(
+  time: number,
+  barTimes: readonly number[],
+  timeframe: string,
+  calendar: TradingCalendar = {},
+): number | null {
+  const first = barTimes[0];
+  if (first === undefined) return null;
+  const mapped = barStart(time, timeframe);
+  let lo = 0;
+  let hi = barTimes.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if ((barTimes[mid] ?? 0) < mapped) lo = mid + 1;
+    else hi = mid;
+  }
+  if (barTimes[lo] === mapped) return lo;
+  if (lo <= 0) return -barsBetween(mapped, first, timeframe, calendar);
+  const last = barTimes[barTimes.length - 1] ?? mapped;
+  if (lo >= barTimes.length) return barTimes.length - 1 + barsBetween(last, mapped, timeframe, calendar);
+  const prev = barTimes[lo - 1] ?? mapped;
+  return lo - 1 + barsBetween(prev, mapped, timeframe, calendar);
+}
+
+/** The fetch that puts both zoom times inside the loaded bars, or null when they already are. */
+export function historyForZoom(
+  barTimes: readonly number[],
+  fromTime: number,
+  toTime: number,
+): { from: number; to: number } | null {
+  const first = barTimes[0];
+  const last = barTimes[barTimes.length - 1];
+  if (first === undefined || last === undefined) return { from: fromTime, to: toTime };
+  const from = Math.min(fromTime, toTime);
+  const to = Math.max(fromTime, toTime);
+  if (from >= first && to <= last) return null;
+  return { from: Math.min(from, first), to: Math.max(to, last) };
+}
+
+/**
+ * The piece of a segment that lies inside the pane. A point outside the loaded bars can sit
+ * far past the edge; the visible part is this clip.
+ */
+export function clipSegment(seg: Segment, width: number, height: number): Segment | null {
+  const dx = seg.x2 - seg.x1;
+  const dy = seg.y2 - seg.y1;
+  const p = [-dx, dx, -dy, dy];
+  const q = [seg.x1, width - seg.x1, seg.y1, height - seg.y1];
+  let t0 = 0;
+  let t1 = 1;
+  for (let i = 0; i < 4; i += 1) {
+    const pi = p[i] ?? 0;
+    const qi = q[i] ?? 0;
+    if (pi === 0) {
+      if (qi < 0) return null;
+      continue;
+    }
+    const r = qi / pi;
+    if (pi < 0) {
+      if (r > t1) return null;
+      if (r > t0) t0 = r;
+    } else {
+      if (r < t0) return null;
+      if (r < t1) t1 = r;
+    }
+  }
+  if (t1 < t0) return null;
+  return {
+    x1: seg.x1 + t0 * dx,
+    y1: seg.y1 + t0 * dy,
+    x2: seg.x1 + t1 * dx,
+    y2: seg.y1 + t1 * dy,
+  };
+}
+
 /** Nearest of open, high, low, close. An equal distance keeps the earlier one. */
 export function snapPrice(price: number, bar: BarPrices): number {
   const options = [bar.open, bar.high, bar.low, bar.close];

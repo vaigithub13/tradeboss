@@ -31,13 +31,14 @@ interface DrawState extends Snap {
   draft: Anchor | null;
   hover: Anchor | null;
   holidays: string[];
+  weekendSessions: string[];
   ready: boolean;
   zoom: { from: number; to: number; token: number } | null;
   setTool: (tool: DrawMode) => void;
   setMagnet: (on: boolean) => void;
   setHover: (anchor: Anchor | null) => void;
   setSelected: (id: string | null) => void;
-  setHolidays: (days: string[]) => void;
+  setHolidays: (days: string[], weekendSessions?: string[]) => void;
   place: (anchor: Anchor, knownAt: number, drawnOn: string) => void;
   patchDrawing: (id: string, patch: Partial<Drawing>) => void;
   requestZoom: (id: string) => void;
@@ -98,13 +99,14 @@ export const useDrawStore = create<DrawState>((set, get) => {
     draft: null,
     hover: null,
     holidays: [],
+    weekendSessions: [],
     ready: false,
     zoom: null,
     setTool: (tool) => set({ tool, draft: null, hover: null }),
     setMagnet: (on) => set({ magnet: on }),
     setHover: (hover) => set({ hover }),
     setSelected: (selectedId) => set({ selectedId }),
-    setHolidays: (holidays) => set({ holidays }),
+    setHolidays: (holidays, weekendSessions = []) => set({ holidays, weekendSessions }),
     place: (anchor, knownAt, drawnOn) => {
       const s = get();
       if (!s.ready || s.lockAll) return;
