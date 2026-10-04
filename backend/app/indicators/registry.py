@@ -17,12 +17,13 @@ from app.indicators.basic import SOURCES, bollinger, ema, sma, source_series
 from app.indicators.fvg import compute_fvg, validate_fvg_params
 from app.indicators.momentum import macd, rsi, stochastic
 from app.indicators.volatility import supertrend
-from app.indicators.volume import vwap
+from app.indicators.futures_vwap import session_vwap
+from app.indicators.volume import VolumeRequired, vwap
 
-INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "fvg")
+INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg")
 
 PANES: dict[str, str] = {
-    "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price",
+    "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price", "vwap_fut": "price",
     "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price",
 }  # fmt: skip
 
@@ -35,6 +36,7 @@ OUTPUTS: dict[str, list[str]] = {
     "stoch": ["k", "d"],
     "macd": ["macd", "signal", "hist"],
     "vwap": ["vwap"],
+    "vwap_fut": ["vwap"],
     "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
 }
 
@@ -89,6 +91,11 @@ PARAMS: dict[str, dict[str, ParamSpec]] = {
         "source": _SOURCE,
     },
     "vwap": {"source": ParamSpec("source", "hlc3")},
+    "vwap_fut": {
+        "source": ParamSpec("source", "hlc3"),
+        "roll_days": ParamSpec("int", 2, 0, 20),
+        "roll_on_volume": ParamSpec("choice", "on", options=("on", "off")),
+    },
 }
 
 
@@ -153,7 +160,7 @@ def warmup_bars(itype: str, params: Mapping[str, Any], bar_minutes: int) -> int:
         rule = 10 * params["atr_length"]
     elif itype == "macd":
         rule = 8 * (params["slow"] + 1) + 8 * (params["signal"] + 1)
-    elif itype == "vwap":
+    elif itype in ("vwap", "vwap_fut"):
         rule = math.ceil(1440 / bar_minutes)  # 24h of bars: always reaches the start of the day
     elif itype == "fvg":
         rule = 2  # candle 3 is the first bar a gap can exist on
@@ -185,6 +192,10 @@ def compute(df: pd.DataFrame, itype: str, params: Mapping[str, Any]) -> dict[str
         series = {name: m[name] for name in OUTPUTS["macd"]}
     elif itype == "vwap":
         series = {"vwap": vwap(df, params["source"])}
+    elif itype == "vwap_fut":
+        if "fut_volume" not in df.columns:
+            raise VolumeRequired("VWAP (futures volume) needs futures volume on the bars")
+        series = {"vwap": session_vwap(df, df["fut_volume"].to_numpy(dtype=float), params["source"])}
     elif itype == "fvg":
         return compute_fvg(df, dict(params))
     else:

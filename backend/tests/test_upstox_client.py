@@ -226,7 +226,8 @@ def test_client_exposes_only_read_methods_and_only_issues_GET() -> None:
     public = {n for n, _ in inspect.getmembers(UpstoxClient, inspect.isfunction) if not n.startswith("_")}
     assert public == {
         "market_status", "historical_candles", "intraday_candles",
-        "expired_historical_candles", "expired_expiries", "expired_option_contracts",
+        "expired_historical_candles", "expired_expiries",
+        "expired_future_contracts", "expired_option_contracts",
     }
     src = inspect.getsource(client_module)
     for verb in (".post(", ".put(", ".delete(", ".patch(", ".request("):

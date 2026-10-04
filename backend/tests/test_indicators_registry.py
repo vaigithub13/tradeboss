@@ -31,9 +31,9 @@ PRICE_TOLERANCE = 0.01
 
 
 def test_types_panes_and_outputs() -> None:
-    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "fvg")
+    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg")
     assert PANES == {
-        "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price",
+        "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price", "vwap_fut": "price",
         "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price",
     }  # fmt: skip
     assert OUTPUTS == {
@@ -45,6 +45,7 @@ def test_types_panes_and_outputs() -> None:
         "stoch": ["k", "d"],
         "macd": ["macd", "signal", "hist"],
         "vwap": ["vwap"],
+        "vwap_fut": ["vwap"],
         "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
     }
 
@@ -76,6 +77,7 @@ def test_types_panes_and_outputs() -> None:
         ),
         ("macd", {"fast": 12, "slow": 26, "signal": 9, "source": "close"}),
         ("vwap", {"source": "hlc3"}),
+        ("vwap_fut", {"source": "hlc3", "roll_days": 2, "roll_on_volume": "on"}),
     ],
 )
 def test_defaults_are_filled_in(itype: str, expected: dict[str, object]) -> None:
@@ -110,6 +112,8 @@ def test_overrides_are_kept() -> None:
         ("macd", {"fast": 26, "slow": 12}),  # fast must be < slow
         ("macd", {"fast": 12, "slow": 12}),
         ("vwap", {"source": "nonsense"}),
+        ("vwap_fut", {"roll_days": -1}),
+        ("vwap_fut", {"roll_on_volume": "maybe"}),
     ],
 )
 def test_invalid_params_raise_value_error(itype: str, params: dict[str, object]) -> None:
@@ -139,6 +143,8 @@ def test_invalid_params_raise_value_error(itype: str, params: dict[str, object])
         ("supertrend", {"atr_length": 200}, 5, 2000),  # 10*200
         ("macd", {"fast": 50, "slow": 100, "signal": 50}, 5, 1216),  # 8*101 + 8*51
         ("vwap", {}, 1, 1440),  # a full 24h of 1m bars
+        ("vwap_fut", {}, 5, 500),
+        ("vwap_fut", {}, 1, 1440),
     ],
 )
 def test_warmup_bars(itype: str, params: dict[str, object], bar_minutes: int, expected: int) -> None:
@@ -176,7 +182,11 @@ def random_walk_frame(days: int = 40, seed: int = 7) -> pd.DataFrame:
 def test_compute_returns_named_arrays_of_equal_length() -> None:
     df = random_walk_frame(days=3)
     for itype in INDICATOR_TYPES:
-        out = compute(df, itype, validate_params(itype, {}))
+        frame = df
+        if itype == "vwap_fut":
+            frame = df.copy()
+            frame["fut_volume"] = df["volume"]
+        out = compute(frame, itype, validate_params(itype, {}))
         assert list(out) == OUTPUTS[itype]
         assert all(isinstance(v, np.ndarray) and len(v) == len(df) for v in out.values())
 
@@ -210,6 +220,7 @@ def test_compute_vwap_without_volume_raises() -> None:
         ("stoch", {"k_length": 5, "k_smoothing": 3, "d_smoothing": 3}),
         ("macd", {"fast": 12, "slow": 26, "signal": 9}),
         ("vwap", {}),
+        ("vwap_fut", {}),
     ],
 )
 def test_warmup_makes_first_visible_values_equal_full_history_values(
@@ -218,6 +229,8 @@ def test_warmup_makes_first_visible_values_equal_full_history_values(
     """Computing from (visible_start - warmup) gives the SAME numbers as computing from the
     very first bar, for every visible bar. This is what 'warm-up is long enough' means."""
     df = random_walk_frame(days=40)  # 3000 bars
+    if itype == "vwap_fut":
+        df["fut_volume"] = df["volume"]  # the weight is on the bars; the roll is tested separately
     p = validate_params(itype, params)
     full = compute(df, itype, p)
 

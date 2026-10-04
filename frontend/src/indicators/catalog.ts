@@ -1,6 +1,6 @@
 import type { Timeframe } from "../api/client";
 
-export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "fvg"] as const;
+export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg"] as const;
 export type IndicatorType = (typeof INDICATOR_TYPES)[number];
 
 export const SOURCES = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"] as const;
@@ -150,6 +150,19 @@ export const CATALOG: Record<IndicatorType, IndicatorDef> = {
     colors: [{ key: "line", label: "Line", default: "#00bcd4" }],
     outputs: ["vwap"],
   },
+  vwap_fut: {
+    type: "vwap_fut", label: "VWAP (futures volume)", pane: "price",
+    params: [
+      source("hlc3"),
+      { key: "roll_days", label: "Roll days before expiry", kind: "int", default: 2, min: 0, max: 20, step: 1 },
+      {
+        key: "roll_on_volume", label: "Roll when next month leads", kind: "choice", default: "on",
+        options: [{ value: "on", label: "On" }, { value: "off", label: "Off" }],
+      },
+    ],
+    colors: [{ key: "line", label: "Line", default: "#00bcd4" }],
+    outputs: ["vwap"],
+  },
   fvg: {
     type: "fvg", label: "FVG", pane: "price",
     params: [
@@ -280,6 +293,8 @@ export function indicatorName(inst: Pick<IndicatorInstance, "type" | "params">):
       return `${label} (${fmtNum(p["fast"])}, ${fmtNum(p["slow"])}, ${fmtNum(p["signal"])}, ${fmtNum(p["source"])})`;
     case "vwap":
       return `${label} (${fmtNum(p["source"])})`;
+    case "vwap_fut":
+      return "VWAP (futures volume)";
     case "fvg": {
       const tf = p["timeframe"] ? String(p["timeframe"]) : "chart";
       const gaps = p["session_gaps"] === "exclude" ? "overnight gaps excluded" : "overnight gaps included";
@@ -292,18 +307,31 @@ export interface AvailabilityContext {
   timeframe: Timeframe;
   /** does the loaded range contain any volume? */
   hasVolume: boolean;
+  symbol?: string | null;
 }
 
 /** Why an indicator cannot be used right now (shown as a tooltip), or null when it can. */
 export function unavailableReason(type: IndicatorType, ctx: AvailabilityContext): string | null {
-  if (type !== "vwap") return null;
+  if (type !== "vwap" && type !== "vwap_fut") return null;
   if (ctx.timeframe === "1D" || ctx.timeframe === "1W") {
     return "VWAP resets every day, so it is intraday only (not available on 1D / 1W).";
+  }
+  if (type === "vwap_fut") {
+    return ctx.symbol === "NIFTY50" ? null : "VWAP (futures volume) is only for the Nifty index.";
   }
   if (!ctx.hasVolume) {
     return "VWAP needs volume. This symbol has none (index data such as Nifty), so it is disabled.";
   }
   return null;
+}
+
+/** On Nifty the futures-volume VWAP replaces the disabled price VWAP. Everywhere else, price VWAP stays. */
+export function menuIndicatorTypes(symbol: string | null): IndicatorType[] {
+  return INDICATOR_TYPES.filter((type) => {
+    if (type === "vwap_fut") return symbol === "NIFTY50";
+    if (type === "vwap") return symbol !== "NIFTY50";
+    return true;
+  });
 }
 
 /** Clean persisted JSON: drop unknown types, repair params / colours, keep ids unique. */

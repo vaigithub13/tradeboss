@@ -456,9 +456,10 @@ export function ChartView({
         entryFor: (item) => clipSeries(cached?.[indicatorKey(item.type, item.params)], cursor),
         candles,
         timeframe,
+        symbol,
         time: shown?.time ?? null,
       }),
-    [items, cached, candles, timeframe, shown, cursor],
+    [items, cached, candles, timeframe, symbol, shown, cursor],
   );
 
   return (

@@ -31,8 +31,9 @@ export function legendRows(args: {
   candles: readonly Candle[];
   timeframe: Timeframe;
   time: number | null;
+  symbol?: string | null;
 }): LegendRow[] {
-  const { items, entryFor, candles, timeframe, time } = args;
+  const { items, entryFor, candles, timeframe, time, symbol } = args;
   const volume = hasVolume(candles);
   const rows: LegendRow[] = [];
   for (const item of items) {
@@ -40,7 +41,7 @@ export function legendRows(args: {
     const row: LegendRow = {
       id: item.id,
       name: indicatorName(item),
-      unavailable: unavailableReason(item.type, { timeframe, hasVolume: volume }),
+      unavailable: unavailableReason(item.type, { timeframe, hasVolume: volume, symbol }),
       entries: [],
     };
     const entry = row.unavailable || time === null ? undefined : entryFor(item);
@@ -52,8 +53,9 @@ export function legendRows(args: {
         case "sma":
         case "ema":
         case "vwap":
+        case "vwap_fut":
         case "rsi":
-          row.entries.push({ label: "", text: fmt(at(item.type)), color: color("line") });
+          row.entries.push({ label: "", text: fmt(at(item.type === "vwap_fut" ? "vwap" : item.type)), color: color("line") });
           break;
         case "stoch":
           row.entries.push(

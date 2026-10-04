@@ -16,6 +16,7 @@ from app.data.service import UnknownTimeframe, get_candles
 from app.data.sessions import DEFAULT_INCLUDED_SESSION_TYPES
 from app.data.store import CandleStore
 from app.indicators.frame import candles_to_frame
+from app.indicators.futures_vwap import NIFTY_SYMBOL, values_for_chart
 from app.indicators.registry import IndicatorSpec, compute, warmup_bars
 
 _TIMEFRAME_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "1D": 1440, "1W": 10080}
@@ -69,8 +70,10 @@ def compute_indicators(
     bar_minutes = _TIMEFRAME_MINUTES.get(timeframe)
     if bar_minutes is None:
         raise UnknownTimeframe(f"Unknown timeframe {timeframe!r}; expected one of {list(_TIMEFRAME_MINUTES)}")
-    if timeframe in ("1D", "1W") and any(s.type == "vwap" for s in specs):
+    if timeframe in ("1D", "1W") and any(s.type in ("vwap", "vwap_fut") for s in specs):
         raise IndicatorNotAvailable("VWAP is intraday only: it resets daily, so it is not available on 1D/1W")
+    if any(s.type == "vwap_fut" for s in specs) and symbol != NIFTY_SYMBOL:
+        raise IndicatorNotAvailable("VWAP (futures volume) is only for the Nifty index")
 
     if cursor is not None and (to_time is None or to_time > cursor):
         to_time = cursor
@@ -83,7 +86,13 @@ def compute_indicators(
 
     outputs: list[IndicatorOutput] = []
     for s in specs:
-        values = compute(frame, s.type, s.params)  # may raise VolumeRequired
+        if s.type == "vwap_fut":
+            projected = values_for_chart(
+                store, candles, s.params, types, bar_minutes * 60, to_time=to_time, cursor=cursor,
+            )
+            values = {"vwap": projected}
+        else:
+            values = compute(frame, s.type, s.params)  # may raise VolumeRequired
         outputs.append(
             IndicatorOutput(
                 id=s.id,

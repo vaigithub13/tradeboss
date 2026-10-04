@@ -45,6 +45,13 @@ from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, current_index
 
 log = logging.getLogger("tradeboss.live.service")
 
+
+def symbols_dirtied_by(updated: set[str], *, future_dir: str | None, index_dir: str = "NIFTY50") -> set[str]:
+    """A tick on the front future also refreshes the Nifty chart, so its futures-volume VWAP moves."""
+    if future_dir and future_dir in updated:
+        return set(updated) | {index_dir}
+    return set(updated)
+
 STALE_AFTER_S = 15.0
 MAX_SUBSCRIPTIONS = 12
 BACKFILL_RETRY_S = 15.0
@@ -224,7 +231,10 @@ class LiveService:
                 by_dir.setdefault(symbol_dir_name(ev.key), []).append(ev.bar)
             for d, bars in by_dir.items():
                 self.overlay.upsert(d, bars)
-            self.hub.mark_dirty(set(by_dir))
+            idx = current_index(self.cfg.instruments_dir)
+            fut = idx.front_future() if idx is not None else None
+            future_dir = symbol_dir_name(fut.key) if fut is not None else None
+            self.hub.mark_dirty(symbols_dirtied_by(set(by_dir), future_dir=future_dir))
         if diffs and day is not None:
             append_jsonl(self.cfg.recordings_dir / f"{day.isoformat()}.overwrites.jsonl", [x.as_dict() for x in diffs])
         for req in requests:

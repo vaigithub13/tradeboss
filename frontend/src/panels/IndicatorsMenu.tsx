@@ -4,9 +4,9 @@ import { Popover } from "../components/Popover";
 import { hasVolume } from "../chart/volume";
 import {
   CATALOG,
-  INDICATOR_TYPES,
   SOURCES,
   indicatorName,
+  menuIndicatorTypes,
   parseParam,
   unavailableReason,
   type IndicatorInstance,
@@ -178,12 +178,14 @@ export function IndicatorsMenu() {
   const status = useIndicatorStore((s) => s.status);
   const error = useIndicatorStore((s) => s.error);
   const loaded = useChartStore((s) => s.loaded);
+  const symbol = useChartStore((s) => s.symbol);
   const candles = useChartStore((s) => s.candles);
 
   const ctx = useMemo(
-    () => (loaded ? { timeframe: loaded.timeframe, hasVolume: hasVolume(candles) } : null),
-    [loaded, candles],
+    () => (loaded ? { timeframe: loaded.timeframe, hasVolume: hasVolume(candles), symbol } : null),
+    [loaded, candles, symbol],
   );
+  const menuTypes = menuIndicatorTypes(loaded?.symbol ?? symbol);
   const reasonFor = (type: IndicatorType): string | null => (ctx ? unavailableReason(type, ctx) : null);
 
   return (
@@ -198,7 +200,7 @@ export function IndicatorsMenu() {
     >
       <div className="flex flex-col gap-2">
         <div className="grid grid-cols-2 gap-1" data-testid="indicator-add">
-          {INDICATOR_TYPES.map((type) => {
+          {menuTypes.map((type) => {
             const reason = reasonFor(type);
             return (
               <button

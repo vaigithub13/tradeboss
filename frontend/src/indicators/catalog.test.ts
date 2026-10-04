@@ -6,6 +6,7 @@ import {
   createInstance,
   defaultParams,
   indicatorName,
+  menuIndicatorTypes,
   nextId,
   parseParam,
   sanitizeInstances,
@@ -35,6 +36,7 @@ describe("defaults mirror the backend registry", () => {
     }],
     ["macd", { fast: 12, slow: 26, signal: 9, source: "close" }],
     ["vwap", { source: "hlc3" }],
+    ["vwap_fut", { source: "hlc3", roll_days: 2, roll_on_volume: "on" }],
   ] as const)("%s", (type, expected) => {
     expect(defaultParams(type)).toEqual(expected);
   });
@@ -126,6 +128,9 @@ describe("instances", () => {
       "MACD (12, 26, 9, close)",
     );
     expect(indicatorName({ type: "vwap", params: { source: "hlc3" } })).toBe("VWAP (hlc3)");
+    expect(indicatorName({ type: "vwap_fut", params: { source: "hlc3", roll_days: 2, roll_on_volume: "on" } })).toBe(
+      "VWAP (futures volume)",
+    );
     expect(indicatorName({ type: "stoch", params: { k_length: 14, k_smoothing: 1, d_smoothing: 3 } })).toBe(
       "Stochastic (14, 1, 3)",
     );
@@ -148,9 +153,21 @@ describe("VWAP availability", () => {
 
   it("is enabled on intraday data with volume; other indicators never need volume", () => {
     expect(unavailableReason("vwap", { timeframe: "5m", hasVolume: true })).toBeNull();
-    for (const t of INDICATOR_TYPES.filter((x) => x !== "vwap")) {
+    for (const t of INDICATOR_TYPES.filter((x) => x !== "vwap" && x !== "vwap_fut")) {
       expect(unavailableReason(t, { timeframe: "1D", hasVolume: false })).toBeNull();
     }
+  });
+});
+
+describe("VWAP (futures volume) on the Nifty index", () => {
+  it("replaces the price VWAP in the menu and is available on intraday Nifty", () => {
+    expect(menuIndicatorTypes("NIFTY50")).toContain("vwap_fut");
+    expect(menuIndicatorTypes("NIFTY50")).not.toContain("vwap");
+    expect(menuIndicatorTypes("RELIANCE")).toContain("vwap");
+    expect(menuIndicatorTypes("RELIANCE")).not.toContain("vwap_fut");
+    expect(unavailableReason("vwap_fut", { timeframe: "5m", hasVolume: false, symbol: "NIFTY50" })).toBeNull();
+    expect(unavailableReason("vwap_fut", { timeframe: "5m", hasVolume: true, symbol: "RELIANCE" })).toMatch(/Nifty/i);
+    expect(unavailableReason("vwap_fut", { timeframe: "1D", hasVolume: false, symbol: "NIFTY50" })).toMatch(/intraday/i);
   });
 });
 

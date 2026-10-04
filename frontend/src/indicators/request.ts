@@ -19,7 +19,7 @@ export function activeItems(ctx: RequestContext): IndicatorInstance[] {
     (i) =>
       i.visible &&
       validateParams(i.type, i.params) === null &&
-      unavailableReason(i.type, { timeframe: ctx.timeframe, hasVolume: volume }) === null,
+      unavailableReason(i.type, { timeframe: ctx.timeframe, hasVolume: volume, symbol: ctx.symbol }) === null,
   );
 }
 

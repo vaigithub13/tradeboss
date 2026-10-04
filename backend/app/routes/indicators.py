@@ -65,6 +65,10 @@ def indicators(
             IndicatorSpec(id=i.id, type=i.type, params=validate_params(i.type, i.params))
             for i in req.indicators
         ]
+        if any(i.type == "vwap_fut" for i in specs):
+            from app.data.futures_volume import schedule_backfill
+
+            schedule_backfill(store.base_dir)
         result = compute_indicators(
             store, req.symbol, req.timeframe, specs,
             from_time=req.from_, to_time=req.to, session_types=types, cursor=req.cursor,

@@ -207,6 +207,17 @@ class UpstoxClient:
             raise UpstoxApiError("unexpected response shape (no data list)", status=200)
         return sorted(date.fromisoformat(str(x)) for x in data)
 
+    def expired_future_contracts(self, instrument_key: str, expiry: date) -> list[dict[str, Any]]:
+        """GET /v2/expired-instruments/future/contract: the future that settled on `expiry`."""
+        body = self._get(
+            "/v2/expired-instruments/future/contract",
+            {"instrument_key": instrument_key, "expiry_date": expiry.isoformat()},
+        )
+        data = body.get("data")
+        if not isinstance(data, list):
+            raise UpstoxApiError("unexpected response shape (no data list)", status=200)
+        return [x for x in data if isinstance(x, dict)]
+
     def expired_option_contracts(self, instrument_key: str, expiry: date) -> list[dict[str, Any]]:
         """GET /v2/expired-instruments/option/contract: the option contracts that settled on `expiry`."""
         body = self._get(

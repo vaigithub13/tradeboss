@@ -180,6 +180,7 @@ export class IndicatorLayer {
       case "sma":
       case "ema":
       case "vwap":
+      case "vwap_fut":
         return bundle(item.type, { line: line(color("line"), 0) });
       case "bb":
         return bundle("bb", {
@@ -280,6 +281,7 @@ export class IndicatorLayer {
         lineJob("line", () => linePoints(t, out(item.type)));
         break;
       case "vwap":
+      case "vwap_fut":
         // VWAP restarts every IST day: do not join yesterday's last value to today's first
         lineJob("line", () => linePoints(t, out("vwap"), firstBarOfIstDay(t)));
         break;
@@ -389,6 +391,7 @@ export class IndicatorLayer {
       case "sma":
       case "ema":
       case "vwap":
+      case "vwap_fut":
       case "rsi":
         recolour("line", color("line"));
         break;
