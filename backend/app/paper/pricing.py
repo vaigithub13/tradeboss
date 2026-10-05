@@ -1,44 +1,55 @@
 """The model price used when a paper fill has no fresh quote: the option model the drawings and the
-backtest overlay already use (options/position.py `priced`), priced at the index level and VIX of that moment."""
+backtest overlay already use (options/position.py `priced`), priced at the index level and the VIX
+of that moment. VIX comes from the feed (or, in a replay, from the same recorded VIX ticks).
+"""
 
 from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Callable
-from datetime import date, datetime, timedelta, timezone
 
-from app.data.store import CandleStore
 from app.options.contract import OptionContract
 from app.options.model import OptionModelConfig, load_option_model
 from app.options.position import priced
 
-VIX_SYMBOL = "NSE_INDEX_India_VIX"
-IST = timezone(timedelta(hours=5, minutes=30))
-ModelPrice = Callable[[OptionContract, float, int], float]
+# The backtest's slippage label for option premiums. Applied against us on modelled fills only:
+# a buy pays this much more and a sell receives this much less than the model price.
+MODEL_SLIPPAGE_POINTS = 0.5
+
+ModelPrice = Callable[[OptionContract, float, int], float | None]
 
 
-def model_price_for(vix_at: Callable[[int], float], cfg: OptionModelConfig | None = None) -> ModelPrice:
-    """(contract, index spot, time in ms) -> model premium. `vix_at(unix seconds)` gives the VIX of that moment."""
+class VixSeries:
+    """VIX closes seen so far, by the unix second the bar starts. A later copy of the same bar replaces it."""
+
+    def __init__(self) -> None:
+        self._times: list[int] = []
+        self._closes: list[float] = []
+
+    def add(self, when: int, close: float) -> None:
+        if self._times and when < self._times[-1]:
+            return  # an older bar than the newest we hold: the feed has moved on
+        if self._times and when == self._times[-1]:
+            self._closes[-1] = float(close)
+            return
+        self._times.append(int(when))
+        self._closes.append(float(close))
+
+    def at(self, when: int) -> float | None:
+        """The last VIX close that started at or before `when`; None before the first one."""
+        i = bisect_right(self._times, when) - 1
+        return None if i < 0 else self._closes[i]
+
+
+def model_price_for(vix_at: Callable[[int], float | None], cfg: OptionModelConfig | None = None) -> ModelPrice:
+    """(contract, index spot, time in ms) -> model premium, or None when no VIX is known yet."""
     model = cfg or load_option_model()
 
-    def price(contract: OptionContract, spot: float, ts_ms: int) -> float:
+    def price(contract: OptionContract, spot: float, ts_ms: int) -> float | None:
         when = ts_ms // 1000
-        return priced(contract.kind, spot, contract.strike, when, contract.expiry, vix_at(when), model)
+        vix = vix_at(when)
+        if vix is None:
+            return None
+        return priced(contract.kind, spot, contract.strike, when, contract.expiry, vix, model)
 
     return price
-
-
-def vix_from_store(store: CandleStore, day: date) -> Callable[[int], float]:
-    """VIX closes from the stored candles for the day: the last close at or before a time."""
-    start = int(datetime(day.year, day.month, day.day, tzinfo=IST).timestamp())
-    rows, _ = store.load(VIX_SYMBOL, from_time=start, to_time=start + 86_400, session_types=("normal", "weekend_full"))
-    times = [int(r["time"]) for r in rows]
-    closes = [float(r["close"]) for r in rows]
-
-    def at(when: int) -> float:
-        i = bisect_right(times, when) - 1
-        if i < 0:
-            raise LookupError(f"no VIX close at or before {when} on {day.isoformat()}")
-        return closes[i]
-
-    return at

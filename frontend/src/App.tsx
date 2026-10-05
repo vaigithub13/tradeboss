@@ -12,6 +12,9 @@ import { BacktestResults, TradeCard } from "./panels/BacktestResults";
 import { IndicatorsMenu } from "./panels/IndicatorsMenu";
 import { DataTokenBadge } from "./panels/DataTokenBadge";
 import { LiveBadge } from "./panels/LiveBadge";
+import { PaperPanel } from "./panels/PaperPanel";
+import { paperMarkers, type PaperSignal } from "./paper/present";
+import { usePaperStore } from "./store/paperStore";
 import { SessionsMenu } from "./panels/SessionsMenu";
 import { SymbolSelector } from "./panels/SymbolSelector";
 import { ReplayBar, useReplayClock } from "./replay/ReplayBar";
@@ -26,6 +29,7 @@ import { liveView, useLiveStore } from "./store/liveStore";
 import type { LevelLine } from "./ai/present";
 
 const POLL_INTERVAL_MS = 3000;
+const NO_PAPER_SIGNALS: PaperSignal[] = [];
 /** wait for typing in a parameter box to settle before asking the backend */
 const INDICATOR_DEBOUNCE_MS = 200;
 
@@ -130,6 +134,7 @@ export default function App() {
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [requestToken, setRequestToken] = useState(0);
   const [analysisLevels, setAnalysisLevels] = useState<LevelLine[]>([]);
+  const [paperOpen, setPaperOpen] = useState(false);
   const onAnalysisLevels = useCallback((lines: LevelLine[]) => setAnalysisLevels(lines), []);
   useEffect(() => {
     setAnalysisLevels([]);
@@ -139,6 +144,7 @@ export default function App() {
   const selectTrade = useBacktestStore((s) => s.selectTrade);
   const showAround = useChartStore((s) => s.showAround);
   const markers: SeriesMarker<Time>[] = [];
+  const paperStatus = usePaperStore((s) => s.status);
   const replayReveal = replayActive && replayCursorTime != null
     ? reveal(
         (activeRun?.result?.trades ?? []).map((trade) => ({
@@ -190,6 +196,9 @@ export default function App() {
   const replayCard = replayReveal?.cardId == null
     ? null
     : activeRun?.result?.trades.find((trade) => trade.id === replayReveal.cardId);
+  if (symbol === "NIFTY50" && !replayActive && paperOpen) {
+    markers.push(...paperMarkers(paperStatus?.signals ?? NO_PAPER_SIGNALS, candles.map((c) => c.time)));
+  }
   markers.sort((a, b) => Number(a.time) - Number(b.time));
   const pickTime = (time: number): void => {
     const trade = activeRun?.result?.trades.find((item) => item.entry_time === time || item.exit_time === time);
@@ -229,6 +238,13 @@ export default function App() {
           }}
         >
           Analyse
+        </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 px-2 py-1 text-xs text-white/80"
+          onClick={() => setPaperOpen((open) => !open)}
+        >
+          Paper
         </button>
         {status === "loading" && <span className="text-xs text-white/40">loading…</span>}
         <div className="ml-auto flex items-center gap-2">
@@ -312,6 +328,7 @@ export default function App() {
         )}
       </main>
       <BacktestResults />
+      {paperOpen && <PaperPanel />}
       </div>
       <AnalysisPanel
         symbol={symbol}

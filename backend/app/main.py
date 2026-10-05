@@ -19,6 +19,7 @@ from app.routes.drawings import router as drawings_router
 from app.routes.fvg import router as fvg_router
 from app.routes.indicators import router as indicators_router
 from app.routes.live import router as live_router
+from app.routes.paper import router as paper_router
 from app.routes.pine import router as pine_router
 from app.routes.upstox import router as upstox_router
 from app.upstox.instruments import snapshot_due, take_snapshot
@@ -63,6 +64,7 @@ app.include_router(drawings_router)
 app.include_router(fvg_router)
 app.include_router(upstox_router)
 app.include_router(live_router)
+app.include_router(paper_router)
 app.include_router(pine_router)
 app.include_router(ai_router)
 app.add_middleware(

@@ -17,18 +17,27 @@ from typing import Any
 from app.backtest.context import PositionView
 from app.backtest.contracts import Signal
 from app.backtest.costs import CostTable
+from app.backtest.engine import BacktestConfig
 from app.live.spreads.decode import DepthQuote
 from app.options.contract import OptionContract
 from app.paper.bars import ClosedBars
 from app.paper.book import Fill, PaperBook, Position, fill, summarise
+from app.paper.pricing import MODEL_SLIPPAGE_POINTS
 from app.paper.quotes import QuoteBook
 from app.strategies.pine_common import minute_of
 
 SQUARE_OFF_MIN = 15 * 60 + 15
+WARMUP_BARS = BacktestConfig().warmup_bars  # the backtest warms its strategy on this many bars before the day
 TAG_REASON = {
     "LE": "log XZ crossed above 0: buy",
     "SE": "log XZ crossed below 0: sell",
 }
+
+
+def warmup_before(prior: list[dict[str, Any]], day_start: int) -> list[dict[str, Any]]:
+    """The last WARMUP_BARS closed bars before `day_start`, exactly the window the backtest warms on."""
+    before = [b for b in prior if int(b["time"]) < day_start]
+    return before[-WARMUP_BARS:]
 
 
 class _Ctx:
@@ -61,7 +70,8 @@ class PaperSession:
         key_for: Callable[[str], str | None],
         quotes: QuoteBook,
         cost_table: CostTable,
-        model_price: Callable[[OptionContract, float, int], float] | None = None,
+        model_price: Callable[[OptionContract, float, int], float | None] | None = None,
+        model_slippage: float = MODEL_SLIPPAGE_POINTS,
         bar_minutes: int = 5,
         lots: int = 1,
         symbol: str = "NIFTY50",
@@ -75,6 +85,8 @@ class PaperSession:
         self.quotes = quotes
         self.cost_table = cost_table
         self.model_price = model_price
+        self.model_slippage = model_slippage
+        self.wanted: set[str] = set()  # option keys this session needs quoted (the live feed subscribes them)
         self.lots = lots
         self.symbol = symbol
         self.timeframe = f"{bar_minutes}m"
@@ -98,7 +110,9 @@ class PaperSession:
         self.quotes.on_depth(quotes)
 
     def on_index_minute(self, minute: dict[str, Any], *, now_ms: int) -> list[dict[str, Any]]:
-        """Feed one live 1-minute index bar. `now_ms` is the feed's current time. Returns the signal records."""
+        """Feed one exchange-final 1-minute index bar (source i1 or official). `now_ms` is the feed's current time.
+
+        Returns the signal records made by the bars this minute closed."""
         out: list[dict[str, Any]] = []
         self._spot = float(minute["close"])
         if minute_of(int(minute["time"])) >= SQUARE_OFF_MIN and self.book.position is not None:
@@ -107,11 +121,9 @@ class PaperSession:
             out += self._on_closed_bar(bar, now_ms)
         return out
 
-    def end_of_day(self, *, now_ms: int) -> list[dict[str, Any]]:
-        out: list[dict[str, Any]] = []
-        for bar in self.bars.end_of_day():
-            out += self._on_closed_bar(bar, now_ms)
-        return out
+    def end_of_day(self) -> None:
+        """The session has ended. A bar still short of its minutes is marked incomplete, never traded."""
+        self.bars.end_of_day()
 
     # ------------------------------------------------------------ decisions
     def _on_closed_bar(self, bar: dict[str, Any], now_ms: int) -> list[dict[str, Any]]:
@@ -178,6 +190,7 @@ class PaperSession:
                 return rec
             self.book.close(exit_fill, index_exit_time=int(bar["time"]), reason="signal")
         self._contract_of[key] = contract
+        self.wanted.add(key)
         self.book.open(Position(
             direction=direction, key=key, symbol=contract.symbol, kind=contract.kind, strike=contract.strike,
             expiry=contract.expiry, lots=self.lots, units=units, lot_size=contract.lot_size, entry=entry,
@@ -186,6 +199,17 @@ class PaperSession:
         rec.update(status="filled", symbol=contract.symbol, key=key, fill_source=entry.source,
                    fill_price=entry.price)
         return rec
+
+    def prepare(self, spot: float) -> None:
+        """Ask for the ATM call and put of the nearest weekly, so a signal finds its quote already subscribed."""
+        for direction in ("LONG", "SHORT"):
+            key = self.key_for(self.choose(direction, spot, self.day).symbol)
+            if key is not None:
+                self.wanted.add(key)
+
+    def close_now(self, now_ms: int, reason: str) -> None:
+        """Square off the open position at the current quote (used when the user stops the strategy)."""
+        self._square_off(now_ms, reason=reason)
 
     def _square_off(self, now_ms: int, reason: str = "square_off") -> None:
         p = self.book.position
@@ -208,7 +232,7 @@ class PaperSession:
         if self.model_price is not None:
             model = lambda: self.model_price(contract, spot, now_ms)  # noqa: E731
         return fill(side, key=key, quotes=self.quotes, now_ms=now_ms, units=units, day=self.day,
-                    cost_table=self.cost_table, model_price=model)
+                    cost_table=self.cost_table, model_price=model, model_slippage=self.model_slippage)
 
     # ---------------------------------------------------------------- output
     def mark(self, now_ms: int) -> dict[str, Any] | None:

@@ -17,6 +17,8 @@ from typing import Any
 from app.backtest.costs import CostTable
 from app.paper.quotes import QuoteBook
 
+TICK = 0.05  # the smallest premium we will quote
+
 
 @dataclass(frozen=True)
 class Fill:
@@ -47,7 +49,8 @@ def fill(
     units: int,
     day: date,
     cost_table: CostTable,
-    model_price: Callable[[], float] | None = None,
+    model_price: Callable[[], float | None] | None = None,
+    model_slippage: float = 0.0,
 ) -> Fill | None:
     q = quotes.at(key, now_ms)
     if side == "BUY" and q is not None and q.ask is not None:
@@ -55,7 +58,11 @@ def fill(
     elif side == "SELL" and q is not None and q.bid is not None:
         price, mid, source = q.bid, _mid(q.bid, q.ask), "quote"
     elif model_price is not None:
-        price, mid, source = float(model_price()), None, "modelled"
+        modelled = model_price()
+        if modelled is None:
+            return None
+        against = model_slippage if side == "BUY" else -model_slippage
+        price, mid, source = max(float(modelled) + against, TICK), None, "modelled"
     else:
         return None
     leg = cost_table.leg_cost(side, price, units, day)

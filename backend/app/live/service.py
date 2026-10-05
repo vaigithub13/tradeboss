@@ -36,11 +36,13 @@ from app.live.engine import BackfillRequest, EngineConfig, LiveEngine
 from app.live.frames import OPENISH_STATUSES
 from app.live.hub import LiveHub
 from app.live.minutelog import append_jsonl, minutes_path, write_minute_log
-from app.live.model import IST, Bar
+from app.live.model import IST, Bar, BarEvent
 from app.live.overlay import LiveOverlay
 from app.live.persist import ReconcileState, is_stored, upsert_bars
 from app.live.reconcile import reconcile_missed, reconcile_today
 from app.live.recorder import BINARY, RECV, SENT, Recorder
+from app.paper.live import PaperRunner, session_factory
+from app.paper.pricing import VixSeries
 from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, current_index
 
 log = logging.getLogger("tradeboss.live.service")
@@ -53,6 +55,8 @@ def symbols_dirtied_by(updated: set[str], *, future_dir: str | None, index_dir: 
     return set(updated)
 
 STALE_AFTER_S = 15.0
+PAPER_BAR_SOURCES = ("i1", "official")  # only exchange-final minutes reach the paper strategy
+PAPER_SYMBOL = "NIFTY50"  # the chart symbol whose stored candles the end-of-day check reads
 MAX_SUBSCRIPTIONS = 12
 BACKFILL_RETRY_S = 15.0
 BACKFILL_WITHHOLD_MAX_S = 60.0
@@ -98,6 +102,7 @@ class LiveConfig:
     base_keys: tuple[str, ...] = (NIFTY_INDEX_KEY, VIX_KEY)
     spread_recorder_enabled: bool = False
     spreads_dir: Path | None = None
+    paper_dir: Path | None = None
 
 
 def _hhmm(s: str) -> dtime:
@@ -154,6 +159,12 @@ class LiveService:
             on_views_changed=self.refresh_subscriptions,
         )
         self._spreads = None
+        self.vix = VixSeries()
+        self.paper = PaperRunner(
+            cfg.paper_dir or (cfg.state_dir.parent / "paper"),
+            session_factory(cfg.instruments_dir, self.vix),
+            on_wanted=self.refresh_subscriptions,
+        )
         self.connection = FeedConnection(
             authorize=authorize or (lambda: authorize_feed(_token())),
             on_frame=self._on_frame,
@@ -200,6 +211,7 @@ class LiveService:
             self.recorder.write(RECV, BINARY, raw, wall)
         except OSError as exc:  # a full disk must not stop the live view
             log.error("recorder write failed: %s", exc)
+        self.paper.on_depth(raw)  # before the engine: a bar this frame closes sees this frame's quotes
         with self._elock:
             self.engine.on_frame(raw, wall)
         self._drain()
@@ -227,6 +239,7 @@ class LiveService:
             finished = self.engine.take_finished()
             day = self.engine.day
         if events:
+            self._feed_paper(events)
             by_dir: dict[str, list[Bar]] = {}
             for ev in events:
                 by_dir.setdefault(symbol_dir_name(ev.key), []).append(ev.bar)
@@ -242,6 +255,19 @@ class LiveService:
             self._spawn_backfill(req)
         for d, key in finished:
             asyncio.get_running_loop().create_task(self._persist(d, key))
+
+    def _feed_paper(self, events: list[BarEvent]) -> None:
+        """VIX feeds the model fallback; exchange-final index minutes feed the paper strategy."""
+        for ev in events:
+            if ev.key == VIX_KEY:
+                self.vix.add(ev.bar.time_s, ev.bar.close)
+            elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in PAPER_BAR_SOURCES:
+                b = ev.bar
+                self.paper.on_index_bar(
+                    {"time": b.time_s, "open": b.open, "high": b.high, "low": b.low, "close": b.close,
+                     "volume": b.volume or 0, "source": b.source},
+                    now_ms=self.engine.current_ts,
+                )
 
     def _sync_key(self, key: str) -> None:
         """Replace the overlay for `key` with everything the engine has (after backfill / release)."""
@@ -310,6 +336,7 @@ class LiveService:
         assert day is not None
         self._flags.close_log_written = True
         write_minute_log(minutes_path(self.cfg.recordings_dir, day.isoformat()), close=self._close_records, reconciled=None, summary=summary)
+        self.paper.finish_day()
 
     # ------------------------------------------------------------------ reconcile
     async def reconcile_now(self) -> list:
@@ -342,6 +369,7 @@ class LiveService:
         await self.hub.broadcast_reload({symbol_dir_name(r.key) for r in reports if r.ok})
         if reports and all(r.ok for r in reports):
             self._flags.reconciled_day = day
+            self.paper.reconcile_check(self.store, PAPER_SYMBOL)
         return reports
 
     async def _startup_reconcile(self) -> None:
@@ -442,12 +470,17 @@ class LiveService:
         return list(dict.fromkeys(keys))[:MAX_SUBSCRIPTIONS]
 
     def subscription_keys(self) -> list[str]:
-        chart = self._chart_keys()
-        if not self.cfg.spread_recorder_enabled:
-            return chart
+        """Chart keys, then option keys: the spread recorder's ATM+-2 set, then any contract the paper
+        strategy needs that the set does not already hold."""
         from app.live.spreads.keys import compose_keys
 
-        return compose_keys(chart, self._spread_session().keys(), enabled=True)
+        chart = self._chart_keys()
+        spread = self._spread_session().keys() if self.cfg.spread_recorder_enabled else []
+        # paper keys first: the option list is capped, and a paper fill cannot wait behind the recorder's set
+        options = list(dict.fromkeys([*sorted(self.paper.wanted_keys()), *spread]))
+        if not options:
+            return chart
+        return compose_keys(chart, options, enabled=True)
 
     def _spread_session(self):
         if self._spreads is None:
@@ -518,6 +551,7 @@ class LiveService:
             "keys": self.connection._desired,  # noqa: SLF001 - informational
             "withheld": [k for k in self.engine.keys() if not self.engine.publishable(k)],
             "unreconciled": [[d.isoformat(), k] for d, k, _stage in self.state.not_final()],
+            "paper": {"state": self.paper.state, "day": None if self.paper.day is None else self.paper.day.isoformat()},
         }
 
 
@@ -553,6 +587,7 @@ def build_service() -> LiveService:
         default_sessions=settings.default_sessions,
         spread_recorder_enabled=settings.spread_recorder_enabled,
         spreads_dir=settings.data_dir / "spreads",
+        paper_dir=settings.data_dir / "paper",
     )
     enabled = settings.live_feed_enabled and settings.upstox_token_value() is not None
     return LiveService(cfg, get_store(), client_factory=make_client, enabled=enabled)

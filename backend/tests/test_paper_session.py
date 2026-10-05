@@ -55,7 +55,8 @@ def session(strategy, *, model_price=None) -> PaperSession:
 
 def minute(h: int, m: int, close: float) -> dict:
     t = int(datetime(2026, 10, 5, h, m, tzinfo=IST).timestamp())
-    return {"time": t, "open": close, "high": close + 1, "low": close - 1, "close": close, "volume": 10}
+    return {"time": t, "open": close, "high": close + 1, "low": close - 1, "close": close, "volume": 10,
+            "source": "i1"}
 
 
 def quote_both(s: PaperSession, now: int, *, ce_bid: float, ce_ask: float, pe_bid: float, pe_ask: float) -> None:
@@ -89,8 +90,9 @@ def test_strategy_is_shown_only_closed_bars_in_order() -> None:
     strat = Scripted({})
     s = session(strat)
     feed(s, run_minutes((9, 15), (9, 34)))
-    # 09:15..09:34 is four 5m bars; the last one (09:30) closes only when 09:35 arrives
-    assert strat.seen == [ist_ms(9, 15) // 1000, ist_ms(9, 20) // 1000, ist_ms(9, 25) // 1000]
+    # 09:15..09:34: four 5m bars, each complete when its own fifth minute is final
+    assert strat.seen == [ist_ms(9, 15) // 1000, ist_ms(9, 20) // 1000, ist_ms(9, 25) // 1000,
+                          ist_ms(9, 30) // 1000]
 
 
 def test_buy_opens_an_atm_call_at_the_live_ask_when_the_bar_closes() -> None:
@@ -102,7 +104,7 @@ def test_buy_opens_an_atm_call_at_the_live_ask_when_the_bar_closes() -> None:
     sig = signals[0]
     assert (sig["side"], sig["status"], sig["symbol"]) == ("BUY", "filled", "NIFTY 22600 CE 06 OCT 26")
     assert sig["fill_source"] == "quote" and sig["index_price"] == 22600.0
-    assert sig["decided_at_ms"] == ist_ms(9, 20)  # the 09:15 bar closes when the 09:20 minute arrives
+    assert sig["decided_at_ms"] == ist_ms(9, 19)  # the 09:15 bar is complete when its fifth minute, 09:19, is final
     pos = s.book.position
     assert pos is not None and pos.direction == "LONG" and pos.entry.price == 100.0
 

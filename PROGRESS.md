@@ -485,3 +485,16 @@ The previous full-window 5-minute result (1,098 trades, index 630,280.25, option
 - Square-off at 15:15. Open P&L marked at the bid, net of estimated exit charges. Per-day JSON under `data/paper/`, weekly roll-up, and an end-of-day check that reruns the normal backtest and gives a reason for each difference.
 - Tests: `tests/test_paper_*.py`, including a replay of the recorded 5 Oct 2026 feed through `LiveEngine` (skips when `data/` is absent).
 - NOT built yet: start/stop in the live service, the panel, browser notifications and sound, chart markers, subscribing option contracts that the feed does not carry, the end-of-day check hooked to reconcile, and the weekly view. The 5 Oct recording has depth only for the front future, so every option fill on that day is modelled.
+
+## Live signals (paper): wired to the feed, partly done
+
+- Closed bars come only from exchange-final minutes (`i1`, or `official` after reconcile). A bar needs all five minutes, with their I1 OHLC. Tick-built minutes are refused.
+- 5 Oct replay: live and backtest signals match (one signal, 13:20 BUY, same bar). The end-of-day check reports no differences. The only bar-level difference is the 15:25 bucket: its last minute (15:29) never becomes exchange-final on the live feed, so the bar is withheld as incomplete. The backtest uses the official 15:29 bar. Nothing can trade in that window.
+- Warm-up: the backtest run for one day passes only that day's bars to the strategy (`on_bar`). Log XZ keeps its own state (RMA and log history), so the live session also starts with no warm-up to match. A multi-day backtest warms only from its own start, so its result depends on where the run begins. Open decision: warm the strategy on the bars before the run in the backtest engine (a critical module; it changes every backtest result).
+- Option quotes: depth from the feed for the ATM call and put of the nearest weekly. Those keys are subscribed ahead of the spread recorder's ATM+-2 set, which is capped at 20. The 5 Oct recording has depth for the front future only, so its option fills are modelled.
+- Fallback: the option model with the feed's VIX, and 0.5 pt slippage against us on modelled fills (the backtest's slippage label). Modelled fills are flagged and shown in amber on the chart.
+- Log XZ runs with default parameters (RMA 14, 5m).
+- Routes: `GET /api/paper/status`, `GET /api/paper/strategies`, `POST /api/paper/start`, `POST /api/paper/stop`, `GET /api/paper/day`, `GET /api/paper/week`.
+- Panel: a Paper button in the header. It has a strategy picker, Start/Stop, the open P&L at the bid, the day's totals, and the signals log. Filled signals are markers on the NIFTY chart.
+- After the reconcile, the end-of-day check reruns the normal backtest on the official bars and saves the differences in the day's file.
+- NOT built: browser notifications and sound, the weekly view in the panel (the route exists), and the 6 Oct replay (no 6 Oct recording on this machine, so that test skips). `SPREAD_RECORDER_ENABLED` is not set in the local `.env`.

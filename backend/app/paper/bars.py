@@ -1,8 +1,9 @@
-"""Closed N-minute bars from live 1-minute bars, anchored to 09:15 IST like the resampler.
+"""Closed N-minute bars from exchange-final 1-minute bars, anchored to 09:15 IST like the resampler.
 
-No look-ahead: a minute is closed only when a later minute has arrived, so a bar is emitted only
-after its last minute is final. A bucket with a missing minute is recorded in `incomplete` and never
-emitted, so the strategy never trades a bar it cannot trust.
+A minute is accepted only when it is exchange-final (source `i1`, the feed's completed-minute bar, or
+`official` after the reconcile). A bar is emitted only when every one of its minutes has arrived, with
+those minutes' OHLC. A bucket that is still short when its last minute has arrived is recorded in
+`incomplete` and never emitted, so the strategy never trades a bar it cannot trust.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ from typing import Any
 
 IST_OFFSET_S = 19_800
 OPEN_IST_MIN = 9 * 60 + 15
+FINAL_SOURCES = ("i1", "official")
 
 
 def _anchor(t: int) -> int:
@@ -25,52 +27,43 @@ class ClosedBars:
             raise ValueError("bar_minutes must be >= 1")
         self.bar_minutes = bar_minutes
         self._width = bar_minutes * 60
-        self._pending: dict[int, dict[str, Any]] = {}  # minutes not yet known to be closed
         self._buckets: dict[int, dict[int, dict[str, Any]]] = {}
-        self._last_closed: int | None = None
+        self._last_minute: int | None = None
         self.incomplete: set[int] = set()
         self.pre_open_ignored = 0
+        self.not_final_ignored = 0
 
     def on_minute(self, bar: dict[str, Any]) -> list[dict[str, Any]]:
-        """Feed one 1-minute bar (a forming update or a new minute). Returns the 5m bars that just closed."""
+        """Feed one exchange-final 1-minute bar. Returns the bars that just closed."""
+        if bar.get("source") not in FINAL_SOURCES:
+            self.not_final_ignored += 1
+            return []
         t = int(bar["time"])
-        out: list[dict[str, Any]] = []
-        for k in sorted(k for k in self._pending if k < t):
-            out += self._close_minute(self._pending.pop(k))
-        if self._last_closed is None or t > self._last_closed:
-            self._pending[t] = dict(bar)  # a forming update of the same minute replaces it
-        return out
-
-    def end_of_day(self) -> list[dict[str, Any]]:
-        """Close every minute still pending (the session has ended)."""
-        out: list[dict[str, Any]] = []
-        for k in sorted(self._pending):
-            out += self._close_minute(self._pending.pop(k))
-        for start in sorted(self._buckets):
-            self.incomplete.add(start)
-        self._buckets.clear()
-        return out
-
-    def _close_minute(self, minute: dict[str, Any]) -> list[dict[str, Any]]:
-        t = int(minute["time"])
+        if self._last_minute is not None and t <= self._last_minute:
+            return []  # a repeat or an out-of-order minute: the first final copy wins
         anchor = _anchor(t)
         if t < anchor:
             self.pre_open_ignored += 1
             return []
-        self._last_closed = t
+        self._last_minute = t
         start = anchor + (t - anchor) // self._width * self._width
         for s in [s for s in self._buckets if s < start]:
             self.incomplete.add(s)
             del self._buckets[s]
         bucket = self._buckets.setdefault(start, {})
-        bucket[t] = minute
+        bucket[t] = bar
         if len(bucket) == self.bar_minutes:
             del self._buckets[start]
             return [_aggregate(start, bucket)]
-        if t >= start + self._width - 60:  # its last minute has closed and it is still short
+        if t >= start + self._width - 60:  # its last minute has arrived and it is still short
             self.incomplete.add(start)
             del self._buckets[start]
         return []
+
+    def end_of_day(self) -> None:
+        """The session has ended: any bucket still open can never complete."""
+        self.incomplete.update(self._buckets)
+        self._buckets.clear()
 
 
 def _aggregate(start: int, bucket: dict[int, dict[str, Any]]) -> dict[str, Any]:
