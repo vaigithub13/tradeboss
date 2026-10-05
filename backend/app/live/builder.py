@@ -14,7 +14,7 @@ a value is returned as a `Diff` so nothing is silent):
     tick      built from last-trade ticks
     i1        the feed's exchange 1-minute OHLC entry, once final (see below)
     backfill  completed minutes fetched from the intraday API after a connection gap
-    official  the historical API, after the 15:45 reconcile
+    official  the intraday candles at 15:45, then the historical candles the next morning
 
 I1 is final when a LATER I1 timestamp has been seen, or when the session has ended. That rule
 works whether I1 is the forming bar or the last completed bar (the docs do not say).
@@ -22,8 +22,8 @@ works whether I1 is the forming bar or the last completed bar (the docs do not s
 Volume of a tick-built bar = (highest `vtt` in the minute) - (baseline), where the baseline is the
 highest `vtt` of the previous minute that had ticks. After a connection gap the first minute's
 volume is unknown (None) until I1 / backfill arrives. For the first bar of the day the baseline
-is `first_tick` (first accepted tick: vtt - ltq, so pre-open volume is not counted; default) or
-`pre_open_inclusive` (0).
+is `pre_open_inclusive` (0, so the 09:15 bar includes pre-open volume; default since 5 Oct 2026)
+or `first_tick` (first accepted tick: vtt - ltq, so pre-open volume is not counted).
 """
 
 from __future__ import annotations
@@ -62,7 +62,7 @@ class BuilderConfig:
     close_ms_of_day: int = CLOSE_MS  # exclusive
     has_volume: bool = True  # False for indices (volume is 0 and always "known")
     has_oi: bool = False
-    open_volume_baseline: OpenBaseline = "first_tick"
+    open_volume_baseline: OpenBaseline = "pre_open_inclusive"
 
 
 @dataclass

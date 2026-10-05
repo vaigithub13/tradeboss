@@ -47,8 +47,9 @@ class Settings(BaseSettings):
 
     # ---- Phase 2b: live feed (one connection, max) -------------------------------------------
     live_feed_enabled: bool = True
-    # 09:15 bar volume baseline: "first_tick" (pre-open volume excluded) | "pre_open_inclusive"
-    live_open_volume_baseline: str = "first_tick"
+    # 09:15 bar volume baseline: "pre_open_inclusive" (default; 5 Oct was 260 under official)
+    # | "first_tick" (pre-open volume excluded; 5 Oct was 9,555 under official)
+    live_open_volume_baseline: str = "pre_open_inclusive"
     # connect window (IST) for the feed connection, any day (the feed's market_info decides the rest)
     live_connect_start: str = "08:55"
     live_connect_end: str = "16:10"

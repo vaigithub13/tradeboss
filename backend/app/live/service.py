@@ -87,7 +87,7 @@ class LiveConfig:
     recordings_dir: Path
     state_dir: Path
     instruments_dir: Path
-    open_volume_baseline: str = "first_tick"
+    open_volume_baseline: str = "pre_open_inclusive"
     connect_start: str = "08:55"
     connect_end: str = "16:10"
     record_start: str = "09:00"
@@ -108,6 +108,7 @@ def _hhmm(s: str) -> dtime:
 @dataclass
 class _Flags:
     reconciled_day: date | None = None
+    historical_ran_on: date | None = None
     next_reconcile_try: float = 0.0
     next_rest_poll: float = 0.0
     rest_status: dict[str, Any] | None = None
@@ -345,7 +346,7 @@ class LiveService:
 
     async def _startup_reconcile(self) -> None:
         client = self.client_factory()
-        if client is None or not self.state.pending():
+        if client is None or not self.state.not_final():
             return
         today = datetime.fromtimestamp(self.now_ms() / 1000, IST).date()
         try:
@@ -353,7 +354,7 @@ class LiveService:
                 reconcile_missed, client,
                 candles_dir=self.cfg.candles_dir, log_dir=self.cfg.recordings_dir, state=self.state, today=today,
             )  # fmt: skip
-            log.info("startup reconcile of missed days: %d instrument-days, %d ok", len(reports), sum(r.ok for r in reports))
+            log.info("startup historical reconcile: %d instrument-days, %d ok", len(reports), sum(r.ok for r in reports))
             await self.hub.broadcast_reload(None)
         except Exception as exc:  # noqa: BLE001
             log.warning("startup reconcile failed: %s: %s", type(exc).__name__, exc)
@@ -398,6 +399,10 @@ class LiveService:
         ):
             self._flags.next_reconcile_try = now + RECONCILE_RETRY_S
             await self.reconcile_now()
+        # 2b. 09:00 historical pass for every day that is not yet final (also runs on startup)
+        if dtime(9, 0) <= t < dtime(9, 5) and self._flags.historical_ran_on != local.date() and self.state.not_final():
+            self._flags.historical_ran_on = local.date()
+            await self._startup_reconcile()
         # 3. REST market status as a second source (informational)
         if now >= self._flags.next_rest_poll and self.connection.window.contains(self.now_ms()):
             self._flags.next_rest_poll = now + REST_STATUS_EVERY_S
@@ -512,7 +517,7 @@ class LiveService:
             "recording": self.recorder.active,
             "keys": self.connection._desired,  # noqa: SLF001 - informational
             "withheld": [k for k in self.engine.keys() if not self.engine.publishable(k)],
-            "unreconciled": [[d.isoformat(), k] for d, k in self.state.pending()],
+            "unreconciled": [[d.isoformat(), k] for d, k, _stage in self.state.not_final()],
         }
 
 

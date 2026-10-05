@@ -83,49 +83,100 @@ def stored_day(candles_dir: Path, key: str, day: date) -> dict[int, Bar]:
     return out
 
 
+# A day moves forward only: live bars land as pending, the 15:45 intraday pass advances
+# them, and the historical pass (next startup or 09:00) marks them final.
+_STAGE_RANK = {"pending": 0, "intraday_reconciled": 1, "final": 2}
+Stage = str
+
+
 class ReconcileState:
-    """`data/live-state/reconcile.json`: {"pending": {"2026-10-05": ["NSE_EQ|...", ...]}}"""
+    """`data/live-state/reconcile.json`: per (day, instrument) stage.
+
+    ``pending`` — live bars stored, no official pass yet.
+    ``intraday_reconciled`` — replaced from today's intraday candles; historical still due.
+    ``final`` — replaced from the historical candles. Not retried.
+
+    Older files that only list ``pending`` keys are read as stage ``pending``.
+    """
 
     def __init__(self, directory: Path) -> None:
         self.path = directory / "reconcile.json"
         self._lock = threading.Lock()
 
-    def _read(self) -> dict[str, list[str]]:
+    def _read(self) -> dict[str, dict[str, str]]:
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
-            pending = data.get("pending", {})
-            return {str(d): [str(k) for k in ks] for d, ks in pending.items()}
         except FileNotFoundError:
             return {}
         except (ValueError, AttributeError):
             log.warning("unreadable %s - treating as empty", self.path)
             return {}
+        status = data.get("status")
+        if isinstance(status, dict):
+            out: dict[str, dict[str, str]] = {}
+            for d, keys in status.items():
+                if isinstance(keys, dict):
+                    out[str(d)] = {str(k): str(v) for k, v in keys.items() if v in _STAGE_RANK}
+            return out
+        pending = data.get("pending", {})
+        if not isinstance(pending, dict):
+            return {}
+        return {str(d): {str(k): "pending" for k in ks} for d, ks in pending.items()}
 
-    def _write(self, pending: dict[str, list[str]]) -> None:
+    def _write(self, status: dict[str, dict[str, str]]) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         tmp = self.path.with_name(self.path.name + ".tmp")
-        tmp.write_text(json.dumps({"pending": pending}, indent=1, sort_keys=True), encoding="utf-8")
+        tmp.write_text(json.dumps({"status": status}, indent=1, sort_keys=True), encoding="utf-8")
         os.replace(tmp, self.path)
 
-    def mark(self, day: date, key: str) -> None:
+    def _set(self, day: date, key: str, stage: str) -> None:
         with self._lock:
             p = self._read()
-            ks = p.setdefault(day.isoformat(), [])
-            if key not in ks:
-                ks.append(key)
+            day_keys = p.setdefault(day.isoformat(), {})
+            current = day_keys.get(key)
+            if current is not None and _STAGE_RANK[current] >= _STAGE_RANK[stage]:
+                return
+            day_keys[key] = stage
             self._write(p)
+
+    def mark(self, day: date, key: str) -> None:
+        """Live bars were stored. Does not move a later stage backwards."""
+        self._set(day, key, "pending")
+
+    def mark_intraday(self, day: date, key: str) -> None:
+        self._set(day, key, "intraday_reconciled")
+
+    def mark_final(self, day: date, key: str) -> None:
+        self._set(day, key, "final")
 
     def clear(self, day: date, key: str) -> None:
         with self._lock:
             p = self._read()
-            ks = [k for k in p.get(day.isoformat(), []) if k != key]
-            if ks:
-                p[day.isoformat()] = ks
+            day_keys = p.get(day.isoformat(), {})
+            day_keys.pop(key, None)
+            if day_keys:
+                p[day.isoformat()] = day_keys
             else:
                 p.pop(day.isoformat(), None)
             self._write(p)
 
+    def status(self, day: date, key: str) -> str | None:
+        with self._lock:
+            return self._read().get(day.isoformat(), {}).get(key)
+
     def pending(self) -> list[tuple[date, str]]:
+        """Still waiting for the intraday pass."""
         with self._lock:
             p = self._read()
-        return [(date.fromisoformat(d), k) for d in sorted(p) for k in p[d]]
+        return [(date.fromisoformat(d), k) for d in sorted(p) for k, stage in p[d].items() if stage == "pending"]
+
+    def not_final(self) -> list[tuple[date, str, str]]:
+        """Every (day, key, stage) that is not yet historical-final. Retried daily."""
+        with self._lock:
+            p = self._read()
+        return [
+            (date.fromisoformat(d), k, stage)
+            for d in sorted(p)
+            for k, stage in p[d].items()
+            if stage != "final"
+        ]

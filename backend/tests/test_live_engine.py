@@ -280,15 +280,15 @@ def test_a_connection_before_the_open_has_first_of_day_semantics_and_no_backfill
     f.live(T(9, 15, 4), eq(T(9, 15, 3), 100.0, vtt=1000, ltq=50))
     f.live(T(9, 15, 40), eq(T(9, 15, 39), 101.0, vtt=1200, ltq=10))
     assert f.eng.take_backfill_requests() == [] and f.eng.publishable(EQ)
-    assert bar_of(f.eng, EQ, M(9, 15)).volume == 250  # type: ignore[union-attr]  # first_tick baseline
+    assert bar_of(f.eng, EQ, M(9, 15)).volume == 1200  # type: ignore[union-attr]  # pre_open_inclusive baseline
 
 
 def test_the_open_volume_baseline_is_a_setting() -> None:
-    f = Feeder(LiveEngine(EngineConfig(open_volume_baseline="pre_open_inclusive")))
+    f = Feeder(LiveEngine(EngineConfig(open_volume_baseline="first_tick")))
     f.warm(EQ)
     f.live(T(9, 15, 4), eq(T(9, 15, 3), 100.0, vtt=1000, ltq=50))
     f.live(T(9, 15, 40), eq(T(9, 15, 39), 101.0, vtt=1200, ltq=10))
-    assert bar_of(f.eng, EQ, M(9, 15)).volume == 1200  # type: ignore[union-attr]
+    assert bar_of(f.eng, EQ, M(9, 15)).volume == 250  # type: ignore[union-attr]
 
 
 # ---------------------------------------------------------------- reconnects

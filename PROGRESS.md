@@ -204,17 +204,19 @@ Scrolling and zooming are cheap at any size (Lightweight Charts only draws what 
 - **Builder rules** (as approved): bar precedence `filled < tick < i1 < backfill < official`, every overwrite logged as a diff; I1(M) final when an I1 with a later ts arrives or on session-end evidence; flat fills only while connected; late ticks accepted for any non-final bar; a tick whose ltt is >5 s ahead of the same frame's `currentTs` is held, released if a later frame's `currentTs` catches up, else dropped and logged (an illiquid option with a real 25-minute gap is NOT held); recording 09:00-16:05 IST gated by `market_info` (holidays not recorded, special sessions recorded); cold start mid-session backfills 09:15 -> now before live bars; on startup any past day still marked unreconciled is reconciled from the historical API.
 - **Frontend**: `live/client.ts` (WebSocket, reconnect 1-10 s, resends the view, 6 s silence watchdog, bar pushes throttled to <=5/s per symbol/timeframe, newest wins), `live/merge.ts`, `live/badge.ts` + `panels/LiveBadge.tsx` (live / stale (Ns since last tick) / reconnecting... / market closed / feed auth failed / feed in use elsewhere / live feed off), `store/liveStore.ts`, `chartStore.applyLive` (ignored while scrolled back), `indicatorStore.applyLiveTail`, ChartView tail path (`series.update`, never `setData` for a live tick) and `IndicatorLayer` tail path (last points only). Higher timeframes and indicators come from the same backend modules as the REST API (`get_candle_page`, `compute_indicators`), so live and REST cannot drift.
 - Vite `/api` proxy now has `ws: true`. When the live feed is disabled the WebSocket stays open and reports "live feed off" (no reconnect loop).
-- Settings (`.env`): `LIVE_FEED_ENABLED` (default true), `LIVE_OPEN_VOLUME_BASELINE` (`first_tick` default | `pre_open_inclusive`), `LIVE_CONNECT_START/END` (08:55-16:10), `LIVE_RECORD_START/END` (09:00-16:05), `LIVE_RECONCILE_AT/UNTIL` (15:45/16:30).
+- Settings (`.env`): `LIVE_FEED_ENABLED` (default true), `LIVE_OPEN_VOLUME_BASELINE` (`pre_open_inclusive` default | `first_tick`), `LIVE_CONNECT_START/END` (08:55-16:10), `LIVE_RECORD_START/END` (09:00-16:05), `LIVE_RECONCILE_AT/UNTIL` (15:45/16:30).
 
 ### Verification
 - Backend: **572 tests pass** (builder, engine, recorder/replayer, reconcile, connection, hub, end-to-end service with a fake socket). Frontend: **243 tests pass**, `npm run typecheck` clean, `vite build` OK. No test touches the network.
 - Browser smoke test (market closed): badge shows "market closed"; simulated `bar` messages updated the last candle, appended a new one and extended the EMA series by one point (`series.update`, no full redraw).
 
 ### Open items for Monday (unknown until we see real frames)
-1. Is the feed's I1 the **forming** or the **last completed** bar? (minute log `i1_timing`; the builder works either way.)
-2. 09:15 volume baseline: compare `open_bar_volume` candidates against the official bar and set `LIVE_OPEN_VOLUME_BASELINE`.
-3. Real latency (`currentTs` vs receive time) and the size of the tick-bar vs I1 vs official differences.
-4. Cold start first-tick minute stays `partial` (unknown volume) until I1/official; it is not part of the backfill range.
+1. Is the feed's I1 the **forming** or the **last completed** bar? (minute log `i1_timing`; the builder works either way.) **5 Oct: last completed.** 1120 of 1123 I1 observations were the previous minute; the three exceptions are each instrument's 09:15 bar.
+2. 09:15 volume baseline. **Set to `pre_open_inclusive`.** On the 5 Oct future, that candidate was 260 under the official bar; `first_tick` was 9,555 under.
+3. Real latency (`currentTs` vs receive time) and the size of the tick-bar vs I1 vs official differences. **5 Oct: 164,040 frames, mean 28 ms, no gaps.**
+4. Cold start first-tick minute stays `partial` (unknown volume) until I1/official; it is not part of the backfill range. Not seen on 5 Oct (connected before the open).
+
+**Reconcile is two stages (from 5 Oct).** 15:45 compares today's intraday candles, replaces the stored session bars, and marks the day `intraday_reconciled` (retried until 16:30). The next startup, and 09:00, compare the historical candles, replace again, and mark `final`. A day that is not final is retried daily. An empty historical response leaves the current stage. Futures minutes 15:30-15:39 are expected and are not stored. An open-interest change on a minute whose prices match is expected, and the official bar (including open interest) is still stored. Both are logged apart from differences.
 
 
 ## Phase 3a — Backtest engine + cost model (engine done; two inputs still open)

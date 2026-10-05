@@ -334,17 +334,22 @@ def test_end_to_end_cold_start_backfill_live_bars_persist_and_reconcile(cdir: Pa
             await until(lambda: (MON, KEY) in svc.state.pending())
             assert len(stored_day(cdir, KEY, MON)) == 375
             await until(lambda: (tmp_path / "rec" / "2026-10-05.minutes.jsonl").exists())
-            # --- 15:45 reconcile
+            # --- 15:45 intraday reconcile, then the next morning's historical pass
             clock["t"] = T(15, 46)
             await svc.maintenance_once()
             await until(lambda: svc.state.pending() == [])
+            assert svc.state.status(MON, KEY) == "intraday_reconciled"
+            assert stored_day(cdir, KEY, MON)[M(11, 0)].volume == 5.0
+            clock["t"] = T(9, 1, day=date(2026, 10, 6))
+            await svc.maintenance_once()
+            await until(lambda: svc.state.status(MON, KEY) == "final")
         finally:
             await svc.stop()
         return svc
 
     svc = asyncio.run(go())
     stored = stored_day(cdir, KEY, MON)
-    assert len(stored) == 375 and all(b.volume == 7.0 for b in stored.values())  # official replaced the live bars
+    assert len(stored) == 375 and all(b.volume == 7.0 for b in stored.values())  # historical replaced the intraday bars
     assert len(stored_day(cdir, KEY, FRI)) == 375
     rec = tmp_path / "rec"
     lines = [json.loads(x) for x in (rec / "2026-10-05.minutes.jsonl").read_text().splitlines()]

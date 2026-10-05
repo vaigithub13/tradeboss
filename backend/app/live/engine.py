@@ -43,7 +43,7 @@ INDEX_SEGMENTS = {"NSE_INDEX", "BSE_INDEX", "MCX_INDEX"}
 
 @dataclass(frozen=True)
 class EngineConfig:
-    open_volume_baseline: OpenBaseline = "first_tick"
+    open_volume_baseline: OpenBaseline = "pre_open_inclusive"
     hold_ahead_ms: int = HOLD_AHEAD_MS
     hold_max_ms: int = HOLD_MAX_MS
     open_ms_of_day: int = OPEN_MS

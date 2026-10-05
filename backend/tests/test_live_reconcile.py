@@ -18,7 +18,7 @@ from app.live.frames import FeedItem, encode_feed, encode_market_info
 from app.live.model import IST, MS_MIN, Bar, minute_of
 from app.live.overlay import LiveOverlay
 from app.live.persist import ReconcileState, is_stored, parquet_path, stored_day, upsert_bars
-from app.live.reconcile import compare_sets, reconcile_missed, reconcile_today
+from app.live.reconcile import compare_sets, reconcile_intraday_day, reconcile_missed, reconcile_today
 from app.upstox.client import UpstoxAuthError
 
 FRI = date(2026, 10, 2)
@@ -46,11 +46,17 @@ def full_day_rows(day: date, base: float = 100.0, vol: float = 10.0) -> list[lis
 
 
 class FakeHistory:
-    def __init__(self, by_day: dict[date, list[list[Any]]] | None = None, fail: Exception | None = None) -> None:
+    def __init__(
+        self,
+        by_day: dict[date, list[list[Any]]] | None = None,
+        fail: Exception | None = None,
+        *,
+        intraday: list[list[Any]] | None = None,
+    ) -> None:
         self.by_day = by_day or {}
         self.fail = fail
         self.calls: list[tuple[str, date, date]] = []
-        self.intraday_rows: list[list[Any]] = []
+        self.intraday_rows: list[list[Any]] = list(intraday or [])
 
     def historical_candles(self, key: str, from_date: date, to_date: date, *, unit: str = "minutes", interval: int = 1) -> list[Any]:
         self.calls.append((key, from_date, to_date))
@@ -60,6 +66,8 @@ class FakeHistory:
         return list(self.by_day.get(from_date, []))
 
     def intraday_candles(self, key: str, *, unit: str = "minutes", interval: int = 1) -> list[Any]:
+        if self.fail:
+            raise self.fail
         return list(self.intraday_rows)
 
 
@@ -196,8 +204,9 @@ def test_reconcile_today_replaces_with_official_logs_every_difference_and_clears
     state = ReconcileState(tmp_path / "state")
     state.mark(MON, KEY)
     logs = tmp_path / "rec"
-    reports = reconcile_today(e, FakeHistory({MON: official_rows()}), candles_dir=cdir, log_dir=logs, state=state)
+    reports = reconcile_today(e, FakeHistory(intraday=official_rows()), candles_dir=cdir, log_dir=logs, state=state)
     assert reports[0].ok and reports[0].official_bars == 375 and state.pending() == []
+    assert state.status(MON, KEY) == "intraday_reconciled"
     assert all(b.source == "official" for b in e.bars(KEY)) and len(e.bars(KEY)) == 375
     stored = stored_day(cdir, KEY, MON)
     assert len(stored) == 375 and stored[M(9, 15)].volume == 7.0
@@ -211,7 +220,7 @@ def test_reconcile_today_replaces_with_official_logs_every_difference_and_clears
 def test_reconcile_today_removes_a_filled_bar_official_does_not_have(cdir: Path, tmp_path: Path) -> None:
     e = live_engine()
     rows = [r for r in official_rows() if datetime.fromisoformat(r[0]).minute not in (17,) or datetime.fromisoformat(r[0]).hour != 9]
-    reports = reconcile_today(e, FakeHistory({MON: rows}), candles_dir=cdir, log_dir=tmp_path / "rec", state=ReconcileState(tmp_path / "s"))
+    reports = reconcile_today(e, FakeHistory(intraday=rows), candles_dir=cdir, log_dir=tmp_path / "rec", state=ReconcileState(tmp_path / "s"))
     assert any(d.kind == "removed" and d.minute == M(9, 17) and d.ours_source == "filled" for d in reports[0].diffs)
     assert e.builders[KEY].bar(M(9, 17)) is None
 
@@ -243,7 +252,8 @@ def test_case8_on_startup_a_past_unreconciled_day_is_reconciled_from_the_histori
     assert len(stored) == 375 and all(b.volume == 7.0 for b in stored.values())
     assert len(stored_day(cdir, KEY, FRI)) == 375  # other days untouched
     lines = [json.loads(x) for x in (tmp_path / "rec" / "2026-10-05.reconcile.jsonl").read_text().splitlines()]
-    assert lines[-1]["mode"] == "missed" and lines[-1]["summary"]
+    assert lines[-1]["mode"] == "historical" and lines[-1]["summary"]
+    assert state.status(MON, KEY) == "final"
 
 
 def test_case8_today_is_left_to_the_running_engine_and_failures_stay_pending(cdir: Path, tmp_path: Path) -> None:
@@ -256,7 +266,7 @@ def test_case8_today_is_left_to_the_running_engine_and_failures_stay_pending(cdi
     rep = reconcile_missed(bad, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=date(2026, 10, 6))
     assert not rep[0].ok and state.pending() == [(MON, KEY)]
     ok = reconcile_missed(hist, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=date(2026, 10, 6))
-    assert ok[0].ok and state.pending() == []
+    assert ok[0].ok and state.pending() == [] and state.status(MON, KEY) == "final"
 
 
 def test_case8_several_days_and_instruments_are_each_reconciled_once(cdir: Path, tmp_path: Path) -> None:
@@ -267,7 +277,7 @@ def test_case8_several_days_and_instruments_are_each_reconciled_once(cdir: Path,
     state.mark(d2, "NSE_EQ|INE000X00000")  # not stored locally: nothing to replace, marker still cleared
     hist = FakeHistory({d1: official_rows(d1), d2: official_rows(d2)})
     reports = reconcile_missed(hist, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=date(2026, 10, 6))
-    assert len(reports) == 3 and state.pending() == []
+    assert len(reports) == 3 and state.pending() == [] and state.not_final() == []
     assert sorted(c[1] for c in hist.calls) == sorted([d1, d2, d2])
     assert len(stored_day(cdir, KEY, d1)) == 375
 
@@ -278,6 +288,14 @@ def test_reconcile_state_survives_a_corrupt_file_and_dedupes(tmp_path: Path) -> 
     s.mark(MON, KEY)
     s.mark(MON, KEY)
     assert s.pending() == [(MON, KEY)]
+    s.path.write_text(json.dumps({"pending": {MON.isoformat(): [KEY, "NSE_FO|1"]}}))
+    assert s.status(MON, KEY) == "pending" and (MON, "NSE_FO|1") in s.pending()
+    s.mark_intraday(MON, KEY)
+    s.mark(MON, KEY)  # a later live write does not move the stage backwards
+    assert s.status(MON, KEY) == "intraday_reconciled" and s.pending() == [(MON, "NSE_FO|1")]
+    s.mark_final(MON, KEY)
+    s.mark_intraday(MON, KEY)
+    assert s.status(MON, KEY) == "final"
     s.path.write_text("{not json")
     assert s.pending() == []
     s.mark(MON, "a")
@@ -285,3 +303,47 @@ def test_reconcile_state_survives_a_corrupt_file_and_dedupes(tmp_path: Path) -> 
     s.clear(MON, "never-there")
     assert s.pending() == []
     assert MS_MIN == 60_000
+
+
+def test_futures_post_close_and_oi_only_are_expected_a_volume_change_is_not(cdir: Path, tmp_path: Path) -> None:
+    fo = "NSE_FO|48704"
+    raw = [
+        {"t": m * MS_MIN, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": vol, "oi": oi}
+        for m, vol, oi in ((M(9, 15), 10.0, 1000.0), (M(9, 16), 10.0, 2000.0))
+    ]
+    df, _ = build_frame(raw, 1, keep_oi=True)
+    write_parquet(df, cdir / symbol_dir_name(fo) / "1m.parquet")
+
+    def row(h: int, mi: int, vol: float, oi: float) -> list[Any]:
+        return [iso(M(h, mi)), 100, 101, 99, 100.5, vol, oi]
+
+    hist = FakeHistory(intraday=[
+        row(9, 15, 10, 1500),   # prices and volume match; open interest does not
+        row(9, 16, 40, 2500),   # volume (and open interest) differ
+        row(15, 30, 1, 2500),
+        row(15, 39, 1, 2500),
+    ])
+    state = ReconcileState(tmp_path / "s")
+    state.mark(MON, fo)
+    reports = reconcile_intraday_day(hist, MON, [fo], candles_dir=cdir, log_dir=tmp_path / "rec", state=state)
+    assert reports[0].ok and {(d.minute, tuple(d.fields)) for d in reports[0].diffs} == {(M(9, 16), ("volume", "oi"))}
+    assert {(d.minute, d.kind) for d in reports[0].expected} == {
+        (M(9, 15), "changed"), (M(15, 30), "added"), (M(15, 39), "added"),
+    }
+    stored = stored_day(cdir, fo, MON)
+    assert M(15, 30) not in stored and M(15, 39) not in stored
+    assert stored[M(9, 15)].oi == 1500.0 and stored[M(9, 16)].volume == 40.0
+    assert state.status(MON, fo) == "intraday_reconciled"
+    lines = [json.loads(x) for x in (tmp_path / "rec" / "2026-10-05.reconcile.jsonl").read_text().splitlines()]
+    assert lines[-1]["differences"] == 1 and lines[-1]["expected"] == 3
+    assert sum(1 for x in lines if x.get("expected") is True and not x.get("summary")) == 3
+
+
+def test_an_empty_historical_fetch_leaves_the_intraday_mark_and_a_manual_run_tries_today(cdir: Path, tmp_path: Path) -> None:
+    state = ReconcileState(tmp_path / "s")
+    state.mark_intraday(MON, KEY)
+    empty = FakeHistory({})
+    rep = reconcile_missed(empty, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=MON, only_day=MON)
+    assert not rep[0].ok and empty.calls == [(KEY, MON, MON)]
+    assert state.status(MON, KEY) == "intraday_reconciled"
+    assert reconcile_missed(empty, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=MON) == []

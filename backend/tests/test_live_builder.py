@@ -241,15 +241,15 @@ def vol_ticks() -> list[Tick]:
     ]
 
 
-def test_d1_default_first_tick_baseline_excludes_pre_open_volume() -> None:
+def test_d1_default_pre_open_inclusive_baseline_includes_pre_open_volume() -> None:
     b = feed(builder(), vol_ticks())
-    assert b.bar(M(9, 15)).volume == 250  # 1200 - (1000 - 50)   # type: ignore[union-attr]
+    assert b.bar(M(9, 15)).volume == 1200  # type: ignore[union-attr]
     assert b.bar(M(9, 16)).volume == 500  # 1700 - 1200   # type: ignore[union-attr]
 
 
-def test_d1b_pre_open_inclusive_baseline() -> None:
-    b = feed(builder(open_volume_baseline="pre_open_inclusive"), vol_ticks())
-    assert b.bar(M(9, 15)).volume == 1200  # type: ignore[union-attr]
+def test_d1b_first_tick_baseline_excludes_pre_open_volume() -> None:
+    b = feed(builder(open_volume_baseline="first_tick"), vol_ticks())
+    assert b.bar(M(9, 15)).volume == 250  # 1200 - (1000 - 50)   # type: ignore[union-attr]
     assert b.bar(M(9, 16)).volume == 500  # type: ignore[union-attr]
 
 
@@ -270,12 +270,12 @@ def test_d2_after_a_reconnect_the_first_minutes_volume_is_unknown_the_next_is_kn
 def test_d3_a_decreasing_vtt_is_ignored_for_volume_but_the_price_counts() -> None:
     b = feed(builder(), [tick(9, 15, 1, 100, ltq=1, vtt=1000), tick(9, 15, 5, 101, vtt=1200), tick(9, 15, 9, 105, vtt=1100)])
     bar = b.bar(M(9, 15))
-    assert bar is not None and bar.high == 105 and bar.volume == 201 and b.counters["vtt_regress"] == 1
+    assert bar is not None and bar.high == 105 and bar.volume == 1200 and b.counters["vtt_regress"] == 1
 
 
 def test_d4_a_zero_vtt_after_a_positive_one_is_treated_as_missing() -> None:
     b = feed(builder(), [tick(9, 15, 1, 100, ltq=1, vtt=1000), tick(9, 15, 5, 101, vtt=0)])
-    assert b.counters["vtt_missing"] == 1 and b.bar(M(9, 15)).volume == 1  # type: ignore[union-attr]
+    assert b.counters["vtt_missing"] == 1 and b.bar(M(9, 15)).volume == 1000  # type: ignore[union-attr]
 
 
 def test_d5_indices_have_known_zero_volume() -> None:
@@ -286,7 +286,7 @@ def test_d5_indices_have_known_zero_volume() -> None:
 
 def test_d6_volume_does_not_depend_on_arrival_order() -> None:
     ticks = vol_ticks()
-    expected = (250.0, 500.0)
+    expected = (1200.0, 500.0)
     for perm in itertools.permutations(ticks):
         b = feed(builder(), perm)
         assert (b.bar(M(9, 15)).volume, b.bar(M(9, 16)).volume) == expected, perm  # type: ignore[union-attr]
@@ -305,7 +305,7 @@ def test_d8_i1_volume_wins_over_tick_volume_and_the_difference_is_logged() -> No
     b.on_i1(i1(9, 16, 102, 103, 102, 103, 500))  # advances -> 09:15 final
     assert b.bar(M(9, 15)).volume == 260 and b.bar(M(9, 15)).source == "i1"  # type: ignore[union-attr]
     d = [x for x in b.take_diffs() if x.minute == M(9, 15)]
-    assert len(d) == 1 and d[0].fields["volume"] == (250, 260) and d[0].ours_source == "tick"
+    assert len(d) == 1 and d[0].fields["volume"] == (1200, 260) and d[0].ours_source == "tick"
 
 
 # ------------------------------------------------------------------ E. I1
@@ -335,7 +335,7 @@ def test_e2_i1_for_the_newest_minute_updates_in_place_the_last_value_is_final() 
 def test_e3_an_i1_equal_to_the_tick_bar_logs_no_difference() -> None:
     b = feed(builder(), [tick(9, 15, 1, 100, ltq=5, vtt=1000), tick(9, 15, 30, 101, vtt=1020)])
     b.take_diffs()
-    b.on_i1(i1(9, 15, 100, 101, 100, 101, 25))  # 1020 - (1000-5) = 25
+    b.on_i1(i1(9, 15, 100, 101, 100, 101, 1020))  # pre_open_inclusive: 09:15 volume is the minute's vtt
     b.on_i1(i1(9, 16, 101, 101, 101, 101, 0))
     assert b.take_diffs() == [] and b.bar(M(9, 15)).source == "i1"  # type: ignore[union-attr]
 
@@ -413,7 +413,7 @@ def test_f1_a_late_tick_revises_a_non_final_bar_by_exchange_time() -> None:
     b.take_events()
     b.on_tick(tick(9, 15, 59, 103, ms=900, vtt=1250))  # late: ltt 09:15:59.9 arrives after 09:16:02
     bar = b.bar(M(9, 15))
-    assert bar is not None and (bar.high, bar.close, bar.volume) == (103, 103, 251)  # 1250 - (1000 - 1)
+    assert bar is not None and (bar.high, bar.close, bar.volume) == (103, 103, 1250)
     assert b.bar(M(9, 16)).volume == 50  # type: ignore[union-attr]  # baseline moved from 1100 to 1250
     assert any(e.bar.minute == M(9, 15) for e in b.take_events())
 
