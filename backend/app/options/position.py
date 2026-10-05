@@ -52,7 +52,7 @@ class PositionOptionEstimate:
     label: str
 
 
-def _priced(kind: str, spot: float, strike: float, when: int, expiry: date, vix: float, cfg: OptionModelConfig) -> float:
+def priced(kind: str, spot: float, strike: float, when: int, expiry: date, vix: float, cfg: OptionModelConfig) -> float:
     premium, *_rest = _model_premium(kind, spot, strike, when, expiry, vix, cfg, load_default_calendar())
     return float(premium)
 
@@ -92,9 +92,9 @@ def estimate_position_option(
         lots=load_default_lot_table(),
         steps=load_default_step_table(),
     )
-    entry_premium = _priced(contract.kind, entry, contract.strike, entry_time, contract.expiry, vix, cfg)
-    target_premium = _priced(contract.kind, target, contract.strike, target_time, contract.expiry, vix, cfg)
-    stop_premium = _priced(contract.kind, stop, contract.strike, stop_time, contract.expiry, vix, cfg)
+    entry_premium = priced(contract.kind, entry, contract.strike, entry_time, contract.expiry, vix, cfg)
+    target_premium = priced(contract.kind, target, contract.strike, target_time, contract.expiry, vix, cfg)
+    stop_premium = priced(contract.kind, stop, contract.strike, stop_time, contract.expiry, vix, cfg)
     if status == "target":
         exit_premium, exit_when = target_premium, target_time
     elif status in ("stop", "ambiguous"):
@@ -104,7 +104,7 @@ def estimate_position_option(
         exit_when = entry_time if exit_time is None else exit_time
         if as_of is not None and exit_when > as_of:
             return None
-        exit_premium = _priced(contract.kind, spot, contract.strike, exit_when, contract.expiry, vix, cfg)
+        exit_premium = priced(contract.kind, spot, contract.strike, exit_when, contract.expiry, vix, cfg)
     costs = get_cost_model("options")
     buy = costs.leg_cost("BUY", entry_premium, contract.lot_size, day)
     sell = costs.leg_cost("SELL", exit_premium, contract.lot_size, ist_date(exit_when))
