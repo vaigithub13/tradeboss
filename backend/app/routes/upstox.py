@@ -34,6 +34,7 @@ from app.upstox.instruments import (
     InstrumentIndex,
     SnapshotError,
     current_index,
+    snapshot_age,
     take_snapshot,
 )
 from app.upstox.status import StatusCache, TokenStatus, check_token
@@ -160,6 +161,27 @@ def instruments_snapshot(instruments_dir: InstrumentsDirDep) -> dict[str, Any]:
     except (SnapshotError, httpx.HTTPError) as e:
         raise HTTPException(status_code=502, detail=f"instrument download failed: {type(e).__name__}") from None
     return {"date": result.day.isoformat(), "created": result.created, "outcome": result.outcome}
+
+
+class SnapshotStatusOut(BaseModel):
+    latest: str | None
+    trading_days_old: int | None
+    #: older than one trading day (or none at all): the header shows a warning
+    stale: bool
+
+
+@router.get("/instruments/snapshot/status", response_model=SnapshotStatusOut)
+def instruments_snapshot_status(
+    instruments_dir: InstrumentsDirDep,
+    today: Annotated[date | None, Query(description="IST date to measure from (default: today)")] = None,
+) -> SnapshotStatusOut:
+    """How old the newest instrument snapshot is, in NSE trading days."""
+    from app.backtest.expiry import load_default_calendar
+
+    day = today or datetime.now(IST).date()
+    latest, age = snapshot_age(instruments_dir, day, load_default_calendar().is_trading_day)
+    return SnapshotStatusOut(latest=None if latest is None else latest.isoformat(), trading_days_old=age,
+                             stale=age is None or age > 1)
 
 
 # ------------------------------------------------------------------ history sync

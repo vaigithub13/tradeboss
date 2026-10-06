@@ -127,17 +127,35 @@ def test_sell_closes_the_call_at_the_bid_and_opens_a_put_at_the_ask() -> None:
 
 
 def test_square_off_at_1515_closes_the_open_position_at_the_bid() -> None:
+    """Time-based, like the backtest's 15:15 square-off: the first feed frame at or after 15:15:00 (exchange time)
+    closes the position at that moment's bid. No exchange-final minute is needed."""
     strat = Scripted({0: "BUY"})
     s = session(strat)
 
     def quotes(sess, now):
         quote_both(sess, now, ce_bid=99.0, ce_ask=100.0, pe_bid=50.0, pe_ask=51.0)
 
-    feed(s, run_minutes((9, 15), (15, 20)), quotes_at=quotes)
+    feed(s, run_minutes((9, 15), (15, 13)), quotes_at=quotes)
+    quote_both(s, ist_ms(15, 15) - 1000, ce_bid=98.0, ce_ask=98.5, pe_bid=50.0, pe_ask=51.0)
+    assert s.on_clock(ist_ms(15, 15) - 1000) is False  # 15:14:59: still open
+    assert s.book.position is not None
+    quote_both(s, ist_ms(15, 15), ce_bid=97.0, ce_ask=97.5, pe_bid=50.0, pe_ask=51.0)
+    assert s.on_clock(ist_ms(15, 15)) is True
     assert s.book.position is None
     t = s.book.trades[0]
     assert t["exit_reason"] == "square_off"
-    assert t["exit_price"] == 99.0
+    assert t["exit_price"] == 97.0 and t["exit_source"] == "quote"
+    assert t["index_exit_time"] == ist_ms(15, 15) // 1000 and t["exit_at_ms"] == ist_ms(15, 15)
+    assert s.on_clock(ist_ms(15, 16)) is False  # nothing left to close
+
+
+def test_an_exchange_final_minute_after_1515_does_not_square_off_by_itself() -> None:
+    """The minute bars no longer decide the square-off; only the clock does (a late I1 would exit late)."""
+    strat = Scripted({0: "BUY"})
+    s = session(strat)
+    feed(s, run_minutes((9, 15), (15, 17)), quotes_at=lambda sess, now: quote_both(
+        sess, now, ce_bid=99.0, ce_ask=100.0, pe_bid=50.0, pe_ask=51.0))
+    assert s.book.position is not None
 
 
 def test_no_quote_and_no_model_records_an_unfilled_signal_and_opens_nothing() -> None:
@@ -189,3 +207,15 @@ def test_save_and_load_round_trip_per_day(tmp_path) -> None:
     assert back["signals"] == payload["signals"]
     assert back["summary"]["signals"] == 1
     assert load_day(tmp_path, date(2026, 10, 6)) is None
+
+
+def test_a_signal_on_the_1510_bar_is_not_traded_because_its_fill_would_be_after_the_square_off() -> None:
+    """The backtest fills on the next bar and blocks a fill at or after 15:15 (after_square_off). The 15:10 bar
+    closes at 15:15, so its signal is recorded and not traded, here as there."""
+    strat = Scripted({k: "BUY" for k in range(71, 72)})  # bar 71 = 15:10 (09:15 + 71 x 5 min)
+    s = session(strat)
+    out = feed(s, run_minutes((9, 15), (15, 14)), quotes_at=lambda sess, now: quote_both(
+        sess, now, ce_bid=99.0, ce_ask=100.0, pe_bid=50.0, pe_ask=51.0))
+    assert strat.seen[-1] == ist_ms(15, 10) // 1000
+    assert [(r["side"], r["status"], r["note"]) for r in out] == [("BUY", "unfilled", "after the 15:15 square-off")]
+    assert s.book.position is None

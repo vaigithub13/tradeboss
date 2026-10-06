@@ -230,6 +230,17 @@ export interface Coverage {
   min_history_date: string;
 }
 
+/** How old the newest instrument snapshot is, in NSE trading days (GET /api/instruments/snapshot/status). */
+export interface SnapshotStatus {
+  latest: string | null;
+  trading_days_old: number | null;
+  stale: boolean;
+}
+
+export function fetchSnapshotStatus(signal?: AbortSignal): Promise<SnapshotStatus> {
+  return getJson<SnapshotStatus>("/api/instruments/snapshot/status", signal);
+}
+
 export function fetchTokenStatus(refresh = false, signal?: AbortSignal): Promise<TokenStatus> {
   return getJson<TokenStatus>(`/api/upstox/status${refresh ? "?refresh=true" : ""}`, signal);
 }

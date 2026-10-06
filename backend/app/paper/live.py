@@ -187,6 +187,14 @@ class PaperRunner:
         if self.state == "running" and self.session is not None:
             self.session.on_depth(depth_quotes(raw))
 
+    def on_clock(self, now_ms: int) -> None:
+        """The feed's exchange time after each frame: squares off at 15:15:00 at that moment's quote."""
+        if self.state != "running" or self.session is None or self.day is None or ist_date(now_ms) != self.day:
+            return
+        if self.session.on_clock(now_ms):
+            self._save()
+            self._sync_wanted()
+
     def on_index_bar(self, bar: dict[str, Any], *, now_ms: int) -> None:
         if self.state != "running" or self.session is None or self.day is None:
             return

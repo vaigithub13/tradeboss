@@ -53,6 +53,8 @@ def replay_into(
                 on_vix(ev.bar.time_s, ev.bar.close)
             elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in PAPER_BAR_SOURCES:
                 session.on_index_minute(bar_minute(ev), now_ms=engine.current_ts)
+        if engine.current_ts > 0:
+            session.on_clock(engine.current_ts)
 
     try:
         replay(path, on_frame)

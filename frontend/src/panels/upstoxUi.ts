@@ -1,5 +1,5 @@
 /** Pure presentation helpers for the Upstox UI (unit-tested; no React). */
-import type { InstrumentHit, SyncJob, TokenStatus } from "../api/client";
+import type { InstrumentHit, SnapshotStatus, SyncJob, TokenStatus } from "../api/client";
 
 export interface BadgeUi {
   label: string;
@@ -33,6 +33,21 @@ export function tokenBadge(token: TokenStatus | null, checkFailed: boolean): Bad
     case "unreachable":
       return { label: "data token unverified", dot: "bg-yellow-400", text: "text-yellow-300", title: token.message };
   }
+}
+
+/** Header warning for the instrument snapshot: shown only when it is older than one trading day (null = hide). */
+export function snapshotBadge(status: SnapshotStatus | null): BadgeUi | null {
+  if (!status || !status.stale) return null;
+  const fix = "Run backend/scripts/launchd/check.sh, or: cd backend && uv run python -m scripts.snapshot_instruments";
+  if (status.latest === null) {
+    return { label: "no instrument snapshot", dot: "bg-yellow-400", text: "text-yellow-300", title: `No instrument snapshot yet. ${fix}` };
+  }
+  return {
+    label: `snapshot ${status.trading_days_old} trading days old`,
+    dot: "bg-yellow-400",
+    text: "text-yellow-300",
+    title: `Newest instrument snapshot is ${status.latest}. Option and futures keys may be out of date. ${fix}`,
+  };
 }
 
 /** Is the Upstox data call usable right now? (Only a definitely bad token blocks fetching.) */

@@ -18,6 +18,7 @@ from app.backtest.context import PositionView
 from app.backtest.contracts import Signal
 from app.backtest.costs import CostTable
 from app.backtest.engine import BacktestConfig
+from app.live.model import ist_ms_of_day
 from app.live.spreads.decode import DepthQuote
 from app.options.contract import OptionContract
 from app.paper.bars import ClosedBars
@@ -152,13 +153,20 @@ class PaperSession:
         Returns the signal records made by the bars this minute closed."""
         out: list[dict[str, Any]] = []
         self._spot = float(minute["close"])
-        # minutes of bars already decided before a restart never trade or square off again
-        trading = self.resume_after is None or int(minute["time"]) >= self.resume_after + self._bar_s
-        if trading and minute_of(int(minute["time"])) >= SQUARE_OFF_MIN and self.book.position is not None:
-            self._square_off(now_ms)
         for bar in self.bars.on_minute(minute):
             out += self._on_closed_bar(bar, now_ms)
         return out
+
+    def on_clock(self, now_ms: int) -> bool:
+        """The feed's exchange time, every frame. At 15:15:00 the open position is squared off at that moment's
+        quote, as the backtest squares off at 15:15; it does not wait for an exchange-final minute.
+        True when this call closed the position."""
+        if self.book.position is None or ist_ms_of_day(now_ms) < SQUARE_OFF_MIN * 60_000:
+            return False
+        if self.resume_after is not None and now_ms < (self.resume_after + self._bar_s) * 1000:
+            return False  # a catch-up frame from before the restart: that time was already decided
+        self._square_off(now_ms)
+        return self.book.position is None
 
     def end_of_day(self) -> None:
         """The session has ended. A bar still short of its minutes is marked incomplete, never traded."""
@@ -206,7 +214,8 @@ class PaperSession:
                 self._square_off(now_ms, reason="exit")
                 rec["status"] = "filled"
             return rec
-        if minute_of(int(bar["time"])) >= SQUARE_OFF_MIN:
+        if minute_of(int(bar["time"]) + self._bar_s) >= SQUARE_OFF_MIN:
+            # the fill would come on the next bar, at or after 15:15: the backtest blocks it too (after_square_off)
             rec["note"] = "after the 15:15 square-off"
             return rec
         direction = "LONG" if sig.side == "BUY" else "SHORT"

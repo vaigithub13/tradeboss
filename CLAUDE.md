@@ -8,6 +8,7 @@ Run from the repo root unless noted. Node deps are installed by `npm run setup`;
 
 - Setup: `make setup` (or `npm run setup`)
 - Start backend (port 8000) and frontend (port 5173) together: `make dev`
+- Market hours: `npm run session` (no auto-reload; see `MARKET_DAY_CHECKLIST.md`)
 - All tests: `npm test` (runs backend pytest, then frontend Vitest)
 - Backend, one file: `cd backend && uv run pytest -q tests/test_bt_lookahead.py`
 - Backend, one test: `cd backend && uv run pytest -q tests/test_bt_lookahead.py::test_name`
@@ -39,5 +40,6 @@ The app is a local trading workstation: a FastAPI backend (`backend/app/`) serve
 - `PROJECT_PLAN.md` is the spec and the phase order. `PROGRESS.md` is the status log: add to it after each phase.
 - Critical modules (backtest engine, cost model, candle builder, resampler, risk manager) get their tests written before the code. Upstox calls are mocked in tests; tests never hit the live API.
 - Commit and push every change, then confirm a clean working tree before reporting a step as done (from `.cursor/rules/commit-before-done.mdc`). Never commit `.env` or anything under `data/`. Ask before leaving a file uncommitted.
+- Never edit code or start extra backends (demo, replay, second uvicorn) between 09:00 and 16:10 IST on a trading day. A reload restarts the live engine and the paper session. Check the time first.
 - Never print or commit the contents of `.env`. Tokens are read through `SecretStr` and must not reach logs or responses.
 - If unsure about an Upstox endpoint, read the official docs rather than guessing.

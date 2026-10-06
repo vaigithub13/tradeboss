@@ -74,6 +74,8 @@ def run_replay(day: date) -> dict:
                      "volume": b.volume or 0, "source": b.source},
                     now_ms=engine.current_ts,
                 )
+        if engine.current_ts > 0:
+            session.on_clock(engine.current_ts)
 
     frames = replay(recording_path(settings.feed_recordings_dir, day), on_frame)
     session.end_of_day()

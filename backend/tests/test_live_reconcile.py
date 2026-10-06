@@ -347,3 +347,28 @@ def test_an_empty_historical_fetch_leaves_the_intraday_mark_and_a_manual_run_tri
     assert not rep[0].ok and empty.calls == [(KEY, MON, MON)]
     assert state.status(MON, KEY) == "intraday_reconciled"
     assert reconcile_missed(empty, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=MON) == []
+
+
+def test_reconcile_today_leaves_out_keys_the_service_does_not_keep(cdir: Path, tmp_path: Path) -> None:
+    """6 Oct: option contracts subscribed only for the spread recorder have no stored candles. They were
+    reconciled (375 "added" minutes each) and then sat in the state, never final, retried every day."""
+    e = live_engine()
+    state = ReconcileState(tmp_path / "s")
+    reports = reconcile_today(e, FakeHistory(intraday=official_rows()), candles_dir=cdir, log_dir=tmp_path / "rec",
+                              state=state, extra_keys=["NSE_FO|40711"], keep=lambda k: k == KEY)
+    assert [r.key for r in reports] == [KEY]
+    assert state.status(MON, "NSE_FO|40711") is None and state.not_final() == [(MON, KEY, "intraday_reconciled")]
+
+
+def test_the_service_reconciles_chart_keys_and_stored_symbols_only(tmp_path: Path) -> None:
+    from app.live.service import LiveConfig, LiveService
+
+    cfg = LiveConfig(candles_dir=tmp_path / "candles", recordings_dir=tmp_path / "rec", state_dir=tmp_path / "state",
+                     instruments_dir=tmp_path / "inst", spread_recorder_enabled=True, spreads_dir=tmp_path / "spreads")
+    svc = LiveService(cfg, CandleStore(tmp_path / "candles"), client_factory=lambda: None,
+                      authorize=lambda: "wss://example.invalid")
+    assert svc.reconciles("NSE_INDEX|Nifty 50")  # a chart key, even before anything is stored
+    assert not svc.reconciles("NSE_FO|40711")  # a spread-recorder contract: no candles of its own
+    df, _ = build_frame([{"t": T(9, 15, day=FRI), "open": 1.0, "high": 1.0, "low": 1.0, "close": 1.0, "volume": 1.0}], 1)
+    write_parquet(df, cfg.candles_dir / symbol_dir_name("NSE_FO|40711") / "1m.parquet")
+    assert svc.reconciles("NSE_FO|40711")  # a contract whose candles are stored is reconciled as before

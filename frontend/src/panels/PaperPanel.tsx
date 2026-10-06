@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 
 import { formatRupees, markLine, paperRows } from "../paper/present";
 import { usePaperStore } from "../store/paperStore";
@@ -69,27 +69,37 @@ export function PaperPanel() {
       {error && <div className="text-red-400">{error}</div>}
       {disabled && <div className="text-yellow-300">The live feed is off, so paper trading cannot run.</div>}
 
-      <table className="w-full text-left">
+      <table className="w-full table-fixed text-left tabular-nums">
+        <colgroup>
+          <col className="w-12" />
+          <col className="w-11" />
+          <col className="w-[4.75rem]" />
+          <col className="w-20" />
+          <col />
+        </colgroup>
         <thead className="text-white/40">
           <tr>
-            <th className="py-1">Time</th>
-            <th>Side</th>
-            <th>Index</th>
-            <th>Contract</th>
-            <th>Fill</th>
-            <th>Reason / note</th>
+            <th className="py-1 pr-2 font-normal">Time</th>
+            <th className="pr-2 font-normal">Side</th>
+            <th className="pr-2 text-right font-normal">Index</th>
+            <th className="pr-2 font-normal">Contract</th>
+            <th className="text-right font-normal">Fill</th>
           </tr>
         </thead>
         <tbody>
           {paperRows(status?.signals ?? []).map((r, i) => (
-            <tr key={i} className="border-t border-white/5 align-top">
-              <td className="py-1">{r.time}</td>
-              <td>{r.side}</td>
-              <td>{r.index}</td>
-              <td>{r.contract}</td>
-              <td>{r.fill}</td>
-              <td className="text-white/50">{r.note}</td>
-            </tr>
+            <Fragment key={i}>
+              <tr className="border-t border-white/5 align-top">
+                <td className="pt-1 pr-2">{r.time}</td>
+                <td className="pt-1 pr-2">{r.side}</td>
+                <td className="pt-1 pr-2 text-right">{r.index}</td>
+                <td className="truncate pt-1 pr-2" title={r.contract}>{r.contract}</td>
+                <td className="whitespace-nowrap pt-1 text-right">{r.fill}</td>
+              </tr>
+              <tr>
+                <td colSpan={5} className="pb-1 text-white/50">{r.note}</td>
+              </tr>
+            </Fragment>
           ))}
         </tbody>
       </table>

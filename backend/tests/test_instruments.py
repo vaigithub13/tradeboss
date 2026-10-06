@@ -279,3 +279,56 @@ def test_current_index_uses_the_newest_snapshot(tmp_path: Path) -> None:
     idx = current_index(tmp_path)
     assert idx is not None and idx.snapshot_day == date(2026, 10, 3)
     assert snapshot_path(tmp_path, date(2026, 10, 3)).is_file()
+
+
+def test_download_retries_a_connection_cut_off_mid_body() -> None:
+    """6 Oct 08:44: the server closed the connection after 1,654,229 of 1,873,614 bytes and the job gave up."""
+    calls = {"n": 0}
+    waits: list[float] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise httpx.RemoteProtocolError("peer closed connection without sending complete message body")
+        return httpx.Response(200, content=b"ok")
+
+    out = download_nse(httpx.Client(transport=httpx.MockTransport(handler)), sleep=waits.append)
+    assert out == b"ok" and calls["n"] == 3 and len(waits) == 2
+
+
+def test_download_gives_up_after_its_attempts_and_does_not_retry_a_client_error() -> None:
+    waits: list[float] = []
+
+    def cut(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("slow")
+
+    with pytest.raises(httpx.ReadTimeout):
+        download_nse(httpx.Client(transport=httpx.MockTransport(cut)), sleep=waits.append)
+    assert len(waits) == 3  # four attempts
+
+    calls = {"n": 0}
+
+    def missing(request: httpx.Request) -> httpx.Response:
+        calls["n"] += 1
+        return httpx.Response(404)
+
+    with pytest.raises(httpx.HTTPStatusError):
+        download_nse(httpx.Client(transport=httpx.MockTransport(missing)), sleep=lambda s: None)
+    assert calls["n"] == 1
+
+
+def test_snapshot_age_counts_trading_days_since_the_newest_decided_day(tmp_path: Path) -> None:
+    from app.upstox.instruments import snapshot_age, snapshot_marker, snapshot_path
+
+    def trading(d: date) -> bool:
+        return d.weekday() < 5 and d != date(2026, 10, 2)  # 2 Oct 2026: Gandhi Jayanti
+
+    assert snapshot_age(tmp_path, date(2026, 10, 6), trading) == (None, None)
+    snapshot_path(tmp_path, date(2026, 10, 1)).parent.mkdir(parents=True)
+    snapshot_path(tmp_path, date(2026, 10, 1)).write_bytes(b"x")
+    # Thu 1 Oct -> Mon 5 Oct: the Friday holiday and the weekend do not count
+    assert snapshot_age(tmp_path, date(2026, 10, 5), trading) == (date(2026, 10, 1), 1)
+    assert snapshot_age(tmp_path, date(2026, 10, 6), trading) == (date(2026, 10, 1), 2)
+    snapshot_marker(tmp_path, date(2026, 10, 5)).parent.mkdir(parents=True)
+    snapshot_marker(tmp_path, date(2026, 10, 5)).write_text("2026-10-01\n")  # "unchanged" counts as taken
+    assert snapshot_age(tmp_path, date(2026, 10, 6), trading) == (date(2026, 10, 5), 1)

@@ -12,6 +12,7 @@ import { BacktestResults, TradeCard } from "./panels/BacktestResults";
 import { IndicatorsMenu } from "./panels/IndicatorsMenu";
 import { DataTokenBadge } from "./panels/DataTokenBadge";
 import { LiveBadge } from "./panels/LiveBadge";
+import { SnapshotBadge } from "./panels/SnapshotBadge";
 import { PaperPanel } from "./panels/PaperPanel";
 import { paperMarkers, type PaperSignal } from "./paper/present";
 import { usePaperStore } from "./store/paperStore";
@@ -250,6 +251,7 @@ export default function App() {
         <div className="ml-auto flex items-center gap-2">
           <LiveBadge />
           <DataTokenBadge />
+          <SnapshotBadge />
           <div className="flex items-center gap-2 rounded-full border border-white/10 bg-white/5 px-3 py-1">
             <span className={`h-2 w-2 rounded-full ${ui.dot}`} />
             <span className={`text-xs font-medium ${ui.text}`}>{ui.label}</span>

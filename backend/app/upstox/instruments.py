@@ -13,6 +13,7 @@ from __future__ import annotations
 import gzip
 import json
 import re
+import time as _time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, timezone
@@ -42,14 +43,34 @@ class SnapshotError(RuntimeError):
 
 
 # ------------------------------------------------------------------ download + snapshots
-def download_nse(http: httpx.Client | None = None, url: str = NSE_INSTRUMENTS_URL) -> bytes:
-    """The raw NSE.json.gz bytes. Public file: no Authorization header is ever sent."""
+#: waits between download attempts (seconds): a cut connection or a timeout is retried, a 4xx is not
+DOWNLOAD_BACKOFF_S = (5.0, 20.0, 60.0)
+
+
+def download_nse(
+    http: httpx.Client | None = None,
+    url: str = NSE_INSTRUMENTS_URL,
+    *,
+    sleep: Callable[[float], None] = _time.sleep,
+) -> bytes:
+    """The raw NSE.json.gz bytes. Public file: no Authorization header is ever sent.
+
+    A transport error (the connection cut mid-body, a timeout) or a 5xx is retried after each wait in
+    `DOWNLOAD_BACKOFF_S`. On 6 Oct 2026 a single cut connection during an early wake lost the day's job."""
     own = http is None
     client = http or httpx.Client(timeout=60.0, follow_redirects=True)
     try:
-        resp = client.get(url, headers={"Accept": "*/*"})
-        resp.raise_for_status()
-        return resp.content
+        for attempt in range(len(DOWNLOAD_BACKOFF_S) + 1):
+            try:
+                resp = client.get(url, headers={"Accept": "*/*"})
+                resp.raise_for_status()
+                return resp.content
+            except (httpx.TransportError, httpx.HTTPStatusError) as exc:
+                server_side = isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code >= 500
+                if attempt == len(DOWNLOAD_BACKOFF_S) or not (isinstance(exc, httpx.TransportError) or server_side):
+                    raise
+                sleep(DOWNLOAD_BACKOFF_S[attempt])
+        raise AssertionError("unreachable")
     finally:
         if own:
             client.close()
@@ -181,6 +202,22 @@ def _marker_target(base: Path, day: date) -> Path:
         return snapshot_path(base, same)
     except (OSError, ValueError):
         return snapshot_path(base, day)
+
+
+def snapshot_age(base: Path, today: date, is_trading_day: Callable[[date], bool]) -> tuple[date | None, int | None]:
+    """The newest day with a snapshot decision (a file, or an `UNCHANGED` note) and how many trading days after
+    it, up to and including `today`. (None, None) when there is no snapshot at all."""
+    done = [date.fromisoformat(p.name) for p in base.glob("*") if _DATE_DIR.match(p.name)
+            and snapshot_done(base, date.fromisoformat(p.name)) and date.fromisoformat(p.name) <= today]
+    if not done:
+        return None, None
+    latest = max(done)
+    age, d = 0, latest
+    while d < today:
+        d += timedelta(days=1)
+        if is_trading_day(d):
+            age += 1
+    return latest, age
 
 
 def snapshot_due(base: Path, now: datetime | None = None) -> bool:

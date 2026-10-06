@@ -217,3 +217,16 @@ def test_a_second_request_for_the_same_instrument_while_running_returns_the_same
     assert j1.status == "done" and len(started) == 1  # ran synchronously (threaded=False)
     j1.status = "running"
     assert jobs.start(inst, None, None) is j1 and len(started) == 1
+
+
+def test_snapshot_status_is_stale_when_older_than_one_trading_day(env: dict[str, Any]) -> None:
+    get = lambda day: env["client"].get("/api/instruments/snapshot/status", params={"today": day}).json()  # noqa: E731
+    # the fixture's snapshot is Sat 3 Oct 2026; Mon 5 Oct is one trading day later, Tue 6 Oct two
+    assert get("2026-10-05") == {"latest": "2026-10-03", "trading_days_old": 1, "stale": False}
+    assert get("2026-10-06") == {"latest": "2026-10-03", "trading_days_old": 2, "stale": True}
+
+
+def test_snapshot_status_without_any_snapshot_is_stale(env: dict[str, Any], tmp_path: Path) -> None:
+    app.dependency_overrides[deps.get_instruments_dir] = lambda: tmp_path / "none"
+    body = env["client"].get("/api/instruments/snapshot/status").json()
+    assert body == {"latest": None, "trading_days_old": None, "stale": True}

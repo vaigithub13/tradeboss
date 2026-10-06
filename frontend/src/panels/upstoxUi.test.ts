@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { InstrumentHit, SyncJob, TokenStatus } from "../api/client";
-import { dataFlag, hitDetail, jobText, tokenBadge, tokenBlocksFetching } from "./upstoxUi";
+import { dataFlag, hitDetail, jobText, snapshotBadge, tokenBadge, tokenBlocksFetching } from "./upstoxUi";
 
 const tok = (state: TokenStatus["state"], over: Partial<TokenStatus> = {}): TokenStatus => ({
   state,
@@ -82,5 +82,22 @@ describe("search rows", () => {
     expect(dataFlag(hit({ has_data: true, has_1m: true }))).toBe("1m");
     expect(dataFlag(hit({ has_data: true }))).toBe("partial");
     expect(dataFlag(hit({}))).toBe("fetch");
+  });
+});
+
+describe("snapshotBadge", () => {
+  it("is hidden while the snapshot is at most one trading day old", () => {
+    expect(snapshotBadge(null)).toBeNull();
+    expect(snapshotBadge({ latest: "2026-10-05", trading_days_old: 1, stale: false })).toBeNull();
+  });
+
+  it("warns with the age and the date when it is older", () => {
+    const b = snapshotBadge({ latest: "2026-10-03", trading_days_old: 2, stale: true });
+    expect(b?.label).toBe("snapshot 2 trading days old");
+    expect(b?.title).toContain("2026-10-03");
+  });
+
+  it("warns when there is no snapshot at all", () => {
+    expect(snapshotBadge({ latest: null, trading_days_old: null, stale: true })?.label).toBe("no instrument snapshot");
   });
 });

@@ -216,7 +216,10 @@ class LiveService:
         self.paper.on_depth(raw)  # before the engine: a bar this frame closes sees this frame's quotes
         with self._elock:
             self.engine.on_frame(raw, wall)
+            now_ms = self.engine.current_ts
         self._drain()
+        if now_ms > 0:
+            self.paper.on_clock(now_ms)  # 15:15:00 square-off at this frame's quote (exchange time)
         self._record_spreads(raw)
 
     def _on_disconnect(self) -> None:
@@ -377,7 +380,7 @@ class LiveService:
         reports = await asyncio.to_thread(
             reconcile_today, self.engine, client,
             candles_dir=self.cfg.candles_dir, log_dir=self.cfg.recordings_dir, state=self.state,
-            extra_keys=extra, engine_lock=self._elock,
+            extra_keys=extra, engine_lock=self._elock, keep=self.reconciles,
         )  # fmt: skip
         for r in reports:
             if r.ok:
@@ -478,6 +481,11 @@ class LiveService:
                 key = str(k) if k else None
         self._key_cache[symbol] = key
         return key
+
+    def reconciles(self, key: str) -> bool:
+        """A chart key, or a symbol with stored candles. Contracts subscribed only for their depth (the spread
+        recorder's set, paper quotes) have no candles of their own and are left out of the reconcile."""
+        return key in self._chart_keys() or is_stored(self.cfg.candles_dir, key)
 
     def _chart_keys(self) -> list[str]:
         keys = list(self.cfg.base_keys)

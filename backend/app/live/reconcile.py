@@ -13,6 +13,7 @@ The post-close futures minutes are not written into the store.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from datetime import date
@@ -158,15 +159,20 @@ def reconcile_today(
     state: ReconcileState,
     extra_keys: list[str] | None = None,
     engine_lock: AbstractContextManager[Any] | None = None,
+    keep: Callable[[str], bool] | None = None,
 ) -> list[ReconcileReport]:
-    """15:45: intraday candles for every instrument the engine has today (plus `extra_keys`).
+    """15:45: intraday candles for every instrument the engine has today (plus `extra_keys`), except those
+    `keep` rejects (contracts subscribed only for their depth, which have no candles of their own).
 
     A failed or empty fetch stays ``pending`` and is retried. Success marks ``intraday_reconciled``.
     """
     day = engine.day
     assert day is not None
+    keys = list(dict.fromkeys([*engine.keys(), *(extra_keys or [])]))
+    if keep is not None:
+        keys = [k for k in keys if keep(k)]
     return _reconcile_intraday(
-        client, day, list(dict.fromkeys([*engine.keys(), *(extra_keys or [])])),
+        client, day, keys,
         candles_dir=candles_dir, log_dir=log_dir, state=state, engine=engine, engine_lock=engine_lock,
     )
 
