@@ -326,9 +326,9 @@ export default function App() {
             {error}
           </div>
         )}
+        {paperOpen && <PaperPanel />}
       </main>
       <BacktestResults />
-      {paperOpen && <PaperPanel />}
       </div>
       <AnalysisPanel
         symbol={symbol}

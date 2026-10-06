@@ -16,9 +16,10 @@ IST_OFFSET_MS = 19_800_000
 MS_MIN = 60_000
 MS_DAY = 86_400_000
 
-Source = Literal["filled", "tick", "i1", "backfill", "official"]
+Source = Literal["filled", "tick", "i1", "session_end", "backfill", "official"]
 #: a bar from a higher source replaces one from a lower source; `final` = rank >= i1
-SOURCE_RANK: dict[str, int] = {"filled": 0, "tick": 1, "i1": 2, "backfill": 3, "official": 4}
+# session_end: the session's last minute, finalised from its ticks once the session has ended (see builder)
+SOURCE_RANK: dict[str, int] = {"filled": 0, "tick": 1, "i1": 2, "session_end": 2, "backfill": 3, "official": 4}
 FINAL_RANK = SOURCE_RANK["i1"]
 
 

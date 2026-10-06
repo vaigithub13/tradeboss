@@ -95,16 +95,53 @@ class PaperSession:
         self.signals: list[dict[str, Any]] = []
         self.shown: list[dict[str, Any]] = []  # the closed bars the strategy saw, live
         self.warm_bars = 0
+        self._bar_s = bar_minutes * 60
         self._side = 0  # the index position as the strategy sees it: +1 long, -1 short
         self._spot: float | None = None
         self._contract_of: dict[str, OptionContract] = {}
+        self.resume_after: int | None = None  # bars at or before this were decided before a restart (see restore)
+        self.last_bar_time: int | None = None
 
     # ---------------------------------------------------------------- input
     def warm(self, bars: Iterable[dict[str, Any]]) -> None:
-        """Run earlier closed bars through the strategy so its indicators are warm. Nothing is traded."""
+        """Run earlier closed bars through the strategy so its state is built, exactly as a backtest does
+        before its first tradable bar: the position is flat and no signal is acted on."""
+        for bar in bars:
+            ctx = _Ctx(self.timeframe, self.symbol, PositionView(side=0, lots=0, units=0, avg_price=0.0))
+            self.strategy.on_bar(dict(bar), ctx)
+            self.warm_bars += 1
+
+    def resume_state(self, bars: Iterable[dict[str, Any]]) -> None:
+        """Rebuild the strategy's state and position side from bars already decided before a restart,
+        without trading them. Used when the day's recording is not available to replay."""
         for bar in bars:
             self._step(bar)
-            self.warm_bars += 1
+
+    def restore(self, saved: dict[str, Any]) -> None:
+        """Take the state of a day file written by an earlier run of this session: signals, trades, the open
+        position, the closed bars and the last bar that was decided. The strategy is not run here."""
+        self.signals = list(saved.get("signals", []))
+        self.book.trades = list(saved.get("trades", []))
+        self.shown = list(saved.get("bars", []))
+        self.warm_bars = int(saved.get("warm_bars", 0))
+        self.bars.incomplete = set(saved.get("incomplete_bars", []))
+        self.resume_after = saved.get("last_bar_time")
+        self.last_bar_time = self.resume_after
+        o = saved.get("open")
+        if o is not None:
+            entry = Fill(**{**o["entry"], "charges": dict(o["entry"]["charges"])})
+            pos = Position(
+                direction=o["direction"], key=o["key"], symbol=o["symbol"], kind=o["kind"], strike=o["strike"],
+                expiry=date.fromisoformat(o["expiry"]), lots=o["lots"], units=o["units"], lot_size=o["lot_size"],
+                entry=entry, index_entry_time=o["index_entry_time"], reason=o["reason"],
+            )
+            self.book.position = pos
+            # The contract is only needed to price an exit by the model: its kind, strike and expiry are kept.
+            self._contract_of[pos.key] = OptionContract(
+                kind=pos.kind, strike=pos.strike, expiry=pos.expiry, cycle="weekly", lot_size=pos.lot_size,
+                symbol=pos.symbol, step=0, step_verification="restored",
+            )
+            self.wanted.add(pos.key)
 
     def on_depth(self, quotes: Iterable[DepthQuote]) -> None:
         self.quotes.on_depth(quotes)
@@ -115,7 +152,9 @@ class PaperSession:
         Returns the signal records made by the bars this minute closed."""
         out: list[dict[str, Any]] = []
         self._spot = float(minute["close"])
-        if minute_of(int(minute["time"])) >= SQUARE_OFF_MIN and self.book.position is not None:
+        # minutes of bars already decided before a restart never trade or square off again
+        trading = self.resume_after is None or int(minute["time"]) >= self.resume_after + self._bar_s
+        if trading and minute_of(int(minute["time"])) >= SQUARE_OFF_MIN and self.book.position is not None:
             self._square_off(now_ms)
         for bar in self.bars.on_minute(minute):
             out += self._on_closed_bar(bar, now_ms)
@@ -127,6 +166,11 @@ class PaperSession:
 
     # ------------------------------------------------------------ decisions
     def _on_closed_bar(self, bar: dict[str, Any], now_ms: int) -> list[dict[str, Any]]:
+        t = int(bar["time"])
+        if self.resume_after is not None and t <= self.resume_after:
+            self._step(bar)  # decided before the restart: the state and side follow, nothing is recorded again
+            return []
+        self.last_bar_time = t
         self.shown.append(bar)
         out = []
         for sig in self._step(bar):
@@ -262,6 +306,8 @@ class PaperSession:
             "open": None if p is None else {**asdict(p), "expiry": p.expiry.isoformat(), "entry": asdict(p.entry)},
             "summary": summarise(self.book.trades, signals=len(entries), unfilled=unfilled),
             "closed_bars": len(self.shown),
+            "bars": self.shown,
+            "last_bar_time": self.last_bar_time,
             "warm_bars": self.warm_bars,
             "incomplete_bars": sorted(self.bars.incomplete),
             "pre_open_ignored": self.bars.pre_open_ignored,

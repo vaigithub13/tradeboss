@@ -21,6 +21,7 @@ from app.options.contract import OptionContract, choose_contract
 from app.options.strikes import load_default_step_table
 from app.data.store import CandleStore
 from app.paper.check import end_of_day_check
+from app.paper.history import stored_warmup
 from app.paper.pricing import VixSeries, model_price_for
 from app.paper.quotes import QuoteBook
 from app.paper.session import PaperSession
@@ -42,21 +43,25 @@ class NotRunning(PaperError):
     pass
 
 
+class SettingsMismatch(PaperError):
+    """Today's file was written by another strategy or other parameters; starting would mix them."""
+
+
 def choose_nearest_weekly_atm(direction: str, spot: float, on: date) -> OptionContract:
     return choose_contract(direction, spot, on, calendar=load_default_calendar(),
                            lots=load_default_lot_table(), steps=load_default_step_table())
 
 
-def session_factory(instruments_dir: Path, vix: VixSeries) -> MakeSession:
+def session_factory(instruments_dir: Path, vix: VixSeries, store: CandleStore, symbol: str = "NIFTY50") -> MakeSession:
     """Builds a PaperSession for the live feed: the instrument master for option keys, the model for
-    fallback prices, and the feed's VIX."""
+    fallback prices, the feed's VIX, and the strategy warmed on the stored bars before the day."""
 
     def make(day: date, strategy: str, params: dict[str, Any]) -> PaperSession:
         index = current_index(instruments_dir)
         if index is None:
             raise PaperError("no instrument snapshot yet, so option contracts cannot be chosen")
         key_of = {i.symbol: i.key for i in index.instruments}
-        return PaperSession(
+        session = PaperSession(
             day=day,
             strategy=build_strategy({"strategy": strategy, "params": params}),
             choose=choose_nearest_weekly_atm,
@@ -64,17 +69,22 @@ def session_factory(instruments_dir: Path, vix: VixSeries) -> MakeSession:
             quotes=QuoteBook(),
             cost_table=load_default_cost_table(),
             model_price=model_price_for(vix.at),
+            symbol=symbol,
         )
+        session.warm(stored_warmup(store, symbol, day))
+        return session
 
     return make
 
 
 class PaperRunner:
     def __init__(self, directory: Path, make_session: MakeSession,
-                 on_wanted: Callable[[], None] | None = None) -> None:
+                 on_wanted: Callable[[], None] | None = None,
+                 catch_up: Callable[[PaperSession, date], None] | None = None) -> None:
         self.directory = directory
         self._make = make_session
         self._on_wanted = on_wanted
+        self._catch_up = catch_up  # replays the day's recorded feed into a session: trades what it has not decided
         self.state = "stopped"  # running | stopped
         self.ended_by: str | None = None
         self.day: date | None = None
@@ -86,14 +96,41 @@ class PaperRunner:
 
     # ------------------------------------------------------------------ control
     def start(self, day: date, strategy: str, params: dict[str, Any]) -> None:
+        """Start (or resume) today's strategy. The session warms on the stored bars, catches up on the day's
+        recorded feed, and resumes from today's file if there is one, so the signals do not depend on when
+        this was called."""
         if self.state == "running":
             raise AlreadyRunning("a strategy is already running")
-        self.session = self._make(day, strategy, params)  # bad strategy names raise here, before any state changes
+        saved = load_day(self.directory, day)
+        if saved is not None and (saved.get("requested_strategy") != strategy
+                                  or saved.get("requested_params") != dict(params)):
+            raise SettingsMismatch(
+                f"today already ran {saved.get('requested_strategy')} with other settings; "
+                "start the same strategy and settings, or move the file aside"
+            )
+        session = self._make(day, strategy, params)  # bad strategy names raise here, before any state changes
+        if saved is not None:
+            session.restore(saved)
+        self.session = session
         self.day, self.strategy, self.params = day, strategy, dict(params)
         self.eod_check = None
+        if self._catch_up is not None:
+            self._catch_up(session, day)
         self.state, self.ended_by = "running", None
         self._save()
         self._sync_wanted()
+
+    def resume_if_running(self, day: date) -> bool:
+        """After a restart: if today's strategy was running when the backend stopped, start it again.
+        A day that had already ended is loaded as it was, so the panel still shows it."""
+        saved = load_day(self.directory, day)
+        if saved is None or self.state == "running":
+            return False
+        if saved.get("state") != "running":
+            self._load_ended(day)
+            return False
+        self.start(day, saved["requested_strategy"], saved["requested_params"])
+        return True
 
     def stop(self, now_ms: int, reason: str = "stopped") -> None:
         if self.state != "running" or self.session is None:
@@ -108,9 +145,12 @@ class PaperRunner:
         self.session.end_of_day()
         self._end("session ended")
 
-    def reconcile_check(self, store: CandleStore, symbol: str) -> dict[str, Any] | None:
+    def reconcile_check(self, store: CandleStore, symbol: str, day: date | None = None) -> dict[str, Any] | None:
         """After the reconcile: rerun the normal backtest for the day on the official bars and keep the
-        differences with their reasons in the day's file. Only once the day has ended."""
+        differences with their reasons in the day's file. Only once the day has ended. With `day`, a runner
+        that lost the ended session to a restart rebuilds it from that day's file first."""
+        if day is not None and self.state != "running" and (self.session is None or self.day != day):
+            self._load_ended(day)
         if self.session is None or self.day is None or self.state == "running":
             return None
         s = self.session
@@ -124,6 +164,18 @@ class PaperRunner:
         )
         self._save()
         return self.eod_check
+
+    def _load_ended(self, day: date) -> None:
+        """Take an ended day from its file, without running the strategy: the check needs its signals and bars."""
+        saved = load_day(self.directory, day)
+        if saved is None or saved.get("state") == "running" or "requested_strategy" not in saved:
+            return
+        strategy, params = saved["requested_strategy"], dict(saved.get("requested_params") or {})
+        session = self._make(day, strategy, params)
+        session.restore(saved)
+        self.session, self.day, self.strategy, self.params = session, day, strategy, params
+        self.state, self.ended_by = "stopped", saved.get("ended_by")
+        self.eod_check = saved.get("eod_check")
 
     def _end(self, reason: str) -> None:
         self.state, self.ended_by = "stopped", reason
@@ -184,5 +236,11 @@ class PaperRunner:
         if self.session is None or self.day is None:
             return
         extra = {"eod_check": self.eod_check} if self.eod_check is not None else {}
-        save_day(self.directory, self.day, {"state": self.state, "ended_by": self.ended_by,
-                                            **self.session.snapshot(), **extra})
+        save_day(self.directory, self.day, {
+            "state": self.state,
+            "ended_by": self.ended_by,
+            "requested_strategy": self.strategy,
+            "requested_params": self.params,
+            **self.session.snapshot(),
+            **extra,
+        })

@@ -12,7 +12,7 @@ from typing import Any
 
 IST_OFFSET_S = 19_800
 OPEN_IST_MIN = 9 * 60 + 15
-FINAL_SOURCES = ("i1", "official")
+FINAL_SOURCES = ("i1", "session_end", "official")
 
 
 def _anchor(t: int) -> int:

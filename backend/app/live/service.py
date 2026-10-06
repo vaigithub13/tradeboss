@@ -35,13 +35,14 @@ from app.live.connection import (
 from app.live.engine import BackfillRequest, EngineConfig, LiveEngine
 from app.live.frames import OPENISH_STATUSES
 from app.live.hub import LiveHub
-from app.live.minutelog import append_jsonl, minutes_path, write_minute_log
-from app.live.model import IST, Bar, BarEvent
+from app.live.minutelog import append_jsonl, minutes_path, read_phase, write_minute_log
+from app.live.model import IST, Bar, BarEvent, ist_date
 from app.live.overlay import LiveOverlay
 from app.live.persist import ReconcileState, is_stored, upsert_bars
 from app.live.reconcile import reconcile_missed, reconcile_today
-from app.live.recorder import BINARY, RECV, SENT, Recorder
-from app.paper.live import PaperRunner, session_factory
+from app.live.recorder import BINARY, RECV, SENT, Recorder, recording_path
+from app.paper.catchup import PAPER_BAR_SOURCES, replay_into
+from app.paper.live import PaperError, PaperRunner, session_factory
 from app.paper.pricing import VixSeries
 from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, current_index
 
@@ -55,7 +56,6 @@ def symbols_dirtied_by(updated: set[str], *, future_dir: str | None, index_dir: 
     return set(updated)
 
 STALE_AFTER_S = 15.0
-PAPER_BAR_SOURCES = ("i1", "official")  # only exchange-final minutes reach the paper strategy
 PAPER_SYMBOL = "NIFTY50"  # the chart symbol whose stored candles the end-of-day check reads
 MAX_SUBSCRIPTIONS = 12
 BACKFILL_RETRY_S = 15.0
@@ -162,8 +162,9 @@ class LiveService:
         self.vix = VixSeries()
         self.paper = PaperRunner(
             cfg.paper_dir or (cfg.state_dir.parent / "paper"),
-            session_factory(cfg.instruments_dir, self.vix),
+            session_factory(cfg.instruments_dir, self.vix, store),
             on_wanted=self.refresh_subscriptions,
+            catch_up=self._paper_catch_up,
         )
         self.connection = FeedConnection(
             authorize=authorize or (lambda: authorize_feed(_token())),
@@ -184,6 +185,7 @@ class LiveService:
         self._tasks = [asyncio.create_task(self.hub.run(), name="live-hub")]  # status works even when the feed is off
         if not self.enabled:
             return
+        self._resume_paper()
         self.refresh_subscriptions()
         self._tasks += [
             asyncio.create_task(self.connection.run(), name="live-feed"),
@@ -255,6 +257,24 @@ class LiveService:
             self._spawn_backfill(req)
         for d, key in finished:
             asyncio.get_running_loop().create_task(self._persist(d, key))
+
+    def _resume_paper(self) -> None:
+        """A restart: a strategy that was running today starts again (warm, catch up, resume its position)."""
+        try:
+            if self.paper.resume_if_running(ist_date(self.now_ms())):
+                log.info("resumed the paper strategy for today from its day file")
+        except PaperError as exc:
+            log.warning("paper strategy not resumed: %s", exc)
+
+    def _paper_catch_up(self, session: Any, day: date) -> None:
+        """Bring a paper session up to now from today's recorded frames: the bars it has not decided yet trade,
+        with the quotes that were on the feed at each bar. Without a recording, the saved bars rebuild the state."""
+        path = recording_path(self.cfg.recordings_dir, day)
+        if not path.exists():
+            if session.resume_after is not None:
+                session.resume_state(session.shown)
+            return
+        replay_into(session, path, on_vix=self.vix.add, open_volume_baseline=self.cfg.open_volume_baseline)
 
     def _feed_paper(self, events: list[BarEvent]) -> None:
         """VIX feeds the model fallback; exchange-final index minutes feed the paper strategy."""
@@ -348,6 +368,7 @@ class LiveService:
         with self._elock:
             self.engine.end_day()
             day = self.engine.day
+        self._close_spreads()  # the day's spread report; a backend left running past the close never stops
         self._drain()
         await asyncio.sleep(0)
         if day is None:
@@ -364,12 +385,13 @@ class LiveService:
         self._maybe_write_close_log()
         with self._elock:
             records, summary = self.engine.minute_records(), self.engine.daily_summary()
-        write_minute_log(minutes_path(self.cfg.recordings_dir, day.isoformat()),
-                         close=self._close_records or [], reconciled=records, summary=summary)
+        log_path = minutes_path(self.cfg.recordings_dir, day.isoformat())
+        close = self._close_records if self._close_records is not None else read_phase(log_path, "close")
+        write_minute_log(log_path, close=close, reconciled=records, summary=summary)
         await self.hub.broadcast_reload({symbol_dir_name(r.key) for r in reports if r.ok})
         if reports and all(r.ok for r in reports):
             self._flags.reconciled_day = day
-            self.paper.reconcile_check(self.store, PAPER_SYMBOL)
+            self.paper.reconcile_check(self.store, PAPER_SYMBOL, day)
         return reports
 
     async def _startup_reconcile(self) -> None:

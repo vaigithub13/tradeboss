@@ -114,8 +114,8 @@ def test_start_and_end_dates_limit_trading_but_earlier_bars_warm_the_context_up(
         lengths.append(len(ctx.bars))
         return []
 
-    plan = {0: peek, 1: peek}
+    plan = {3: peek, 4: peek}  # the first three calls are Monday's warm-up bars, then Tuesday's
     strat = Scripted(plan)
     run(strat, candles, start="2026-01-06", end="2026-01-06", warmup_bars=3)
-    assert len(strat.seen) == 5 and strat.seen[0] == ist(*TUE, 9, 15) and strat.seen[-1] == ist(*TUE, 9, 19)
+    assert len(strat.seen) == 8 and strat.seen[3] == ist(*TUE, 9, 15) and strat.seen[-1] == ist(*TUE, 9, 19)
     assert lengths[0] == 3 + 1  # 3 warm-up bars from Monday + the first tradable bar

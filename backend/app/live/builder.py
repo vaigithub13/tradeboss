@@ -261,6 +261,14 @@ class CandleBuilder:
         self.ended = True
         if self._i1_latest is not None and self._i1_latest.final_how is None:
             self._finalize_i1(self._i1_latest, "session_end")
+        # The session's last minute usually has no I1 of its own (the feed's last I1 is the minute before).
+        # Once the session has ended no trade can follow it, so its complete tick bar is final now.
+        last = self.close_minute - 1
+        tick_bar = self._bars.get(last)
+        if (tick_bar is not None and tick_bar.source == "tick" and not tick_bar.partial
+                and last not in self._gap and last not in self._partial):
+            self._set_bar(Bar(last, tick_bar.open, tick_bar.high, tick_bar.low, tick_bar.close,
+                              tick_bar.volume, tick_bar.oi, "session_end"))
         if self._resume_pending:
             # we were disconnected and never saw a tick again: everything after the last bar is a gap
             self._start_resume(self.close_minute, no_break=True)

@@ -23,6 +23,7 @@ from app.live.spreads.decode import depth_quotes
 from app.options.contract import choose_contract
 from app.options.strikes import load_default_step_table
 from app.paper.check import end_of_day_check
+from app.paper.history import stored_warmup
 from app.paper.live import PaperRunner
 from app.paper.store import load_day
 from app.paper.pricing import VixSeries, model_price_for
@@ -51,13 +52,13 @@ def _choose(direction: str, spot: float, on: date):
 
 
 def run_replay(day: date) -> dict:
-    """One day's recording through the live engine into a paper session. No warm-up: the backtest for a
-    single day passes that day's bars alone to the strategy, so the live session starts from the same state."""
+    """One day's recording through the live engine into a paper session, warmed on the stored bars before the day."""
     key_of = {i.symbol: i.key for i in current_index(settings.instruments_dir).instruments}
     vix = VixSeries()
     session = PaperSession(day=day, strategy=build_strategy({"strategy": "log_xz", "params": PARAMS}),
                            choose=_choose, key_for=key_of.get, quotes=QuoteBook(),
                            cost_table=load_default_cost_table(), model_price=model_price_for(vix.at))
+    session.warm(stored_warmup(CandleStore(settings.candles_dir), SYMBOL, day))  # exactly the backtest's warm-up
     engine = LiveEngine()
 
     def on_frame(raw: bytes, wall_ms: int, idx: int) -> None:
@@ -66,7 +67,7 @@ def run_replay(day: date) -> dict:
         for ev in engine.take_events():
             if ev.key == VIX_KEY:
                 vix.add(ev.bar.time_s, ev.bar.close)
-            elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in ("i1", "official"):
+            elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in ("i1", "session_end", "official"):
                 b = ev.bar
                 session.on_index_minute(
                     {"time": b.time_s, "open": b.open, "high": b.high, "low": b.low, "close": b.close,
@@ -117,7 +118,7 @@ def test_5_oct_live_and_backtest_signals_match(oct5) -> None:
         symbol=SYMBOL,
         make_strategy=lambda: build_strategy({"strategy": "log_xz", "params": PARAMS}),
     )
-    assert report["live_signals"] == report["backtest_signals"] == 1
+    assert report["live_signals"] == report["backtest_signals"] == 4
     assert report["differences"] == []
 
 
@@ -142,4 +143,4 @@ def test_5_oct_reconcile_check_is_saved_into_the_day_file(oct5, tmp_path) -> Non
     runner.finish_day()
     report = runner.reconcile_check(CandleStore(settings.candles_dir), SYMBOL)
     assert report is not None and report["differences"] == []
-    assert load_day(tmp_path, DAY5)["eod_check"]["live_signals"] == 1
+    assert load_day(tmp_path, DAY5)["eod_check"]["live_signals"] == 4

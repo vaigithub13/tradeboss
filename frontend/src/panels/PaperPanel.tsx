@@ -27,7 +27,7 @@ export function PaperPanel() {
   const summary = status?.summary ?? null;
 
   return (
-    <aside className="flex w-96 shrink-0 flex-col gap-3 overflow-y-auto border-l border-white/10 bg-[#0b0f14] p-3 text-xs text-white/80">
+    <aside className="flex h-full w-96 shrink-0 flex-col gap-3 overflow-y-auto border-l border-white/10 bg-[#0b0f14] p-3 text-xs text-white/80">
       <div>
         <h2 className="text-sm font-semibold text-white">Live signals (paper)</h2>
         <p className="text-white/50">No orders are sent. Fills are paper: live quotes, or the model flagged as modelled.</p>

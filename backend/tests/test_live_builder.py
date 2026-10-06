@@ -561,3 +561,25 @@ def test_j1_futures_carry_the_oi_of_the_last_tick_by_exchange_time() -> None:
     assert b.bar(M(9, 15)).oi == 1010.0  # type: ignore[union-attr]
     stock = feed(builder(has_oi=False), [tick(9, 15, 1, 100, oi=5.0)])
     assert stock.bar(M(9, 15)).oi is None  # type: ignore[union-attr]
+
+
+# ------------------------------------------------------------------ session end: the last minute
+def test_session_end_finalises_the_last_minute_from_its_complete_ticks_when_no_i1_arrived() -> None:
+    """Live 5 Oct: the feed's last I1 was 15:28, and 15:29 had only ticks. Session-end evidence makes the
+    15:29 tick bar final (source session_end), as the builder finalises the last I1."""
+    b = builder()
+    feed(b, [tick(15, 28, 5, 100.0), tick(15, 29, 3, 101.0), tick(15, 29, 40, 103.0)])
+    b.take_events()
+    b.on_session_end()
+    ev = [e for e in b.take_events() if e.bar.minute == M(15, 29)]
+    assert ev and ev[-1].bar.source == "session_end"
+    assert ev[-1].bar.final and ohlc(ev[-1].bar) == (101.0, 103.0, 101.0, 103.0)
+
+
+def test_session_end_does_not_finalise_a_last_minute_with_a_connection_gap() -> None:
+    b = builder()
+    feed(b, [tick(15, 29, 3, 101.0)])
+    b._gap.add(M(15, 29))  # a gap the builder has not resolved
+    b.take_events()
+    b.on_session_end()
+    assert all(e.bar.source != "session_end" for e in b.take_events())

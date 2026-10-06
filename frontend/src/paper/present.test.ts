@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRupees, markLine, paperMarkers, paperRows, shortContract, type PaperSignal } from "./present";
+import { formatRupees, markLine, paperMarkers, paperRows, shortContract, strikeOf, type PaperSignal } from "./present";
 
 const T0 = 1791171900; // 09:15 IST on 5 Oct 2026
 
@@ -27,12 +27,19 @@ describe("shortContract", () => {
   });
 });
 
+describe("strikeOf", () => {
+  it("is the strike alone, for a short chart label", () => {
+    expect(strikeOf("NIFTY 22600 CE 06 OCT 26")).toBe("22600");
+    expect(strikeOf(null)).toBe("");
+  });
+});
+
 describe("paperMarkers", () => {
   it("marks filled entries, snapped to the candle that contains them", () => {
     const m = paperMarkers([signal({})], [T0, T0 + 300, T0 + 600])[0];
     expect(m?.time).toBe(T0 + 300);
     expect(m?.position).toBe("belowBar");
-    expect(m?.text).toBe("L 22600 CE");
+    expect(m?.text).toBe("L 22600");
   });
 
   it("uses a different colour for a modelled fill", () => {

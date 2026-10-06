@@ -35,6 +35,11 @@ export function shortContract(symbol: string | null): string {
   return parts.length >= 3 ? `${parts[1]} ${parts[2]}` : symbol;
 }
 
+/** The strike alone, for a chart label that must stay short: "NIFTY 22600 CE 06 OCT 26" -> "22600" */
+export function strikeOf(symbol: string | null): string {
+  return symbol ? symbol.split(" ")[1] ?? "" : "";
+}
+
 /** Entry markers for the filled signals, snapped to the candle that contains each one. */
 export function paperMarkers(signals: readonly PaperSignal[], candleTimes: readonly number[]): SeriesMarker<Time>[] {
   const out: SeriesMarker<Time>[] = [];
@@ -48,7 +53,7 @@ export function paperMarkers(signals: readonly PaperSignal[], candleTimes: reado
       position: buy ? "belowBar" : "aboveBar",
       shape: buy ? "arrowUp" : "arrowDown",
       color: s.fill_source === "modelled" ? "#eab308" : buy ? "#26a69a" : "#ef5350",
-      text: `${buy ? "L" : "S"} ${shortContract(s.symbol)}`,
+      text: `${buy ? "L" : "S"} ${strikeOf(s.symbol)}`,
     });
   }
   return out;

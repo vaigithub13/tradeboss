@@ -217,6 +217,13 @@ def _build_series(cfg: BacktestConfig, source: CandleSource) -> tuple[_Series, i
     return _Series(bars[lo:hi], out_subs, ends, lasts, first - lo, coarse), base, warnings
 
 
+def warm_bars(cfg: BacktestConfig, source: CandleSource) -> list[dict[str, Any]]:
+    """The bars a backtest warms its strategy on before its first tradable bar: exactly the window
+    `run_backtest` uses, so a live session that warms on these starts from the same state."""
+    series, _base, _warnings = _build_series(cfg, source)
+    return list(series.bars[: series.first])
+
+
 def _note_vwap_fallback(warnings: list[str], store: Any, symbol: str, cfg: BacktestConfig, series: _Series) -> None:
     """Count signal bars whose futures VWAP used the other contract, and say so on the result."""
     tf_min = INTRADAY_MIN.get(cfg.timeframe)
@@ -344,12 +351,16 @@ def run_backtest(
     for k in range(n):
         bar = bars[k]
         cur_day[0] = dates[k]
+        if k == 0:
+            strategy.on_start(ctx)
         if k < first:
+            # Strategy warm-up: the strategy builds its state on these bars exactly as it does on tradable
+            # bars, but trading is blocked: the position is flat and any signal is dropped (no order is placed).
             history.append(bar)
             hub.advance(k)
+            ctx._set_time(ends[k])
+            strategy.on_bar(dict(bar), ctx)
             continue
-        if k == first:
-            strategy.on_start(ctx)
         counters["bars"] += 1
         if on_progress is not None and (counters["bars"] == 1 or counters["bars"] % 50 == 0):
             on_progress(counters["bars"], max(n - first, 1))

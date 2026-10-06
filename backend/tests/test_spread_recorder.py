@@ -362,3 +362,26 @@ def test_s9_every_two_sided_snapshot_is_in_one_bin_and_fill_costs_sit_beside_the
     assert rep["moneyness"]["ATM"]["spread"]["n"] == 1
     assert rep["moneyness"]["OTM1"]["spread"]["n"] == 1
     assert rep["moneyness"]["ITM2"]["spread"]["n"] == 1
+
+
+def test_the_15_45_reconcile_writes_the_spread_report_without_waiting_for_shutdown(tmp_path: Path) -> None:
+    """Live 6 Oct: the report was only written on backend shutdown, so a backend left running had none."""
+    import asyncio
+
+    class FakeSpreads:
+        def __init__(self) -> None:
+            self.closed_with: list | None = None
+
+        def close(self, bars: list) -> None:
+            self.closed_with = bars
+
+    cfg = LiveConfig(
+        candles_dir=tmp_path / "candles", recordings_dir=tmp_path / "rec", state_dir=tmp_path / "state",
+        instruments_dir=tmp_path / "inst", spread_recorder_enabled=True, spreads_dir=tmp_path / "spreads",
+    )
+    svc = LiveService(cfg, CandleStore(tmp_path / "candles"), client_factory=lambda: object(),
+                      authorize=lambda: "wss://example.invalid")
+    fake = FakeSpreads()
+    svc._spreads = fake  # type: ignore[assignment]
+    asyncio.run(svc.reconcile_now())
+    assert fake.closed_with == []

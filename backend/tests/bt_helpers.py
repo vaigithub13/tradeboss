@@ -61,7 +61,7 @@ def minute_index(h: int, m: int) -> int:
 class Scripted(Strategy):
     """Emits the signals listed in `plan` (bar number -> signals or a callable), nothing else.
 
-    Bar numbers count the on_bar calls made to this strategy (0 = the first tradable bar)."""
+    Bar numbers count the on_bar calls made to this strategy, warm-up bars included (0 = the first bar it is shown)."""
 
     name = "scripted"
 

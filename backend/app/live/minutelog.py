@@ -38,6 +38,20 @@ def write_minute_log(
     os.replace(tmp, path)
 
 
+def read_phase(path: Path, phase: str) -> list[dict]:
+    """The rows of one phase, without the `phase` field. A restart loses the close rows held in memory;
+    the reconcile reads them back from here so its rewrite keeps them."""
+    if not path.exists():
+        return []
+    rows = []
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            row = json.loads(line)
+            if row.pop("phase", None) == phase:
+                rows.append(row)
+    return rows
+
+
 def append_jsonl(path: Path, rows: list[dict]) -> None:
     if not rows:
         return

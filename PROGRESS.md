@@ -498,3 +498,30 @@ The previous full-window 5-minute result (1,098 trades, index 630,280.25, option
 - Panel: a Paper button in the header. It has a strategy picker, Start/Stop, the open P&L at the bid, the day's totals, and the signals log. Filled signals are markers on the NIFTY chart.
 - After the reconcile, the end-of-day check reruns the normal backtest on the official bars and saves the differences in the day's file.
 - NOT built: browser notifications and sound, the weekly view in the panel (the route exists), and the 6 Oct replay (no 6 Oct recording on this machine, so that test skips). `SPREAD_RECORDER_ENABLED` is not set in the local `.env`.
+
+## Strategy warm-up, restart resume, session-end bar (2026-10-06)
+
+- Warm-up: a backtest now shows its strategy the `warmup_bars` before its first tradable bar (default 500), with trading blocked: the position is flat and any signal is dropped. `on_start` runs before the first warm-up bar. Walk-forward windows are child backtests and warm the same way. A paper session warms on exactly those stored bars (`paper/history.py` `stored_warmup`, from `engine.warm_bars`).
+- Proof (`tests/test_bt_warmup.py`): on a seeded 60-day series, a run from T gives the same signals after T as a longer run sliced at T; with `warmup_bars=0` they differ (control); warm-up bars never trade.
+- Before/after (research window 2024-10-01 .. 2026-06-30, normal + weekend_full; holdout not run, peek count unchanged). Only Log XZ changes, because it keeps its own RMA and log history; the other strategies already read history through `ctx.bars`.
+
+| run | before | after |
+|---|---:|---:|
+| Log XZ 5m index: trades / net ₹ | 1,675 / 295,903.75 | 1,677 / 294,763.75 |
+| Log XZ 5m delta-adjusted options: net ₹ | −170,993.47 | −172,115.18 |
+| Walk-forward 094b876a: trades / option net ₹ | 89 / 14,923.77 | 83 / 17,438.05 |
+| Walk-forward 38c684f8: trades / option net ₹ | 553 / −45,317.33 | 554 / −48,054.47 |
+| Pivot Extension, Price Channel, EMA crossover, Supertrend, ORB; walk-forward 79ec2b09, 7d2d6e80, a6757550 | | unchanged |
+
+- 5 Oct replay with warm-up: 4 signals (10:45 SELL, 11:10 BUY, 11:15 SELL, 13:15 BUY), all modelled (no option depth that day); live and backtest agree, no differences.
+- Session end: the session's last minute (15:29) usually has no I1. Once the session has ended, its complete tick bar becomes final with source `session_end`, so the 15:25 bar is no longer withheld. A minute with a connection gap stays unfinalised.
+- Restart: a strategy that was running today starts again on restart: it warms, restores today's file (signals, trades, open position, last decided bar), and catches up from today's recording. Bars decided before the restart never trade again. A start with another strategy or other parameters on the same day is refused. A day that had already ended is loaded as it was, so the panel still shows it, and the 15:45 check still runs and is saved (on 6 Oct a reload between 15:30 and 15:45 had left the day without its check).
+- The minute log keeps its close phase when the reconcile runs in a process that did not write it.
+- The 15:45 reconcile writes the spread report (`data/spreads/reports/<day>.md` and `.json`); before, only a backend shutdown did.
+
+## 6 Oct 2026: first day with option depth (SPREAD_RECORDER_ENABLED=true)
+
+- Spreads, ATM, expiry day (DTE 0, nearest weekly only), one snapshot per contract per second: CE median 0.10 / p90 0.15 pt, PE 0.10 / 0.15. 09:15-11:00 is wider (0.15 / 0.20). 1-lot fill cost vs mid (lot 65): median 0.05 pt each side, round trip ≈ ₹6.50 (p90 ₹9.75); in fast minutes and in the 5 minutes after the 09:30 range break (09:40-09:45) 0.075 pt each side, round trip ≈ ₹9.75 (p90 ₹13.00). Level 1 covered one lot in every ATM snapshot.
+- Reconcile: 5 Oct is final. 6 Oct is intraday_reconciled with 0 differences for NIFTY, VIX and the front future.
+- Paper (Log XZ, RMA 14, 5m, warmed): one signal, 14:35 SELL, bought NIFTY 22700 PE 06 OCT 26 at the ask 28.85 (mid 28.825), squared off 15:17 at the bid 10.30. Gross −1,205.75, charges 49.33, net −1,255.08. Both legs from live quotes; no modelled leg. The replay of the recording gives the same signal and fills. End-of-day check against the official bars: 1 live, 1 backtest, no differences.
+- Open: the ten option keys subscribed for depth have no stored candles, so the reconcile counts each official minute as "added" and the keys stay not final (they will be retried daily, and the contracts have expired). The square-off fills at the first exchange-final minute at or after 15:15, which was 15:17 today.
