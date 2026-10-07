@@ -573,3 +573,24 @@ Research only; the running paper strategy is unchanged. Log XZ RMA 14, 5m, optio
 - New: option-premium exits (`premium_target_pct`, `premium_stop_pct` on a run and in a walk-forward grid; the backtest form has "Premium target %" and "Premium stop %"). They walk the contract's real 1m bars; a minute touching both levels exits at the stop; a gap through a level exits at the open; slippage applies. Every option trade now reports `max_open_gross` and `given_back`. Log XZ's own target/stop inputs are in the catalog (checkbox + points).
 - Fixed while running: the walk-forward's run-time check dropped premium combinations silently (77 of 105 tried).
 - Paper: two strategies at once (slots 1 and 2), each with its own session, position, P&L and day files (`data/paper/` and `data/paper/slot2/`). The panel shows both; slot 2's chart markers start with "2·". Paper does not apply a strategy's own target or stop yet, so a start with `use_target` / `use_stop` is refused (400) rather than run as something else.
+
+## Price Channel at measured slippage 0.2 (2026-10-07, after the close)
+
+Options, real premiums, delta-adjusted fills, sessions normal + weekend_full, 2024-10-03 .. 2026-06-30. Holdout not run, peek count 0. The slippage 1.0 rows are rerun on today's code; they reproduce the earlier results exactly (16,621.49 and 11,318.45 on 2026-10-04).
+
+| run | slippage | option net ₹ | trades | win % | max DD ₹ | slippage cost ₹ |
+|---|---:|---:|---:|---:|---:|---:|
+| 5m length 20 | 0.2 | 128,704.61 | 1,089 | 36.8 | 62,099 | 28,182 |
+| 5m length 20 | 1.0 | 16,621.49 | 1,089 | 35.6 | 109,723 | 140,323 |
+| 15m length 40 | 0.2 | 45,299.77 | 342 | 43.6 | 80,718 | 8,650 |
+| 15m length 40 | 1.0 | 11,318.45 | 342 | 42.1 | 95,138 | 42,648 |
+
+Walk-forward (6-month train, 2-month test, step 2, 7 windows), out-of-sample option net:
+
+| grid | slippage 0.2 | slippage 1.0 |
+|---|---:|---:|
+| 5m L20 and 15m L40 (2 combos) | +27,100.26 (373 trades, max DD 60,873) | −30,189.09 (306 trades) |
+| length 20/40 × 5m/15m (4 combos) | +20,913.11 (426 trades, max DD 74,438) | −30,189.09 (306 trades; the stored 2026-10-03 run was −30,607.41 on older code) |
+
+- 0.2, 2 combos, test windows: +30,854 (15m L40), +423 (15m L40), −17,990 (5m L20), −5,671 (5m L20), no choice, no choice, +19,483 (5m L20). Two windows carry the result. The last window chose 5m length 20.
+- Slippage: 0.2 premium points per leg is the measured ATM figure from 2 days of spread data (6 Oct DTE 0: one-lot fill cost 0.05 each side; 7 Oct DTE 4: 0.175 each side). Re-check when 10 sessions across different DTEs are recorded. At 1.0 the same walk-forward is negative, so this result depends on that measurement.
