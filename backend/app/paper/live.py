@@ -177,6 +177,11 @@ class PaperRunner:
         self.state, self.ended_by = "stopped", saved.get("ended_by")
         self.eod_check = saved.get("eod_check")
 
+    def flush(self) -> None:
+        """Write the day's file now (backend shutdown). A running strategy stays `running` in the file, so a
+        restart resumes it."""
+        self._save()
+
     def _end(self, reason: str) -> None:
         self.state, self.ended_by = "stopped", reason
         self._save()

@@ -74,3 +74,23 @@ def test_weekly_summary_adds_up_the_days_of_the_iso_week(tmp_path) -> None:
     assert week["totals"]["trades"] == 3 and week["totals"]["wins"] == 1
     assert week["totals"]["net"] == 100.0 and week["totals"]["modelled_legs"] == 1
     assert [d["date"] for d in week["days"]] == ["2026-10-05", "2026-10-07"]
+
+
+def test_a_dry_run_day_is_listed_but_left_out_of_the_forward_test_totals(tmp_path) -> None:
+    """6 and 7 Oct 2026 are marked dry runs (7 Oct ran cold). The mark lives in its own file, so the runner
+    rewriting a day file never drops it."""
+    from app.paper.store import dry_runs, mark_dry_run
+
+    mon = date(2026, 10, 5)
+    for d, net in ((mon, 200.0), (mon + timedelta(days=1), -1255.08), (mon + timedelta(days=2), -847.52)):
+        save_day(tmp_path, d, {"summary": {"trades": 1, "wins": 0, "gross": net, "charges": 0.0, "net": net}})
+    mark_dry_run(tmp_path, mon + timedelta(days=1), "dry run (cold start)")
+    mark_dry_run(tmp_path, mon + timedelta(days=2), "dry run (cold start)")
+    save_day(tmp_path, mon + timedelta(days=2), {"summary": {"trades": 1, "net": -847.52}})  # a later rewrite
+    assert dry_runs(tmp_path) == {"2026-10-06": "dry run (cold start)", "2026-10-07": "dry run (cold start)"}
+
+    week = weekly_summary(tmp_path, mon)
+    assert [(d["date"], d["dry_run"]) for d in week["days"]] == [
+        ("2026-10-05", None), ("2026-10-06", "dry run (cold start)"), ("2026-10-07", "dry run (cold start)")]
+    assert week["totals"]["net"] == 200.0 and week["totals"]["trades"] == 1
+    assert week["excluded"] == ["2026-10-06", "2026-10-07"]

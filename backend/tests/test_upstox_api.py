@@ -118,7 +118,11 @@ def _nifty(env: dict[str, Any]):  # noqa: ANN202
     return inst
 
 
-def test_search_kind_filter_and_validation(env: dict[str, Any]) -> None:
+def test_search_kind_filter_and_validation(env: dict[str, Any], monkeypatch: pytest.MonkeyPatch) -> None:
+    # the sample's options expire on 6 Oct 2026 and search hides expired contracts: search as of the snapshot day
+    import app.upstox.instruments as inst
+
+    monkeypatch.setattr(inst, "ist_now", lambda: ist(2026, 10, 3, 9, 0))
     c = env["client"]
     kinds = {i["kind"] for i in c.get("/api/instruments/search", params={"kind": "option", "limit": 50}).json()["items"]}
     assert kinds == {"option"}

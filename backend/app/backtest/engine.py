@@ -143,7 +143,10 @@ class _Series:
     coarse_bars: int
 
 
-def _build_series(cfg: BacktestConfig, source: CandleSource) -> tuple[_Series, int, list[str]]:
+def _build_series(
+    cfg: BacktestConfig, source: CandleSource, *, warm_only: bool = False
+) -> tuple[_Series, int, list[str]]:
+    """`warm_only`: only the warm-up bars before `cfg.start`, found by date, so the day's own bars are not needed."""
     start, end = _parse_date("start", cfg.start), _parse_date("end", cfg.end)
     tf = cfg.timeframe
     tf_min = INTRADAY_MIN.get(tf)
@@ -190,12 +193,17 @@ def _build_series(cfg: BacktestConfig, source: CandleSource) -> tuple[_Series, i
 
     # tradable range
     dates = [ist_date(b["time"]) for b in bars]
-    idx_ok = [i for i, d in enumerate(dates) if (start is None or d >= start) and (end is None or d <= end)]
-    if not idx_ok:
-        return _Series([], [], [], [], 0, 0), base, ["no bars in the requested range"]
-    first, last = idx_ok[0], idx_ok[-1]
-    lo = max(0, first - cfg.warmup_bars)
-    hi = last + 1
+    if warm_only:
+        # the bars dated before the start: the same window a run over that day warms on once it is stored
+        first = sum(1 for d in dates if start is not None and d < start)
+        lo, hi = max(0, first - cfg.warmup_bars), first
+    else:
+        idx_ok = [i for i, d in enumerate(dates) if (start is None or d >= start) and (end is None or d <= end)]
+        if not idx_ok:
+            return _Series([], [], [], [], 0, 0), base, ["no bars in the requested range"]
+        first, last = idx_ok[0], idx_ok[-1]
+        lo = max(0, first - cfg.warmup_bars)
+        hi = last + 1
     coarse = 0
     out_subs: list[list[Sub]] = []
     ends: list[int] = []
@@ -220,7 +228,7 @@ def _build_series(cfg: BacktestConfig, source: CandleSource) -> tuple[_Series, i
 def warm_bars(cfg: BacktestConfig, source: CandleSource) -> list[dict[str, Any]]:
     """The bars a backtest warms its strategy on before its first tradable bar: exactly the window
     `run_backtest` uses, so a live session that warms on these starts from the same state."""
-    series, _base, _warnings = _build_series(cfg, source)
+    series, _base, _warnings = _build_series(cfg, source, warm_only=True)
     return list(series.bars[: series.first])
 
 

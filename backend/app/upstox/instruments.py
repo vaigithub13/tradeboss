@@ -391,3 +391,11 @@ def current_index(base: Path) -> InstrumentIndex | None:
         hit = InstrumentIndex(load_instruments(path), day)
         _cache[cache_key] = hit
     return hit
+
+
+def index_on(base: Path, day: date) -> InstrumentIndex | None:
+    """Index of the newest snapshot dated on or before `day` (a replay of a past day needs that day's contracts)."""
+    days = [d for d in list_snapshots(base) if d <= day]
+    if not days:
+        return None
+    return InstrumentIndex(load_instruments(snapshot_path(base, days[-1])), days[-1])

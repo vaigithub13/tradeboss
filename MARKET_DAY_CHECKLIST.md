@@ -4,7 +4,8 @@ For every trading day (first used for Monday sessions). Times are IST.
 
 ## Freeze: 09:00–16:10
 
-- Run the app with `npm run session`, never `npm run dev`. The session backend has no auto-reload, and the
+- Run the app with `npm run session`, never `npm run dev`. The session backend (`app/serve.py`) has no
+  auto-reload and shuts down cleanly on one Ctrl+C, and the
   frontend is a production build served by `vite preview` (same `/api` and `/ws` proxy, no hot reload).
 - Do not edit code in this repo, and do not start a second backend, a demo backend or a replay script
   that opens the feed. A reload in the middle of the day restarts the live engine and the paper session.
@@ -30,4 +31,8 @@ For every trading day (first used for Monday sessions). Times are IST.
 - 15:45: the reconcile runs (retried until 16:30). Check `data/live-state/reconcile.json`: today
   `intraday_reconciled`, yesterday `final`.
 - The spread report is in `data/spreads/reports/<day>.md`; the paper day file `data/paper/<day>.json` has `eod_check`.
-- After 16:10: stop `npm run session` (Ctrl-C). `npm run dev` and code changes are allowed again.
+- After 16:10: stop `npm run session` with ONE Ctrl+C and wait for "Application shutdown complete" (at most a few
+  seconds). The shutdown writes the spread report and the paper day file. Stopping before 15:45 logs a warning:
+  the reconcile, the paper end-of-day check and the full-day spread report then do not run.
+- The backend log is `data/logs/backend-YYYY-MM-DD.log` (start, stop, warnings, errors, and a traceback on a crash).
+- After that, `npm run dev` and code changes are allowed again.

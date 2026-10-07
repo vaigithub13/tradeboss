@@ -159,6 +159,7 @@ class LiveService:
             on_views_changed=self.refresh_subscriptions,
         )
         self._spreads = None
+        self._day_files_closed = False
         self.vix = VixSeries()
         self.paper = PaperRunner(
             cfg.paper_dir or (cfg.state_dir.parent / "paper"),
@@ -204,8 +205,28 @@ class LiveService:
         if self.connection.lock is not None:
             self.connection.lock.release()
         self.recorder.close()
-        self._close_spreads()
+        self.close_day_files()
         set_overlay(None)
+
+    def close_day_files(self) -> None:
+        """On the way out: the spread report and the paper day file. Once only; called by `stop` and by the exit
+        hook, which still runs when a second Ctrl+C makes uvicorn skip the app's shutdown."""
+        if self._day_files_closed:
+            return
+        self._day_files_closed = True
+        local = datetime.fromtimestamp(self.now_ms() / 1000, IST)
+        if (self.engine.day == local.date() and local.time() < _hhmm(self.cfg.reconcile_at)
+                and self._flags.reconciled_day != local.date()):
+            log.warning(
+                "backend stopped at %s, before %s: today's reconcile, the paper end-of-day check and the full-day "
+                "spread report will not run unless the backend is started again before %s",
+                local.strftime("%H:%M"), self.cfg.reconcile_at, self.cfg.reconcile_until,
+            )
+        for name, step in (("spread report", self._close_spreads), ("paper day file", self.paper.flush)):
+            try:
+                step()
+            except Exception as exc:  # noqa: BLE001 - one failure must not stop the other
+                log.error("%s on shutdown failed: %s: %s", name, type(exc).__name__, exc)
 
     # ------------------------------------------------------------------ feed callbacks (loop thread)
     def _on_frame(self, raw: bytes, wall: int) -> None:

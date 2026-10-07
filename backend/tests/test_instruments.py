@@ -332,3 +332,15 @@ def test_snapshot_age_counts_trading_days_since_the_newest_decided_day(tmp_path:
     snapshot_marker(tmp_path, date(2026, 10, 5)).parent.mkdir(parents=True)
     snapshot_marker(tmp_path, date(2026, 10, 5)).write_text("2026-10-01\n")  # "unchanged" counts as taken
     assert snapshot_age(tmp_path, date(2026, 10, 6), trading) == (date(2026, 10, 5), 1)
+
+
+def test_index_on_a_past_day_uses_the_newest_snapshot_dated_on_or_before_it(tmp_path: Path) -> None:
+    """A replay of 6 Oct needs 6 Oct's contracts: the 7 Oct file no longer lists the weekly that expired on 6 Oct."""
+    from app.upstox.instruments import index_on
+
+    for d in (date(2026, 10, 3), date(2026, 10, 7)):
+        take_snapshot(tmp_path, now=datetime(d.year, d.month, d.day, 9, 0, tzinfo=IST), fetch=make_master_bytes,
+                      force=True)
+    assert index_on(tmp_path, date(2026, 10, 6)).snapshot_day == date(2026, 10, 3)
+    assert index_on(tmp_path, date(2026, 10, 7)).snapshot_day == date(2026, 10, 7)
+    assert index_on(tmp_path, date(2026, 10, 2)) is None

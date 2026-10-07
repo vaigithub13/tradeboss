@@ -45,6 +45,9 @@ class Settings(BaseSettings):
     # Startup fallback: download today's instrument file if the daily job has not (see launchd/)
     snapshot_on_startup: bool = True
 
+    # Backend log: data/logs/backend-YYYY-MM-DD.log next to the terminal (tests turn it off in conftest)
+    backend_log_file: bool = True
+
     # ---- Phase 2b: live feed (one connection, max) -------------------------------------------
     live_feed_enabled: bool = True
     # 09:15 bar volume baseline: "pre_open_inclusive" (default; 5 Oct was 260 under official)

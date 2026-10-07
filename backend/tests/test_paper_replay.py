@@ -29,7 +29,7 @@ from app.paper.store import load_day
 from app.paper.pricing import VixSeries, model_price_for
 from app.paper.quotes import QuoteBook
 from app.paper.session import PaperSession
-from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, current_index
+from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, index_on
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SYMBOL = "NIFTY50"
@@ -39,8 +39,8 @@ PARAMS: dict = {}  # Log XZ defaults: RMA 14, 5m
 def _missing(day: date, *, need_candles: bool) -> str | None:
     if not recording_path(settings.feed_recordings_dir, day).exists():
         return f"no feed recording for {day.isoformat()} in data/"
-    if current_index(settings.instruments_dir) is None:
-        return "no instrument snapshot in data/"
+    if index_on(settings.instruments_dir, day) is None:
+        return f"no instrument snapshot on or before {day.isoformat()} in data/"
     if need_candles and not (settings.candles_dir / SYMBOL / "1m.parquet").exists():
         return "no stored NIFTY 1m candles in data/"
     return None
@@ -53,7 +53,7 @@ def _choose(direction: str, spot: float, on: date):
 
 def run_replay(day: date) -> dict:
     """One day's recording through the live engine into a paper session, warmed on the stored bars before the day."""
-    key_of = {i.symbol: i.key for i in current_index(settings.instruments_dir).instruments}
+    key_of = {i.symbol: i.key for i in index_on(settings.instruments_dir, day).instruments}  # that day's contracts
     vix = VixSeries()
     session = PaperSession(day=day, strategy=build_strategy({"strategy": "log_xz", "params": PARAMS}),
                            choose=_choose, key_for=key_of.get, quotes=QuoteBook(),
@@ -146,3 +146,23 @@ def test_5_oct_reconcile_check_is_saved_into_the_day_file(oct5, tmp_path) -> Non
     report = runner.reconcile_check(CandleStore(settings.candles_dir), SYMBOL)
     assert report is not None and report["differences"] == []
     assert load_day(tmp_path, DAY5)["eod_check"]["live_signals"] == 4
+
+
+# ---------------------------------------------------------------- 7 Oct: the live session ran cold
+DAY7 = date(2026, 10, 7)
+SKIP7 = _missing(DAY7, need_candles=True)
+
+
+@pytest.mark.skipif(SKIP7 is not None, reason=SKIP7 or "")
+def test_7_oct_warmed_replay_matches_the_backtest_with_real_fills() -> None:
+    """Live 7 Oct started cold (warm_bars 0): 2 signals against the backtest's 6. Warmed, they agree."""
+    s = run_replay(DAY7)["session"]
+    assert s.warm_bars == 500
+    entries = [{"time": r["time"], "side": r["side"]} for r in s.signals if r["side"] in ("BUY", "SELL")]
+    report = end_of_day_check(
+        day=DAY7, live_entries=entries, live_bars=s.live_bars(), incomplete=s.bars.incomplete,
+        store=CandleStore(settings.candles_dir), symbol=SYMBOL,
+        make_strategy=lambda: build_strategy({"strategy": "log_xz", "params": PARAMS}),
+    )
+    assert report["live_signals"] == report["backtest_signals"] == 6 and report["differences"] == []
+    assert all(r["fill_source"] == "quote" for r in s.signals if r["status"] == "filled")

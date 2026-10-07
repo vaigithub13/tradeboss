@@ -91,3 +91,42 @@ def test_warm_up_bars_never_trade() -> None:
     T = ist(T_day.year, T_day.month, T_day.day, 9, 15)
     assert all(t.entry_time >= T for t in res.trades)
     assert all(e["t"] >= T for e in res.events if e["kind"] == "signal")
+
+
+def test_warm_up_for_a_day_uses_only_earlier_days_and_does_not_need_the_days_own_bars() -> None:
+    """Live 7 Oct: at the open nothing of the day is stored yet. The warm-up came back empty and the paper
+    strategy ran cold (2 signals against the backtest's 6). It must be the same bars whether or not the day exists."""
+    from app.backtest.engine import warm_bars
+
+    candles = synthetic()
+    days = weekdays(date(2026, 1, 5), 60)
+    D = days[40]
+    T = ist(D.year, D.month, D.day, 9, 15)
+    cfg = BacktestConfig(
+        timeframe="5m", start=D.isoformat(), end=D.isoformat(), session_types=("normal",), underlying=None,
+        lot_table=None, lot_size=1, contract=None, cost_model=get_cost_model("zero"), warmup_bars=500,
+    )
+    with_day = warm_bars(cfg, ListSource(candles, 1))
+    before_open = warm_bars(cfg, ListSource([c for c in candles if c["time"] < T], 1))
+    assert len(with_day) == 500 and all(b["time"] < T for b in with_day)
+    assert before_open == with_day
+    # nothing of the day itself, even when later days are stored
+    assert warm_bars(cfg, ListSource(candles, 1))[-1]["time"] < T
+
+
+def test_warm_up_skips_days_with_no_bars_and_takes_the_last_stored_days() -> None:
+    """A holiday or a weekend before the day is skipped: the warm-up is the last 500 stored bars before it."""
+    from app.backtest.engine import warm_bars
+
+    candles = synthetic()
+    days = weekdays(date(2026, 1, 5), 60)
+    D = days[40]
+    T = ist(D.year, D.month, D.day, 9, 15)
+    gap_start = ist(days[38].year, days[38].month, days[38].day, 9, 15)  # two missing days before D
+    stored = [c for c in candles if c["time"] < gap_start]
+    cfg = BacktestConfig(
+        timeframe="5m", start=D.isoformat(), end=D.isoformat(), session_types=("normal",), underlying=None,
+        lot_table=None, lot_size=1, contract=None, cost_model=get_cost_model("zero"), warmup_bars=500,
+    )
+    bars = warm_bars(cfg, ListSource(stored, 1))
+    assert len(bars) == 500 and bars[-1]["time"] < gap_start and bars[-1]["time"] < T

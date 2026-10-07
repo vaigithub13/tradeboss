@@ -1,4 +1,5 @@
 import logging
+import os
 import threading
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -40,6 +41,11 @@ def _startup_snapshot() -> None:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup fallback for the launchd job: if today's instrument file is missing and it is past
     06:30 IST, fetch it in the background (never blocks or fails the start)."""
+    if settings.backend_log_file:
+        from app.logsetup import configure_logging
+
+        configure_logging(settings.data_dir / "logs")
+        log.info("backend started (pid %d)", os.getpid())
     if settings.snapshot_on_startup and snapshot_due(settings.instruments_dir):
         threading.Thread(target=_startup_snapshot, daemon=True).start()
     live = None

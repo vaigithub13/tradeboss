@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import os
+
+os.environ["BACKEND_LOG_FILE"] = "false"  # before app.config is imported: tests never write data/logs
+
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any

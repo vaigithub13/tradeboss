@@ -25,9 +25,9 @@ pytestmark = pytest.mark.skipif(SKIP5 is not None, reason=SKIP5 or "")
 
 
 def _session(day: date, vix: VixSeries) -> PaperSession:
-    from app.upstox.instruments import current_index
+    from app.upstox.instruments import index_on
 
-    key_of = {i.symbol: i.key for i in current_index(settings.instruments_dir).instruments}
+    key_of = {i.symbol: i.key for i in index_on(settings.instruments_dir, day).instruments}
     s = PaperSession(day=day, strategy=build_strategy({"strategy": "log_xz", "params": PARAMS}), choose=_choose,
                      key_for=key_of.get, quotes=QuoteBook(), cost_table=load_default_cost_table(),
                      model_price=model_price_for(vix.at))
