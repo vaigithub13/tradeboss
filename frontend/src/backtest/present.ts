@@ -4,7 +4,7 @@ export const DIRTY_WARNING = "code not committed: may not reproduce";
 
 export interface RunConfig {
   strategy: string;
-  params: Record<string, number | string>;
+  params: Record<string, number | string | boolean>;
   symbol: string;
   timeframe: string;
   start: string;
@@ -13,6 +13,9 @@ export interface RunConfig {
   mode: "index" | "options";
   strike_offset: number;
   slippage_points: number;
+  /** option-premium exits as fractions of the entry premium (0.3 = +30%); absent or null = off */
+  premium_target_pct?: number | null;
+  premium_stop_pct?: number | null;
   kind?: "walk_forward" | "holdout";
   train_months?: number;
   test_months?: number;
@@ -159,4 +162,15 @@ export function gridHint(strategy: string): string {
   if (strategy === "log_xz") return "Grid: length 10, 14 × 5m and 15m";
   if (strategy === "price_channel") return "Grid: length 20, 40 × 5m and 15m";
   return "Grid: strategy defaults";
+}
+
+/** A percent typed in the form ("30") as the fraction a run takes (0.3); blank or not positive = off (null). */
+export function percentToFraction(text: string): number | null {
+  const n = Number(text);
+  return text.trim() === "" || !Number.isFinite(n) || n <= 0 ? null : n / 100;
+}
+
+/** The fraction a run holds, shown as a percent in the form ("" when off). */
+export function fractionToPercent(value: number | null | undefined): string {
+  return value == null ? "" : String(Math.round(value * 10000) / 100);
 }

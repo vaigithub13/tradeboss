@@ -9,7 +9,16 @@ from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any
 
-from app.backtest.catalog import NIFTY_SYMBOL, RunRequestError, _CATALOG, _date, _option_fill, _sessions
+from app.backtest.catalog import (
+    NIFTY_SYMBOL,
+    PREMIUM_EXIT_KEYS,
+    RunRequestError,
+    _CATALOG,
+    _date,
+    _option_fill,
+    _sessions,
+    parse_premium_exits,
+)
 from app.backtest.curve import equity_and_drawdown
 from app.backtest.holdout import assert_research_range, holdout_record, load_holdout
 from app.backtest.metrics import TradeRecord
@@ -133,7 +142,10 @@ def run_walk_forward(
             int(spec["step_months"]),
         ))
 
-    grid = [dict(params) for params in spec["grid"] if _constructs(spec["strategy"], dict(params), spec.get("timeframe"))]
+    grid = [
+        dict(params) for params in spec["grid"]
+        if _constructs(spec["strategy"], _strategy_part(params), spec.get("timeframe"))
+    ]
     tried = 0
     rows: list[dict[str, Any]] = []
     pnls: list[float] = []
@@ -405,9 +417,12 @@ def split_timeframe(params: dict[str, Any], default: str) -> tuple[dict[str, Any
 
 
 def child_backtest_config(config: dict[str, Any], params: dict[str, Any], start: date, end: date) -> dict[str, Any]:
-    """One walk-forward combination. `timeframe` in the combo overrides the request."""
+    """One walk-forward combination. `timeframe` in the combo overrides the request; premium exits go to the
+    option overlay of the child run."""
     strategy_params, timeframe = split_timeframe(params, config["timeframe"])
+    premium = {key: strategy_params.pop(key) for key in PREMIUM_EXIT_KEYS if key in strategy_params}
     return {
+        **{key: value for key, value in premium.items() if value is not None},
         "strategy": config["strategy"],
         "params": strategy_params,
         "symbol": config["symbol"],
@@ -447,11 +462,17 @@ def _expand_grid(strategy: str, grid: Any, timeframe: str, max_combinations: int
     for params in combos:
         raw = dict(params)
         chosen = raw.pop("timeframe", None)
+        premium_raw = {key: raw.pop(key) for key in PREMIUM_EXIT_KEYS if key in raw}
+        try:
+            premium = parse_premium_exits(premium_raw)
+        except RunRequestError:
+            continue
         full = _complete(strategy, raw)
         check = timeframe if chosen is None else str(chosen)
         if full is not None and _constructs(strategy, full, check):
             if chosen is not None:
                 full["timeframe"] = chosen
+            full.update(premium)
             valid.append(full)
     if not valid:
         raise RunRequestError("grid has no valid combinations")
@@ -472,6 +493,11 @@ def _complete(strategy: str, params: dict[str, Any]) -> dict[str, Any] | None:
     if "mode" in fields:
         full["mode"] = "long_short"
     return full
+
+
+def _strategy_part(params: dict[str, Any]) -> dict[str, Any]:
+    """A combo without its option-overlay settings (premium exits), which are not strategy arguments."""
+    return {key: value for key, value in params.items() if key not in PREMIUM_EXIT_KEYS}
 
 
 def _constructs(strategy: str, params: dict[str, Any], timeframe: str | None) -> bool:

@@ -1,0 +1,89 @@
+"""Two paper strategies on one feed: slot 1 and slot 2, each a `PaperRunner` with its own session, position,
+P&L and day files. Slot 1 keeps `data/paper/` (earlier days and dry-run marks stay where they were); slot 2
+writes `data/paper/slot2/`. The feed service talks to the desk as it talked to one runner; the routes pick a slot.
+"""
+
+from __future__ import annotations
+
+from datetime import date
+from pathlib import Path
+from typing import Any
+
+from app.data.store import CandleStore
+from app.paper.live import PaperError, PaperRunner
+
+SLOTS = ("1", "2")
+
+
+class UnknownSlot(PaperError):
+    pass
+
+
+class PaperDesk:
+    def __init__(self, runners: dict[str, PaperRunner]) -> None:
+        if tuple(runners) != SLOTS:
+            raise ValueError(f"a desk has the slots {SLOTS}")
+        self.runners = runners
+
+    @staticmethod
+    def slot_dir(base: Path, slot: str) -> Path:
+        return base if slot == "1" else base / f"slot{slot}"
+
+    def runner(self, slot: str) -> PaperRunner:
+        try:
+            return self.runners[slot]
+        except KeyError:
+            raise UnknownSlot(f"unknown slot {slot!r}: use one of {list(SLOTS)}") from None
+
+    # ------------------------------------------------------------------ the service's view
+    @property
+    def state(self) -> str:
+        return "running" if any(r.state == "running" for r in self.runners.values()) else "stopped"
+
+    @property
+    def day(self) -> date | None:
+        days = [r.day for r in self.runners.values() if r.day is not None]
+        return max(days) if days else None
+
+    def wanted_keys(self) -> set[str]:
+        out: set[str] = set()
+        for r in self.runners.values():
+            out |= r.wanted_keys()
+        return out
+
+    def resume_if_running(self, day: date) -> bool:
+        resumed = False
+        for r in self.runners.values():
+            try:
+                resumed = r.resume_if_running(day) or resumed
+            except PaperError:
+                # one slot that cannot resume (a missing snapshot, other settings) must not stop the other
+                continue
+        return resumed
+
+    def on_depth(self, raw: bytes) -> None:
+        for r in self.runners.values():
+            r.on_depth(raw)
+
+    def on_clock(self, now_ms: int) -> None:
+        for r in self.runners.values():
+            r.on_clock(now_ms)
+
+    def on_index_bar(self, bar: dict[str, Any], *, now_ms: int) -> None:
+        for r in self.runners.values():
+            r.on_index_bar(bar, now_ms=now_ms)
+
+    def finish_day(self) -> None:
+        for r in self.runners.values():
+            r.finish_day()
+
+    def reconcile_check(self, store: CandleStore, symbol: str, day: date | None = None) -> None:
+        for r in self.runners.values():
+            r.reconcile_check(store, symbol, day)
+
+    def flush(self) -> None:
+        for r in self.runners.values():
+            r.flush()
+
+    def status(self, now_ms: int) -> dict[str, Any]:
+        return {"state": self.state, "slots": [{"slot": s, **self.runners[s].status(now_ms)} for s in SLOTS]}

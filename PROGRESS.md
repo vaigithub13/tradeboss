@@ -545,3 +545,31 @@ The previous full-window 5-minute result (1,098 trades, index 630,280.25, option
 - Shutdown: the backend went down at 15:32 without a spread report. Reproduced: one Ctrl+C reaches uvicorn twice (the terminal signals the process group and `concurrently` forwards it), uvicorn takes the second SIGINT as "force exit" and skips the app's shutdown. `npm run session` now runs `python -m app.serve`: a repeat SIGINT within 5 s is ignored, the graceful wait is capped at 5 s, SIGTERM is graceful. The shutdown writes the spread report and flushes the paper day file, and warns when it is before 15:45 that the 15:45 jobs will not run. `npm run dev` (auto-reload) does not have this.
 - Backend log: `data/logs/backend-YYYY-MM-DD.log` (IST date) next to the terminal: app and uvicorn lines, uncaught exceptions (also in threads), and a faulthandler traceback on a hard crash. Tests turn it off (`BACKEND_LOG_FILE=false` in conftest).
 - Test fix: `test_search_kind_filter_and_validation` started failing on 7 Oct because the saved instrument sample's options expire on 6 Oct and search hides expired contracts by the real date. The test now searches as of the sample's snapshot day.
+
+## Log XZ exit research and two paper strategies (2026-10-07, after the close)
+
+Research only; the running paper strategy is unchanged. Log XZ RMA 14, 5m, options with real premiums (3,290 real fills, 48 modelled), delta-adjusted fills, slippage 0.2, sessions normal + weekend_full, 2024-10-03 .. 2026-06-30. Holdout not run, peek count 0. "Given back" = best open profit of the option over the holding (premium high, before charges) minus the trade's gross, per trade.
+
+| variant | net ₹ | trades | win % | max DD ₹ | given back / trade ₹ (median) |
+|---|---:|---:|---:|---:|---:|
+| none (current) | −103,881 | 1,669 | 29.0 | 162,497 | 1,862 (1,399) |
+| script defaults 10/7 pts | −153,753 | 1,669 | 40.7 | 153,753 | 274 (225) |
+| index 30/20 | −181,987 | 1,669 | 38.6 | 181,987 | 649 (493) |
+| index 30/30 | −198,180 | 1,669 | 44.2 | 198,180 | 690 (401) |
+| index 30/50 | −222,205 | 1,669 | 47.6 | 222,205 | 718 (334) |
+| index 50/20 | −187,925 | 1,669 | 29.5 | 187,925 | 868 (767) |
+| index 50/30 | −206,587 | 1,669 | 34.0 | 206,587 | 935 (728) |
+| index 50/50 | −212,054 | 1,669 | 38.1 | 213,389 | 964 (634) |
+| index 80/20 | −135,573 | 1,669 | 25.3 | 148,979 | 1,057 (894) |
+| index 80/30 | −159,113 | 1,669 | 28.9 | 161,293 | 1,163 (990) |
+| index 80/50 | −150,671 | 1,669 | 32.5 | 156,572 | 1,206 (898) |
+| premium +30% / −20% | −140,216 | 1,669 | 34.6 | 163,569 | 978 (649) |
+| premium +30% / −30% | −155,159 | 1,669 | 37.1 | 176,572 | 1,016 (645) |
+| premium +50% / −20% | −142,314 | 1,669 | 29.5 | 165,035 | 1,227 (926) |
+| premium +50% / −30% | −155,657 | 1,669 | 31.8 | 172,123 | 1,278 (945) |
+
+- No variant beats the current exits. Tighter exits raise the win rate and cut what is given back, but lose more: the few large winners pay for the many small losers.
+- Walk-forward over the same 15 (6-month train, 2-month test, step 2; 7 windows, 105 combinations tried): a choice in 2 windows only, both "no target/stop", both lost on test (−29,316 and −33,197). The other 5 had no positive train result. Out-of-sample: −62,514 on 277 trades, max DD 91,856.
+- New: option-premium exits (`premium_target_pct`, `premium_stop_pct` on a run and in a walk-forward grid; the backtest form has "Premium target %" and "Premium stop %"). They walk the contract's real 1m bars; a minute touching both levels exits at the stop; a gap through a level exits at the open; slippage applies. Every option trade now reports `max_open_gross` and `given_back`. Log XZ's own target/stop inputs are in the catalog (checkbox + points).
+- Fixed while running: the walk-forward's run-time check dropped premium combinations silently (77 of 105 tried).
+- Paper: two strategies at once (slots 1 and 2), each with its own session, position, P&L and day files (`data/paper/` and `data/paper/slot2/`). The panel shows both; slot 2's chart markers start with "2·". Paper does not apply a strategy's own target or stop yet, so a start with `use_target` / `use_stop` is refused (400) rather than run as something else.

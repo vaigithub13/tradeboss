@@ -43,6 +43,10 @@ class NotRunning(PaperError):
     pass
 
 
+class UnsupportedSettings(PaperError):
+    """Settings paper trading cannot honour (a strategy's own target or stop)."""
+
+
 class SettingsMismatch(PaperError):
     """Today's file was written by another strategy or other parameters; starting would mix them."""
 
@@ -109,6 +113,9 @@ class PaperRunner:
                 "start the same strategy and settings, or move the file aside"
             )
         session = self._make(day, strategy, params)  # bad strategy names raise here, before any state changes
+        if getattr(session.strategy, "use_target", False) or getattr(session.strategy, "use_stop", False):
+            raise UnsupportedSettings("paper trading does not apply a strategy's target or stop yet (it acts on BUY/SELL "
+                             "signals only); run it without them, or test them in a backtest")
         if saved is not None:
             session.restore(saved)
         self.session = session

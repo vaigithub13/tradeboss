@@ -99,6 +99,9 @@ class OptionModelConfig:
     real_premiums: bool = False
     vix_scales: tuple[tuple[str, float], ...] = ()
     option_fill: str = "delta_adjusted"  # delta_adjusted | optimistic | adverse | worst
+    #: research exits on the option's own premium, as a fraction of the entry fill (0.30 = +30%); None = off
+    premium_target_pct: float | None = None
+    premium_stop_pct: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "option_fill", canonical_option_fill(self.option_fill))
@@ -116,6 +119,10 @@ class OptionModelConfig:
         for _, scale in self.vix_scales:
             if scale <= 0:
                 raise ValueError("every VIX scale must be > 0")
+        if self.premium_target_pct is not None and not self.premium_target_pct > 0:
+            raise ValueError("premium_target_pct must be > 0")
+        if self.premium_stop_pct is not None and not 0 < self.premium_stop_pct < 1:
+            raise ValueError("premium_stop_pct must be between 0 and 1")
 
     def scale_for(self, dte: int) -> float:
         if not self.vix_scales:
@@ -125,6 +132,9 @@ class OptionModelConfig:
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         raw["vix_scales"] = {name: scale for name, scale in self.vix_scales}
+        for key in ("premium_target_pct", "premium_stop_pct"):  # off: left out, so earlier run ids stay the same
+            if raw[key] is None:
+                del raw[key]
         return raw
 
 
@@ -606,6 +616,16 @@ def _one_trade(
         }
 
     entry_fill = _apply_slip("BUY", entry_prem, cfg.slippage_points, cfg.min_premium)
+    walk = _premium_walk(
+        tape if cfg.real_premiums else None, contract.expiry, contract.strike, contract.kind,
+        start=trade.entry_time if trade.entry_at_open else trade.entry_time + 60, end=exit_time,
+        entry_fill=entry_fill, target_pct=cfg.premium_target_pct, stop_pct=cfg.premium_stop_pct,
+    )
+    exit_reason = "index"
+    if walk.exit is not None:
+        exit_time, exit_prem, exit_reason = walk.exit
+        exit_source, held_past = "real", False
+        exit_d = ist_date(exit_time)
     exit_fill = exit_prem if held_past else _apply_slip("SELL", exit_prem, cfg.slippage_points, cfg.min_premium)
     buy = costs.leg_cost("BUY", entry_fill, units, entry_d)
     if held_past:
@@ -642,6 +662,11 @@ def _one_trade(
         flags.append("expired_while_held")
     if entry_source == "modelled" or exit_source == "modelled":
         flags.append("modelled")
+    premium_exit = cfg.premium_target_pct is not None or cfg.premium_stop_pct is not None
+    if premium_exit and not walk.checked:
+        flags.append("premium_exit_unchecked")
+    max_open = None if walk.max_high is None else _money(
+        (Decimal(str(max(walk.max_high, exit_prem))) - Decimal(str(entry_fill))) * Decimal(units))
 
     return {
         "label": ESTIMATED,
@@ -680,9 +705,56 @@ def _one_trade(
         "slippage_points": cfg.slippage_points,
         "slippage_cost": _money(slip_cost),
         "net_pnl": _money(net),
+        "exit_reason": exit_reason,
+        #: best open profit (premium high over the holding, before slippage and charges) and how much of it was
+        #: not kept; None when the contract has no real minute bars for the trade
+        "max_open_gross": max_open,
+        "given_back": None if max_open is None else _money(Decimal(str(max_open)) - gross),
         "flags": flags,
         "unpriced": False,
     }
+
+
+@dataclass(frozen=True)
+class _Walk:
+    exit: tuple[int, float, str] | None  # (minute, premium, "premium_target" | "premium_stop")
+    max_high: float | None  # highest premium seen up to the exit; None when no real bar was found
+    checked: bool  # at least one real bar was walked
+
+
+def _premium_walk(
+    tape: PremiumTape | None, expiry: date, strike: float, kind: str, *, start: int, end: int,
+    entry_fill: float, target_pct: float | None, stop_pct: float | None,
+) -> _Walk:
+    """Walk the contract's real 1m bars over [start, end): the first premium target or stop, and the high."""
+    bar_at = getattr(tape, "bar_at", None) if tape is not None else None
+    if bar_at is None:
+        return _Walk(None, None, False)
+    target = None if target_pct is None else round(entry_fill * (1 + target_pct), 2)
+    stop = None if stop_pct is None else round(entry_fill * (1 - stop_pct), 2)
+    high: float | None = None
+    t = start - start % 60
+    first = True
+    while t < end:
+        ohlc = bar_at(expiry, strike, kind, t)
+        if ohlc is not None:
+            o, h, lo, _c = (float(x) for x in ohlc)
+            if not first:  # the entry minute's open is the entry itself
+                if stop is not None and o <= stop:
+                    return _Walk((t, o, "premium_stop"), o if high is None else max(high, o), True)
+                if target is not None and o >= target:
+                    return _Walk((t, o, "premium_target"), o if high is None else max(high, o), True)
+            hit_stop = stop is not None and lo <= stop
+            hit_target = target is not None and h >= target
+            if hit_stop:  # both in one minute: the stop first, as the engine does
+                # the minute's high may come after the stop: only its open counts toward the best open profit
+                return _Walk((t, stop, "premium_stop"), o if high is None else max(high, o), True)  # type: ignore[arg-type]
+            if hit_target:
+                return _Walk((t, target, "premium_target"), target if high is None else max(high, target), True)  # type: ignore[arg-type]
+            high = h if high is None else max(high, h)
+        first = False
+        t += 60
+    return _Walk(None, high, high is not None)
 
 
 def _expiry_close_ts(expiry: date) -> int:

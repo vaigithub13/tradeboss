@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRupees, markLine, paperMarkers, paperRows, shortContract, strikeOf, type PaperSignal } from "./present";
+import { formatRupees, markLine, paperMarkers, paperRows, parseParams, shortContract, strikeOf, type PaperSignal } from "./present";
 
 const T0 = 1791171900; // 09:15 IST on 5 Oct 2026
 
@@ -83,5 +83,19 @@ describe("money and mark text", () => {
     expect(markLine(null)).toBe("no open position");
     expect(markLine({ symbol: "NIFTY 22600 PE 06 OCT 26", source: null, gross: null, net: null })).toBe("22600 PE: no live bid");
     expect(markLine({ symbol: "NIFTY 22600 PE 06 OCT 26", source: "quote", gross: 100, net: 80 })).toBe("22600 PE: +80.00 net (at bid)");
+  });
+});
+
+describe("two slots", () => {
+  it("prefixes slot 2's markers so the two strategies are told apart", () => {
+    expect(paperMarkers([signal({})], [T0], "2·")[0]?.text).toBe("2· L 22600");
+    expect(paperMarkers([signal({})], [T0])[0]?.text).toBe("L 22600");
+  });
+
+  it("reads the params box: {} by default, an object, or an error", () => {
+    expect(parseParams("")).toEqual({ params: {} });
+    expect(parseParams('{"z_length": 20}')).toEqual({ params: { z_length: 20 } });
+    expect(parseParams("[1]").error).toBeTruthy();
+    expect(parseParams("{bad").error).toBeTruthy();
   });
 });

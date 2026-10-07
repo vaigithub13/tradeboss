@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { useBacktestStore } from "../store/backtestStore";
 import {
   DIRTY_WARNING,
+  fractionToPercent,
+  percentToFraction,
   HOLDOUT_COUNT,
   RESEARCH_END,
   compareSelection,
@@ -142,5 +144,15 @@ describe("compareSelection", () => {
     expect(compareSelection(["a"]).ok).toBe(false);
     expect(compareSelection(["a", "b", "c", "d"]).ok).toBe(false);
     expect(compareSelection(["a", "a"]).ok).toBe(false);
+  });
+});
+
+describe("premium exit percent", () => {
+  it("turns a typed percent into the run's fraction and back; blank is off", () => {
+    expect(percentToFraction("30")).toBe(0.3);
+    expect(percentToFraction("")).toBeNull();
+    expect(percentToFraction("0")).toBeNull();
+    expect(fractionToPercent(0.3)).toBe("30");
+    expect(fractionToPercent(null)).toBe("");
   });
 });

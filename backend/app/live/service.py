@@ -42,6 +42,7 @@ from app.live.persist import ReconcileState, is_stored, upsert_bars
 from app.live.reconcile import reconcile_missed, reconcile_today
 from app.live.recorder import BINARY, RECV, SENT, Recorder, recording_path
 from app.paper.catchup import PAPER_BAR_SOURCES, replay_into
+from app.paper.desk import SLOTS, PaperDesk
 from app.paper.live import PaperError, PaperRunner, session_factory
 from app.paper.pricing import VixSeries
 from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, current_index
@@ -161,12 +162,17 @@ class LiveService:
         self._spreads = None
         self._day_files_closed = False
         self.vix = VixSeries()
-        self.paper = PaperRunner(
-            cfg.paper_dir or (cfg.state_dir.parent / "paper"),
-            session_factory(cfg.instruments_dir, self.vix, store),
-            on_wanted=self.refresh_subscriptions,
-            catch_up=self._paper_catch_up,
-        )
+        paper_base = cfg.paper_dir or (cfg.state_dir.parent / "paper")
+        # two strategies at once (slot 1 keeps data/paper/), each with its own session, position and P&L
+        self.paper = PaperDesk({
+            slot: PaperRunner(
+                PaperDesk.slot_dir(paper_base, slot),
+                session_factory(cfg.instruments_dir, self.vix, store),
+                on_wanted=self.refresh_subscriptions,
+                catch_up=self._paper_catch_up,
+            )
+            for slot in SLOTS
+        })
         self.connection = FeedConnection(
             authorize=authorize or (lambda: authorize_feed(_token())),
             on_frame=self._on_frame,

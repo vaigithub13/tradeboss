@@ -171,6 +171,8 @@ def _model(config: dict[str, Any]) -> OptionModelConfig:
         carry_basis=shipped.carry_basis,
         real_premiums=shipped.real_premiums,
         vix_scales=shipped.vix_scales,
+        premium_target_pct=config.get("premium_target_pct"),
+        premium_stop_pct=config.get("premium_stop_pct"),
     )
 
 
@@ -288,6 +290,10 @@ def _trade(trade: Trade, option: dict[str, Any] | None) -> dict[str, Any]:
             "net_pnl": option["net_pnl"],
             "flags": option["flags"],
             "dte": option.get("dte"),
+            "exit_time": option.get("exit_time"),
+            "exit_reason": option.get("exit_reason"),
+            "max_open_gross": option.get("max_open_gross"),
+            "given_back": option.get("given_back"),
         }
     return row
 

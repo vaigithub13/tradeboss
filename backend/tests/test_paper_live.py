@@ -149,10 +149,14 @@ def test_no_vix_means_no_modelled_fill() -> None:
 
 # ---------------------------------------------------------------- routes
 
-def client_for(runner: PaperRunner, *, enabled: bool = True, now: int = ms(9, 20)) -> TestClient:
+def client_for(runner: PaperRunner, *, enabled: bool = True, now: int = ms(9, 20),
+               second: PaperRunner | None = None) -> TestClient:
+    from app.paper.desk import PaperDesk
+
+    other = second or Fixture(runner.directory / "slot2", {}).runner
     app = FastAPI()
     app.include_router(paper_router)
-    app.state.live = SimpleNamespace(enabled=enabled, paper=runner, now_ms=lambda: now)
+    app.state.live = SimpleNamespace(enabled=enabled, paper=PaperDesk({"1": runner, "2": other}), now_ms=lambda: now)
     return TestClient(app)
 
 
@@ -196,3 +200,34 @@ def test_paper_keys_are_subscribed_ahead_of_the_recorder_set() -> None:
     chart = ["NSE_INDEX|Nifty 50"]
     keys = compose_keys(chart, list(dict.fromkeys([*paper, *recorder])), enabled=True)
     assert "NSE_FO|PAPER" in keys
+
+
+def test_routes_run_a_second_strategy_in_slot_2_beside_the_first(tmp_path) -> None:
+    one, two = Fixture(tmp_path, {}), Fixture(tmp_path / "slot2", {})
+    c = client_for(one.runner, second=two.runner)
+    assert c.post("/api/paper/start", json={"strategy": "log_xz"}).json()["slot"] == "1"
+    r = c.post("/api/paper/start", json={"strategy": "log_xz", "params": {"use_target": True}, "slot": "2"})
+    assert r.status_code == 200 and r.json()["slot"] == "2" and r.json()["params"] == {"use_target": True}
+    body = c.get("/api/paper/status").json()
+    assert body["state"] == "running" and [s["state"] for s in body["slots"]] == ["running", "running"]
+    assert c.post("/api/paper/stop", params={"slot": "2"}).json()["state"] == "stopped"
+    assert [s["state"] for s in c.get("/api/paper/status").json()["slots"]] == ["running", "stopped"]
+    assert c.get("/api/paper/day", params={"day": "2026-10-05", "slot": "2"}).status_code == 200
+    assert c.post("/api/paper/start", json={"strategy": "log_xz", "slot": "3"}).status_code == 400
+
+
+def test_a_strategy_with_a_target_or_stop_is_refused_because_paper_does_not_apply_them(tmp_path) -> None:
+    """A backtest exits on the bracket; paper acts on BUY/SELL only. Running it would forward-test another strategy."""
+    from app.paper.live import PaperError
+
+    def make(day, strategy, params):
+        s = tps.session(tps.Scripted({}), model_price=lambda c, sp, ts: 95.0)
+        s.strategy.use_target, s.strategy.use_stop = bool(params.get("use_target")), bool(params.get("use_stop"))
+        return s
+
+    runner = PaperRunner(tmp_path, make)
+    with pytest.raises(PaperError, match="target"):
+        runner.start(DAY, "log_xz", {"use_target": True})
+    assert runner.state == "stopped" and load_day(tmp_path, DAY) is None
+    runner.start(DAY, "log_xz", {})
+    assert runner.state == "running"

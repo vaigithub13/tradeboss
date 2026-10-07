@@ -74,6 +74,11 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "ma": _Field("str", "rma", choices=("rma", "ema")),
             "execution": _Field("str", "realistic", choices=("realistic", "tv_parity")),
             "lots": _Field("int", 1, min_value=1),
+            # the script's own target/stop inputs (index points), off by default as in the script
+            "use_target": _Field("bool", False),
+            "use_stop": _Field("bool", False),
+            "target_points": _Field("float", 10.0, min_value=0.05),
+            "stop_points": _Field("float", 7.0, min_value=0.05),
         },
     ),
     "price_channel": (
@@ -88,8 +93,26 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
 
 _TOP = {
     "strategy", "params", "symbol", "timeframe", "start", "end", "sessions",
-    "mode", "strike_offset", "slippage_points", "option_fill",
+    "mode", "strike_offset", "slippage_points", "option_fill", *("premium_target_pct", "premium_stop_pct"),
 }
+#: option-premium exits: settings of the option overlay, not strategy parameters
+PREMIUM_EXIT_KEYS = ("premium_target_pct", "premium_stop_pct")
+
+
+def parse_premium_exits(body: dict[str, Any]) -> dict[str, float]:
+    """`premium_target_pct` > 0 and 0 < `premium_stop_pct` < 1 (fractions of the entry premium), or absent."""
+    out: dict[str, float] = {}
+    for key in PREMIUM_EXIT_KEYS:
+        value = body.get(key)
+        if value is None:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RunRequestError(f"{key} must be a number")
+        number = float(value)
+        if not number > 0 or (key == "premium_stop_pct" and number >= 1):
+            raise RunRequestError(f"{key} must be > 0" + (" and < 1" if key == "premium_stop_pct" else ""))
+        out[key] = number
+    return out
 
 
 def strategy_catalog() -> list[dict[str, Any]]:
@@ -181,7 +204,11 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
         raise RunRequestError("slippage_points must be a number >= 0")
     option_fill = _option_fill(body.get("option_fill", "delta_adjusted"))
+    premium = parse_premium_exits(body)
+    if premium and mode != "options":
+        raise RunRequestError("premium exits apply to options mode")
     return {
+        **premium,
         "strategy": strategy,
         "params": params,
         "symbol": symbol,
@@ -209,6 +236,10 @@ def build_strategy(config: dict[str, Any]) -> Strategy:
 
 
 def _coerce(key: str, value: Any, field: _Field) -> Any:
+    if field.kind == "bool":
+        if not isinstance(value, bool):
+            raise RunRequestError(f"{key} must be true or false")
+        return value
     if field.kind == "int":
         if isinstance(value, bool) or not isinstance(value, int):
             raise RunRequestError(f"{key} must be a whole number")

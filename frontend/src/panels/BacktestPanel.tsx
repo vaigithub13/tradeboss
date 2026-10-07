@@ -1,7 +1,7 @@
 import { useEffect } from "react";
 
 import type { StrategySpec } from "../api/backtests";
-import { gridHint, holdoutFormWarning, runLabel, type RunConfig } from "../backtest/present";
+import { fractionToPercent, gridHint, holdoutFormWarning, percentToFraction, runLabel, type RunConfig } from "../backtest/present";
 import { useBacktestStore } from "../store/backtestStore";
 import { useChartStore } from "../store/chartStore";
 
@@ -80,7 +80,15 @@ export function BacktestPanel() {
         Object.entries(spec.params).map(([key, field]) => (
           <label key={key} className="flex flex-col gap-1 capitalize">
             {key.replaceAll("_", " ")}
-            {field.choices ? (
+            {field.type === "bool" ? (
+              <input
+                aria-label={key}
+                type="checkbox"
+                className="h-4 w-4 self-start"
+                checked={Boolean(form.params[key] ?? field.default)}
+                onChange={(e) => setParam(key, e.target.checked)}
+              />
+            ) : field.choices ? (
               <select
                 aria-label={key}
                 className="rounded border border-white/10 bg-white/5 px-2 py-1"
@@ -185,6 +193,37 @@ export function BacktestPanel() {
           onChange={(e) => setForm({ slippage_points: Number(e.target.value) })}
         />
       </label>
+      {form.mode === "options" && (
+        <div className="grid grid-cols-2 gap-2">
+          <label className="flex flex-col gap-1">
+            Premium target %
+            <input
+              aria-label="Premium target %"
+              type="number"
+              min={0}
+              step={5}
+              placeholder="off"
+              className="rounded border border-white/10 bg-white/5 px-2 py-1"
+              value={fractionToPercent(form.premium_target_pct)}
+              onChange={(e) => setForm({ premium_target_pct: percentToFraction(e.target.value) })}
+            />
+          </label>
+          <label className="flex flex-col gap-1">
+            Premium stop %
+            <input
+              aria-label="Premium stop %"
+              type="number"
+              min={0}
+              max={99}
+              step={5}
+              placeholder="off"
+              className="rounded border border-white/10 bg-white/5 px-2 py-1"
+              value={fractionToPercent(form.premium_stop_pct)}
+              onChange={(e) => setForm({ premium_stop_pct: percentToFraction(e.target.value) })}
+            />
+          </label>
+        </div>
+      )}
       <p className="text-white/40">Square-off 15:15. Fills at the next bar open. Index costs are zero.</p>
       <button
         type="button"

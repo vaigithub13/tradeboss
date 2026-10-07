@@ -46,7 +46,7 @@ interface BacktestState {
   loadCatalog: () => Promise<void>;
   setForm: (patch: Partial<RunConfig>) => void;
   setWalk: (patch: Partial<WalkSettings>) => void;
-  setParam: (key: string, value: number | string) => void;
+  setParam: (key: string, value: number | string | boolean) => void;
   useChartDefaults: (symbol: string, timeframe: Timeframe, sessions: SessionType[]) => void;
   duplicate: (run: BacktestRun) => void;
   refresh: () => Promise<void>;

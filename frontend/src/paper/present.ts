@@ -41,7 +41,11 @@ export function strikeOf(symbol: string | null): string {
 }
 
 /** Entry markers for the filled signals, snapped to the candle that contains each one. */
-export function paperMarkers(signals: readonly PaperSignal[], candleTimes: readonly number[]): SeriesMarker<Time>[] {
+export function paperMarkers(
+  signals: readonly PaperSignal[],
+  candleTimes: readonly number[],
+  prefix = "",
+): SeriesMarker<Time>[] {
   const out: SeriesMarker<Time>[] = [];
   for (const s of signals) {
     if (s.status !== "filled" || s.time == null || (s.side !== "BUY" && s.side !== "SELL")) continue;
@@ -53,7 +57,7 @@ export function paperMarkers(signals: readonly PaperSignal[], candleTimes: reado
       position: buy ? "belowBar" : "aboveBar",
       shape: buy ? "arrowUp" : "arrowDown",
       color: s.fill_source === "modelled" ? "#eab308" : buy ? "#26a69a" : "#ef5350",
-      text: `${buy ? "L" : "S"} ${strikeOf(s.symbol)}`,
+      text: `${prefix ? `${prefix} ` : ""}${buy ? "L" : "S"} ${strikeOf(s.symbol)}`,
     });
   }
   return out;
@@ -103,4 +107,16 @@ export function markLine(mark: PaperMark | null): string {
   if (!mark) return "no open position";
   if (mark.net == null) return `${shortContract(mark.symbol)}: no live bid`;
   return `${shortContract(mark.symbol)}: ${formatRupees(mark.net)} net (at bid)`;
+}
+
+/** The params box of a paper slot: blank is {}, otherwise a JSON object. */
+export function parseParams(text: string): { params?: Record<string, unknown>; error?: string } {
+  if (text.trim() === "") return { params: {} };
+  try {
+    const value: unknown = JSON.parse(text);
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return { error: "params must be a JSON object" };
+    return { params: value as Record<string, unknown> };
+  } catch {
+    return { error: "params are not valid JSON" };
+  }
 }

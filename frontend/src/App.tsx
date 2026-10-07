@@ -198,7 +198,10 @@ export default function App() {
     ? null
     : activeRun?.result?.trades.find((trade) => trade.id === replayReveal.cardId);
   if (symbol === "NIFTY50" && !replayActive && paperOpen) {
-    markers.push(...paperMarkers(paperStatus?.signals ?? NO_PAPER_SIGNALS, candles.map((c) => c.time)));
+    const times = candles.map((c) => c.time);
+    for (const slot of paperStatus?.slots ?? []) {
+      markers.push(...paperMarkers(slot.signals ?? NO_PAPER_SIGNALS, times, slot.slot === "1" ? "" : `${slot.slot}·`));
+    }
   }
   markers.sort((a, b) => Number(a.time) - Number(b.time));
   const pickTime = (time: number): void => {

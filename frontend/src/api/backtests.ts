@@ -2,8 +2,8 @@ import { getJson, postJson } from "./client";
 import type { RunConfig } from "../backtest/present";
 
 export interface StrategyField {
-  type: "int" | "float" | "str";
-  default: number | string;
+  type: "int" | "float" | "str" | "bool";
+  default: number | string | boolean;
   min?: number;
   choices?: string[];
 }

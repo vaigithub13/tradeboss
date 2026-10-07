@@ -1,39 +1,44 @@
 import { create } from "zustand";
 
-import { fetchPaperStatus, startPaper, stopPaper, type PaperStatus } from "../api/paper";
+import { fetchPaperStatus, startPaper, stopPaper, type PaperDeskStatus } from "../api/paper";
 
 interface PaperState {
-  status: PaperStatus | null;
-  error: string | null;
+  status: PaperDeskStatus | null;
+  /** the last error, per slot ("" for the status poll) */
+  errors: Record<string, string | null>;
   refresh: () => Promise<void>;
-  start: (strategy: string) => Promise<void>;
-  stop: () => Promise<void>;
+  start: (slot: string, strategy: string, params: Record<string, unknown>) => Promise<void>;
+  stop: (slot: string) => Promise<void>;
 }
 
 const messageOf = (e: unknown): string => (e instanceof Error ? e.message : "request failed");
 
-export const usePaperStore = create<PaperState>((set) => ({
+export const usePaperStore = create<PaperState>((set, get) => ({
   status: null,
-  error: null,
+  errors: {},
   refresh: async () => {
     try {
-      set({ status: await fetchPaperStatus(), error: null });
+      set({ status: await fetchPaperStatus(), errors: { ...get().errors, "": null } });
     } catch (e) {
-      set({ error: messageOf(e) });
+      set({ errors: { ...get().errors, "": messageOf(e) } });
     }
   },
-  start: async (strategy) => {
+  start: async (slot, strategy, params) => {
     try {
-      set({ status: await startPaper(strategy), error: null });
+      await startPaper(slot, strategy, params);
+      set({ errors: { ...get().errors, [slot]: null } });
     } catch (e) {
-      set({ error: messageOf(e) });
+      set({ errors: { ...get().errors, [slot]: messageOf(e) } });
     }
+    await get().refresh();
   },
-  stop: async () => {
+  stop: async (slot) => {
     try {
-      set({ status: await stopPaper(), error: null });
+      await stopPaper(slot);
+      set({ errors: { ...get().errors, [slot]: null } });
     } catch (e) {
-      set({ error: messageOf(e) });
+      set({ errors: { ...get().errors, [slot]: messageOf(e) } });
     }
+    await get().refresh();
   },
 }));
