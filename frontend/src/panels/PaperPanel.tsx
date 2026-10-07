@@ -4,8 +4,12 @@ import { PAPER_SLOTS, type PaperStatus } from "../api/paper";
 import { formatRupees, markLine, paperRows, parseParams } from "../paper/present";
 import { usePaperStore } from "../store/paperStore";
 
-const STRATEGIES = [{ name: "log_xz", label: "Log XZ (RMA 14, 5m)" }];
-const DEFAULT_STRATEGY = "log_xz";
+const STRATEGIES = [
+  { name: "log_xz", label: "Log XZ (RMA 14, 5m)" },
+  { name: "price_channel", label: "Price Channel (length 20, 5m)" },
+];
+/** slot 1 forward-tests the original; slot 2 the Price Channel the 7 Oct walk-forward chose */
+const DEFAULT_STRATEGY: Record<string, string> = { "1": "log_xz", "2": "price_channel" };
 const POLL_MS = 3000;
 
 /** Live signals (paper): two strategies side by side on the live feed, each with its own position and P&L. No orders. */
@@ -41,7 +45,7 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
   const error = usePaperStore((s) => s.errors[slot] ?? null);
   const start = usePaperStore((s) => s.start);
   const stop = usePaperStore((s) => s.stop);
-  const [strategy, setStrategy] = useState(DEFAULT_STRATEGY);
+  const [strategy, setStrategy] = useState(DEFAULT_STRATEGY[slot] ?? "log_xz");
   const [paramsText, setParamsText] = useState("");
   const running = status?.state === "running";
   const summary = status?.summary ?? null;
@@ -55,7 +59,7 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
         <select
           aria-label={`Strategy ${slot}`}
           className="rounded border border-white/15 bg-transparent px-2 py-1"
-          value={strategy}
+          value={running && status?.strategy ? status.strategy : strategy}
           disabled={running}
           onChange={(e) => setStrategy(e.target.value)}
         >

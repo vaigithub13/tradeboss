@@ -54,6 +54,8 @@ def replay_into(
             elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in PAPER_BAR_SOURCES:
                 session.on_index_minute(bar_minute(ev), now_ms=engine.current_ts)
         if engine.current_ts > 0:
+            if NIFTY_INDEX_KEY in engine.ticked:
+                session.on_index_tick(engine.ticked[NIFTY_INDEX_KEY], now_ms=engine.current_ts)
             session.on_clock(engine.current_ts)
 
     try:

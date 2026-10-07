@@ -94,3 +94,13 @@ def test_a_dry_run_day_is_listed_but_left_out_of_the_forward_test_totals(tmp_pat
         ("2026-10-05", None), ("2026-10-06", "dry run (cold start)"), ("2026-10-07", "dry run (cold start)")]
     assert week["totals"]["net"] == 200.0 and week["totals"]["trades"] == 1
     assert week["excluded"] == ["2026-10-06", "2026-10-07"]
+
+
+def test_a_stop_strategy_is_compared_on_the_bar_its_fill_is_in() -> None:
+    """Market strategies fill at the next bar's open, so their decision bar is one bar earlier. A stop fills inside
+    a bar: the backtest's 1m fill minute is placed in the 5m bar that contains it, as paper records its fills."""
+    from app.paper.check import entry_bar
+
+    fill_minute = NINE_FIFTEEN + 300 + 3 * 60  # 09:23, inside the 09:20 bar
+    assert entry_bar(fill_minute, 300, basis="fill") == NINE_TWENTY
+    assert entry_bar(NINE_TWENTY, 300, basis="decision") == NINE_FIFTEEN

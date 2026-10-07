@@ -231,3 +231,12 @@ def test_a_strategy_with_a_target_or_stop_is_refused_because_paper_does_not_appl
     assert runner.state == "stopped" and load_day(tmp_path, DAY) is None
     runner.start(DAY, "log_xz", {})
     assert runner.state == "running"
+
+
+def test_price_channel_is_offered_for_paper() -> None:
+    from app.backtest.catalog import build_strategy
+
+    body = client_for(PaperRunner(__import__("pathlib").Path("/nonexistent"), lambda *a: None)).get("/api/paper/strategies").json()
+    names = {s["name"]: s for s in body["strategies"]}
+    assert names["price_channel"]["label"] == "Price Channel (length 20, 5m)"
+    assert build_strategy({"strategy": "price_channel", "params": names["price_channel"]["params"]}).length == 20

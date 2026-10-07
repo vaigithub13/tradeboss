@@ -244,8 +244,11 @@ class LiveService:
         with self._elock:
             self.engine.on_frame(raw, wall)
             now_ms = self.engine.current_ts
+            index_price = self.engine.ticked.get(NIFTY_INDEX_KEY)
         self._drain()
         if now_ms > 0:
+            if index_price is not None:
+                self.paper.on_index_tick(index_price, now_ms=now_ms)  # stop orders fire on the live index price
             self.paper.on_clock(now_ms)  # 15:15:00 square-off at this frame's quote (exchange time)
         self._record_spreads(raw)
 

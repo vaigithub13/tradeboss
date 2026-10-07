@@ -67,3 +67,29 @@ def test_wanted_keys_are_the_union_and_an_unknown_slot_is_refused(tmp_path) -> N
     assert any("CE" in k for k in keys) and any("PE" in k for k in keys)
     with pytest.raises(UnknownSlot):
         d.runner("3")
+
+
+def test_a_failure_in_one_slot_never_reaches_the_other_slot_or_the_feed(tmp_path, caplog) -> None:
+    d = desk(tmp_path, {"1": {0: "BUY"}, "2": {0: "SELL"}})
+    for slot in SLOTS:
+        d.runner(slot).start(DAY, "log_xz", {})
+
+    def boom(*a, **k):
+        raise RuntimeError("slot 2 broke")
+
+    d.runner("2").session.on_index_minute = boom  # type: ignore[method-assign]
+    d.runner("2").session.on_index_tick = boom  # type: ignore[method-assign]
+    feed(d, [(9, m, 22600.0) for m in range(15, 22)])  # does not raise
+    d.on_index_tick(22610.0, now_ms=ms(9, 22))
+    assert d.runner("1").session.book.position is not None
+    assert any("slot 2" in r.getMessage() for r in caplog.records)
+
+
+def test_index_ticks_reach_each_running_slot(tmp_path) -> None:
+    d = desk(tmp_path, {"1": {}, "2": {}})
+    seen = []
+    for slot in SLOTS:
+        d.runner(slot).start(DAY, "log_xz", {})
+        d.runner(slot).session.on_index_tick = lambda price, now_ms, s=slot: seen.append((s, price)) or []
+    d.on_index_tick(22610.0, now_ms=ms(9, 22))
+    assert seen == [("1", 22610.0), ("2", 22610.0)]

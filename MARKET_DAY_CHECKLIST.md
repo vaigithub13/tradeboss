@@ -22,8 +22,8 @@ For every trading day (first used for Monday sessions). Times are IST.
 
 ## During the session
 
-- The header badge says "live". Paper: pick the strategy and Start (a Start late in the day catches up from
-  the recording, so the signals are the same).
+- The header badge says "live". Paper: Start strategy 1 (Log XZ) and strategy 2 (Price Channel, length 20, 5m:
+  the slot's default). A Start late in the day catches up from the recording, so the signals are the same.
 - Paper squares off at 15:15:00 at the live bid.
 
 ## After the close

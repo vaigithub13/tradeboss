@@ -594,3 +594,16 @@ Walk-forward (6-month train, 2-month test, step 2, 7 windows), out-of-sample opt
 
 - 0.2, 2 combos, test windows: +30,854 (15m L40), +423 (15m L40), −17,990 (5m L20), −5,671 (5m L20), no choice, no choice, +19,483 (5m L20). Two windows carry the result. The last window chose 5m length 20.
 - Slippage: 0.2 premium points per leg is the measured ATM figure from 2 days of spread data (6 Oct DTE 0: one-lot fill cost 0.05 each side; 7 Oct DTE 4: 0.175 each side). Re-check when 10 sessions across different DTEs are recorded. At 1.0 the same walk-forward is negative, so this result depends on that measurement.
+- Slot 2 for 8 Oct: Price Channel, length 20, 5m (the walk-forward's last choice). Paper now runs stop-order
+  strategies: a stop is armed on the closed bar (replaced by tag, as Pine's strategy.entry does), fills when the
+  live index price crosses it (option bought at the ask then), a fill against the position reverses it, one in
+  the direction already held is cancelled (pyramiding 0), nothing fills at or after 15:15. The strategy reads its
+  bars (warm-up + live) through `ctx.bars`.
+- Bar decision lag: the backtest's stop is live from its bar's end; paper learns the level when the bar is
+  decided (its last minute exchange-final, about a minute later). A level the index crossed in that gap fills
+  when it is armed, at the live price then, noted on the signal (5 Oct 10:55 was this case).
+- The end-of-day check compares a stop strategy on the bar each fill is in (`basis="fill"`).
+- Replays of 5, 6 and 7 Oct through paper match the backtest with no differences (3, 2 and 3 fills; 6 and 7 Oct
+  from live quotes, 5 Oct modelled: no option depth that day). Tests: `test_paper_stops.py`, and the Price Channel
+  replay tests in `test_paper_replay.py`.
+- A failure in one paper slot is logged and skipped; the other slot and the feed go on.

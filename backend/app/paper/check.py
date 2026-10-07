@@ -77,9 +77,18 @@ def compare_signals(
     return diffs
 
 
+def entry_bar(entry_time: int, step: int, *, basis: str) -> int:
+    """The bar a backtest entry is compared on. `decision`: a market order filled at the next bar's open, so the
+    bar before. `fill`: a stop filled inside a bar, so the bar (anchored at 09:15 IST) that holds the fill minute."""
+    if basis == "decision":
+        return entry_time - step
+    anchor = entry_time - (entry_time + 19_800) % 86_400 + 9 * 3600 + 15 * 60
+    return entry_time - (entry_time - anchor) % step
+
+
 def backtest_day(store: CandleStore, symbol: str, day: date, strategy: Strategy,
-                 timeframe: str = "5m") -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
-    """The normal backtest on one day: its entries (decision bar time, side) and its bars."""
+                 timeframe: str = "5m", basis: str = "decision") -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+    """The normal backtest on one day: its entries (bar time, side) and its bars."""
     config = BacktestConfig(
         timeframe=timeframe,
         start=day.isoformat(),
@@ -94,7 +103,7 @@ def backtest_day(store: CandleStore, symbol: str, day: date, strategy: Strategy,
     result = run_backtest(strategy, StoreSource(store, symbol), config)
     step = 60 * int(timeframe[:-1])
     entries = [
-        {"time": t.entry_time - step, "side": "BUY" if t.direction == "LONG" else "SELL"}
+        {"time": entry_bar(t.entry_time, step, basis=basis), "side": "BUY" if t.direction == "LONG" else "SELL"}
         for t in result.trades
     ]
     start = int(datetime(day.year, day.month, day.day, tzinfo=IST).timestamp())
@@ -113,8 +122,9 @@ def end_of_day_check(
     symbol: str,
     make_strategy: Callable[[], Strategy],
     timeframe: str = "5m",
+    basis: str = "decision",
 ) -> dict[str, Any]:
-    backtest, bt_bars = backtest_day(store, symbol, day, make_strategy(), timeframe)
+    backtest, bt_bars = backtest_day(store, symbol, day, make_strategy(), timeframe, basis)
     diffs = compare_signals(live_entries, backtest, live_bars=live_bars, bt_bars=bt_bars, incomplete=incomplete)
     return {
         "day": day.isoformat(),

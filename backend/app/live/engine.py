@@ -111,6 +111,8 @@ class LiveEngine:
         self._new_requests: list[BackfillRequest] = []
         self._trading = False
         self.last_live_wall_ms: int | None = None  # receive time of the newest live_feed frame (badge)
+        #: last trade price of each instrument that ticked in the latest frame (paper stops read the index's)
+        self.ticked: dict[str, float] = {}
 
     # ------------------------------------------------------------------ input
     def on_disconnect(self) -> None:
@@ -118,6 +120,7 @@ class LiveEngine:
         self._reconnected = True
 
     def on_frame(self, raw: bytes, recv_wall_ms: int | None = None, frame_idx: int | None = None) -> None:
+        self.ticked = {}
         try:
             frame = decode_frame(raw)
         except FrameError as exc:
@@ -222,6 +225,7 @@ class LiveEngine:
                     held = True
                 else:
                     b.on_tick(tick)
+                    self.ticked[item.key] = float(item.ltp)
             if item.i1 is not None:
                 b.on_i1(item.i1, ref_ltt=None if held or item.ltt <= 0 else item.ltt, frame=idx)
 

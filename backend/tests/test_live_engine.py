@@ -354,3 +354,13 @@ def test_replaying_the_same_frames_batched_or_unbatched_gives_identical_bars() -
             e.on_frame(fr, T(9, 15) + i * lat, i)
         out.append((e.bars(EQ, include_withheld=True), e.bars(NIFTY, include_withheld=True)))
     assert out[0] == out[1] == out[2] and out[0][0]
+
+
+def test_the_index_prices_that_ticked_in_a_frame_are_kept_for_that_frame_only() -> None:
+    """Paper stop orders fire on the live index price; the engine hands over each frame's last trade price."""
+    f = Feeder()
+    f.info(T(9, 15))
+    f.live(T(9, 20, 1), idx(T(9, 20, 0, 500), 22611.5))
+    assert f.eng.ticked == {NIFTY: 22611.5}
+    f.live(T(9, 20, 2))
+    assert f.eng.ticked == {}

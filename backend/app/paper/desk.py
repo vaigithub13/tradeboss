@@ -5,6 +5,8 @@ writes `data/paper/slot2/`. The feed service talks to the desk as it talked to o
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Callable
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -13,6 +15,7 @@ from app.data.store import CandleStore
 from app.paper.live import PaperError, PaperRunner
 
 SLOTS = ("1", "2")
+log = logging.getLogger("tradeboss.paper.desk")
 
 
 class UnknownSlot(PaperError):
@@ -61,29 +64,34 @@ class PaperDesk:
                 continue
         return resumed
 
+    def _each(self, what: str, call: Callable[[PaperRunner], Any]) -> None:
+        """Run `call` on every slot. A slot that fails is logged and skipped: the other slot and the feed go on."""
+        for slot, r in self.runners.items():
+            try:
+                call(r)
+            except Exception:  # noqa: BLE001 - one strategy's failure must not stop the feed or the other slot
+                log.exception("paper slot %s failed in %s", slot, what)
+
     def on_depth(self, raw: bytes) -> None:
-        for r in self.runners.values():
-            r.on_depth(raw)
+        self._each("on_depth", lambda r: r.on_depth(raw))
 
     def on_clock(self, now_ms: int) -> None:
-        for r in self.runners.values():
-            r.on_clock(now_ms)
+        self._each("on_clock", lambda r: r.on_clock(now_ms))
+
+    def on_index_tick(self, price: float, *, now_ms: int) -> None:
+        self._each("on_index_tick", lambda r: r.on_index_tick(price, now_ms=now_ms))
 
     def on_index_bar(self, bar: dict[str, Any], *, now_ms: int) -> None:
-        for r in self.runners.values():
-            r.on_index_bar(bar, now_ms=now_ms)
+        self._each("on_index_bar", lambda r: r.on_index_bar(bar, now_ms=now_ms))
 
     def finish_day(self) -> None:
-        for r in self.runners.values():
-            r.finish_day()
+        self._each("finish_day", lambda r: r.finish_day())
 
     def reconcile_check(self, store: CandleStore, symbol: str, day: date | None = None) -> None:
-        for r in self.runners.values():
-            r.reconcile_check(store, symbol, day)
+        self._each("reconcile_check", lambda r: r.reconcile_check(store, symbol, day))
 
     def flush(self) -> None:
-        for r in self.runners.values():
-            r.flush()
+        self._each("flush", lambda r: r.flush())
 
     def status(self, now_ms: int) -> dict[str, Any]:
         return {"state": self.state, "slots": [{"slot": s, **self.runners[s].status(now_ms)} for s in SLOTS]}

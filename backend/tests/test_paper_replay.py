@@ -75,6 +75,8 @@ def run_replay(day: date) -> dict:
                     now_ms=engine.current_ts,
                 )
         if engine.current_ts > 0:
+            if NIFTY_INDEX_KEY in engine.ticked:
+                session.on_index_tick(engine.ticked[NIFTY_INDEX_KEY], now_ms=engine.current_ts)
             session.on_clock(engine.current_ts)
 
     frames = replay(recording_path(settings.feed_recordings_dir, day), on_frame)
@@ -166,3 +168,33 @@ def test_7_oct_warmed_replay_matches_the_backtest_with_real_fills() -> None:
     )
     assert report["live_signals"] == report["backtest_signals"] == 6 and report["differences"] == []
     assert all(r["fill_source"] == "quote" for r in s.signals if r["status"] == "filled")
+
+
+# ---------------------------------------------------------------- Price Channel (stop orders) on the recordings
+PC = {"strategy": "price_channel", "params": {"length": 20, "execution": "realistic", "lots": 1}}
+
+
+@pytest.mark.parametrize("day", [DAY5, DAY6, DAY7])
+def test_price_channel_paper_fills_match_the_backtest(day: date) -> None:
+    """Stops armed on closed 5m bars, filled on the live index price (a cross during the bar's decision fills when
+    armed). Compared on the bar each fill is in: no differences on 5, 6 and 7 Oct 2026."""
+    from app.paper.catchup import replay_into
+
+    missing = _missing(day, need_candles=True)
+    if missing:
+        pytest.skip(missing)
+    key_of = {i.symbol: i.key for i in index_on(settings.instruments_dir, day).instruments}
+    vix = VixSeries()
+    s = PaperSession(day=day, strategy=build_strategy(PC), choose=_choose, key_for=key_of.get, quotes=QuoteBook(),
+                     cost_table=load_default_cost_table(), model_price=model_price_for(vix.at))
+    s.warm(stored_warmup(CandleStore(settings.candles_dir), SYMBOL, day))
+    replay_into(s, recording_path(settings.feed_recordings_dir, day), on_vix=vix.add)
+    s.end_of_day()
+    filled = [r for r in s.signals if r["status"] == "filled"]
+    assert filled and s.uses_stops
+    report = end_of_day_check(
+        day=day, live_entries=[{"time": r["time"], "side": r["side"]} for r in filled], live_bars=s.live_bars(),
+        incomplete=s.bars.incomplete, store=CandleStore(settings.candles_dir), symbol=SYMBOL,
+        make_strategy=lambda: build_strategy(PC), basis="fill",
+    )
+    assert report["differences"] == [] and report["live_signals"] == report["backtest_signals"]

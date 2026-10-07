@@ -168,6 +168,7 @@ class PaperRunner:
             day=self.day, live_entries=entries, live_bars=s.live_bars(), incomplete=s.bars.incomplete,
             store=store, symbol=symbol,
             make_strategy=lambda: build_strategy({"strategy": strategy, "params": params}),
+            basis="fill" if s.uses_stops else "decision",
         )
         self._save()
         return self.eod_check
@@ -204,6 +205,14 @@ class PaperRunner:
         if self.state != "running" or self.session is None or self.day is None or ist_date(now_ms) != self.day:
             return
         if self.session.on_clock(now_ms):
+            self._save()
+            self._sync_wanted()
+
+    def on_index_tick(self, price: float, *, now_ms: int) -> None:
+        """The live index price: fills a working stop it crosses (stop-order strategies)."""
+        if self.state != "running" or self.session is None or self.day is None or ist_date(now_ms) != self.day:
+            return
+        if self.session.on_index_tick(price, now_ms=now_ms):
             self._save()
             self._sync_wanted()
 

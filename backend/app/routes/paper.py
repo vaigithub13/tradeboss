@@ -18,7 +18,11 @@ from app.paper.live import AlreadyRunning, NotRunning, PaperError, PaperRunner, 
 from app.paper.store import weekly_summary
 
 router = APIRouter(prefix="/api/paper")
-STRATEGIES = {"log_xz": {"label": "Log XZ (RMA 14, 5m)", "params": {}}}
+STRATEGIES = {
+    "log_xz": {"label": "Log XZ (RMA 14, 5m)", "params": {}},
+    # stop orders at the channel; the walk-forward's last choice (2026-10-07, slippage 0.2)
+    "price_channel": {"label": "Price Channel (length 20, 5m)", "params": {"length": 20}},
+}
 
 
 class StartBody(BaseModel):

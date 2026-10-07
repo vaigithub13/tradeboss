@@ -9,12 +9,13 @@ Open positions are squared off at 15:15, like the backtest's default square-off.
 
 from __future__ import annotations
 
+from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import asdict
 from datetime import date
 from typing import Any
 
-from app.backtest.context import PositionView
+from app.backtest.context import History, PastBars, PositionView
 from app.backtest.contracts import Signal
 from app.backtest.costs import CostTable
 from app.backtest.engine import BacktestConfig
@@ -28,6 +29,7 @@ from app.paper.quotes import QuoteBook
 from app.strategies.pine_common import minute_of
 
 SQUARE_OFF_MIN = 15 * 60 + 15
+TICK_MEMORY_MS = 10 * 60_000  # longer than any bar's decision lag
 WARMUP_BARS = BacktestConfig().warmup_bars  # the backtest warms its strategy on this many bars before the day
 TAG_REASON = {
     "LE": "log XZ crossed above 0: buy",
@@ -44,7 +46,8 @@ def warmup_before(prior: list[dict[str, Any]], day_start: int) -> list[dict[str,
 class _Ctx:
     """The fields a strategy's on_bar may read (see app/backtest/context.py StrategyContext)."""
 
-    def __init__(self, timeframe: str, symbol: str, position: PositionView) -> None:
+    def __init__(self, timeframe: str, symbol: str, position: PositionView, history: History | None = None,
+                 cancel: Callable[[str | None], int] | None = None) -> None:
         self.timeframe = timeframe
         self.symbol = symbol
         self.position = position
@@ -52,10 +55,11 @@ class _Ctx:
         self.cash = 0.0
         self.lot_size = 1
         self.open_orders: list[dict[str, Any]] = []
-        self.bars = None
+        self.bars = None if history is None else PastBars(history)
+        self._cancel = cancel
 
     def cancel_working(self, tag: str | None = None) -> int:
-        return 0
+        return 0 if self._cancel is None else self._cancel(tag)
 
     def indicator(self, itype: str, **params: Any) -> Any:
         raise NotImplementedError("paper trading takes no indicator views yet")
@@ -102,13 +106,22 @@ class PaperSession:
         self._contract_of: dict[str, OptionContract] = {}
         self.resume_after: int | None = None  # bars at or before this were decided before a restart (see restore)
         self.last_bar_time: int | None = None
+        self.history = History()  # warm-up and live closed bars: the strategy's ctx.bars
+        #: stop orders armed by the strategy, by tag: {side, price, tag, active_ms}; filled by on_index_tick
+        self.working: dict[str, dict[str, Any]] = {}
+        self.uses_stops = False  # the strategy arms stop orders: the end-of-day check compares fills
+        #: recent index prices (ms, price): a level crossed while a bar was being decided fills on arming
+        self._ticks: deque[tuple[int, float]] = deque()
+        self._fresh: set[str] = set()  # stops armed by the bar being decided now
 
     # ---------------------------------------------------------------- input
     def warm(self, bars: Iterable[dict[str, Any]]) -> None:
         """Run earlier closed bars through the strategy so its state is built, exactly as a backtest does
         before its first tradable bar: the position is flat and no signal is acted on."""
         for bar in bars:
-            ctx = _Ctx(self.timeframe, self.symbol, PositionView(side=0, lots=0, units=0, avg_price=0.0))
+            self.history.append(dict(bar))  # type: ignore[arg-type]
+            ctx = _Ctx(self.timeframe, self.symbol, PositionView(side=0, lots=0, units=0, avg_price=0.0),
+                       self.history, cancel=lambda _tag: 0)
             self.strategy.on_bar(dict(bar), ctx)
             self.warm_bars += 1
 
@@ -125,6 +138,7 @@ class PaperSession:
         self.book.trades = list(saved.get("trades", []))
         self.shown = list(saved.get("bars", []))
         self.warm_bars = int(saved.get("warm_bars", 0))
+        self.uses_stops = bool(saved.get("uses_stops", False))
         self.bars.incomplete = set(saved.get("incomplete_bars", []))
         self.resume_after = saved.get("last_bar_time")
         self.last_bar_time = self.resume_after
@@ -161,6 +175,8 @@ class PaperSession:
         """The feed's exchange time, every frame. At 15:15:00 the open position is squared off at that moment's
         quote, as the backtest squares off at 15:15; it does not wait for an exchange-final minute.
         True when this call closed the position."""
+        if ist_ms_of_day(now_ms) >= SQUARE_OFF_MIN * 60_000 and self.working:
+            self.working.clear()  # nothing fills after the square-off
         if self.book.position is None or ist_ms_of_day(now_ms) < SQUARE_OFF_MIN * 60_000:
             return False
         if self.resume_after is not None and now_ms < (self.resume_after + self._bar_s) * 1000:
@@ -182,16 +198,101 @@ class PaperSession:
         self.shown.append(bar)
         out = []
         for sig in self._step(bar):
-            out.append(self._act(sig, bar, now_ms))
+            if sig.type == "MARKET":
+                out.append(self._act(sig, bar, now_ms))
+        out += self._fill_crossed_on_arming(now_ms)
         return out
 
+    def _fill_crossed_on_arming(self, now_ms: int) -> list[dict[str, Any]]:
+        """A stop is live in the backtest from its bar's end; paper learns it when the bar is decided, about a
+        minute later. If the index traded through the level in between, fill now at the live price."""
+        fresh, self._fresh = self._fresh, set()
+        if not fresh or not self._tradable(now_ms):
+            return []
+        for tag in sorted(fresh):
+            order = self.working.get(tag)
+            if order is None:
+                continue
+            seen = [p for t, p in self._ticks if order["active_ms"] <= t <= now_ms]
+            crossed = any(p >= order["price"] for p in seen) if order["side"] == "BUY" else any(
+                p <= order["price"] for p in seen)
+            if crossed and self._ticks:
+                note = "the level was crossed before the order was armed (bar decision lag): filled when armed"
+                return self._trigger(tag, order, self._ticks[-1][1], now_ms, note=note)
+        return []
+
+    def _tradable(self, now_ms: int) -> bool:
+        if ist_ms_of_day(now_ms) >= SQUARE_OFF_MIN * 60_000:
+            return False
+        return self.resume_after is None or now_ms >= (self.resume_after + self._bar_s) * 1000
+
     def _step(self, bar: dict[str, Any]) -> list[Signal]:
+        """The strategy decides on a closed bar. Market signals move its side now; a stop is armed (by tag) and
+        moves the side only when on_index_tick fills it."""
+        self.history.append(dict(bar))  # type: ignore[arg-type]
         ctx = _Ctx(self.timeframe, self.symbol,
-                   PositionView(side=self._side, lots=1 if self._side else 0, units=0, avg_price=0.0))
+                   PositionView(side=self._side, lots=1 if self._side else 0, units=0, avg_price=0.0),
+                   self.history, cancel=self._cancel_working)
         signals = list(self.strategy.on_bar(bar, ctx))
         for sig in signals:
-            self._side = {"BUY": 1, "SELL": -1, "EXIT": 0}[sig.side]
+            if sig.type == "MARKET":
+                self._side = {"BUY": 1, "SELL": -1, "EXIT": 0}[sig.side]
+            else:
+                self._arm(sig, bar)
         return signals
+
+    def _cancel_working(self, tag: str | None) -> int:
+        if tag is None:
+            n = len(self.working)
+            self.working.clear()
+            return n
+        return 1 if self.working.pop(tag, None) is not None else 0
+
+    def _arm(self, sig: Signal, bar: dict[str, Any]) -> None:
+        """A stop works from the end of the bar that placed it, as in the backtest. A fill that could only come at
+        or after 15:15 is not placed (the backtest blocks it as after_square_off)."""
+        if sig.price is None or sig.type != "SL":
+            return
+        end = int(bar["time"]) + self._bar_s
+        if minute_of(end) >= SQUARE_OFF_MIN:
+            return
+        self.uses_stops = True
+        tag = sig.tag or sig.side
+        self.working[tag] = {"side": sig.side, "price": float(sig.price), "tag": tag, "active_ms": end * 1000}
+        self._fresh.add(tag)
+
+    def on_index_tick(self, price: float, *, now_ms: int) -> list[dict[str, Any]]:
+        """The live index price (exchange time). Fills the first working stop it crosses: the option is bought at
+        the live ask now. Returns the signal records it made."""
+        self._ticks.append((now_ms, float(price)))
+        while self._ticks and self._ticks[0][0] < now_ms - TICK_MEMORY_MS:
+            self._ticks.popleft()
+        if not self.working or not self._tradable(now_ms):
+            return []  # (before a restart's last decided bar: that time was already decided)
+        for tag, order in sorted(self.working.items(), key=lambda kv: kv[1]["active_ms"]):
+            if now_ms < order["active_ms"]:
+                continue
+            crossed = price >= order["price"] if order["side"] == "BUY" else price <= order["price"]
+            if crossed:
+                return self._trigger(tag, order, float(price), now_ms)
+        return []
+
+    def _trigger(self, tag: str, order: dict[str, Any], price: float, now_ms: int, note: str = "") -> list[dict[str, Any]]:
+        del self.working[tag]
+        direction = "LONG" if order["side"] == "BUY" else "SHORT"
+        if self.book.position is not None and self.book.position.direction == direction:
+            return []  # already in that position: the broker cancels it (pyramiding 0)
+        bar_time = (now_ms // 1000) - ((now_ms // 1000) - _session_anchor(now_ms)) % self._bar_s
+        rec: dict[str, Any] = {
+            "time": bar_time, "decided_at_ms": now_ms, "side": order["side"], "index_price": price,
+            "order_price": order["price"], "reason": f"{order['side'].lower()} stop {tag} at {order['price']:.2f}",
+            "symbol": None, "key": None, "status": "unfilled", "fill_source": None, "fill_price": None, "note": note,
+        }
+        self.signals.append(rec)
+        self._enter(rec, direction, price, now_ms, index_time=now_ms // 1000, close_reason="reverse")
+        if rec["status"] == "filled":
+            self._side = 1 if direction == "LONG" else -1
+        return [rec]
 
     def _act(self, sig: Signal, bar: dict[str, Any], now_ms: int) -> dict[str, Any]:
         rec: dict[str, Any] = {
@@ -224,34 +325,38 @@ class PaperSession:
             rec["note"] = "already in that position"
             return rec
 
-        spot = float(bar["close"])
+        self._enter(rec, direction, float(bar["close"]), now_ms, index_time=int(bar["time"]), close_reason="signal")
+        return rec
+
+    def _enter(self, rec: dict[str, Any], direction: str, spot: float, now_ms: int, *, index_time: int,
+               close_reason: str) -> None:
+        """Buy the ATM option for `direction` at the live ask (closing an open one at the bid first)."""
         contract = self.choose(direction, spot, self.day)
         key = self.key_for(contract.symbol)
         if key is None:
             rec["note"] = "contract is not in the instrument master"
-            return rec
+            return
         units = self.lots * contract.lot_size
         entry = self._fill("BUY", key, contract, units, spot, now_ms)
         if entry is None:
             rec["note"] = "no quote and no model price for the contract"
-            return rec
+            return
         if self.book.position is not None:
             exit_fill = self._fill("SELL", self.book.position.key, self._contract_of[self.book.position.key],
                                    self.book.position.units, spot, now_ms)
             if exit_fill is None:
                 rec["note"] = "could not close the open position: no quote and no model price"
-                return rec
-            self.book.close(exit_fill, index_exit_time=int(bar["time"]), reason="signal")
+                return
+            self.book.close(exit_fill, index_exit_time=index_time, reason=close_reason)
         self._contract_of[key] = contract
         self.wanted.add(key)
         self.book.open(Position(
             direction=direction, key=key, symbol=contract.symbol, kind=contract.kind, strike=contract.strike,
             expiry=contract.expiry, lots=self.lots, units=units, lot_size=contract.lot_size, entry=entry,
-            index_entry_time=int(bar["time"]), reason=rec["reason"],
+            index_entry_time=index_time, reason=rec["reason"],
         ))
         rec.update(status="filled", symbol=contract.symbol, key=key, fill_source=entry.source,
                    fill_price=entry.price)
-        return rec
 
     def prepare(self, spot: float) -> None:
         """Ask for the ATM call and put of the nearest weekly, so a signal finds its quote already subscribed."""
@@ -317,7 +422,15 @@ class PaperSession:
             "closed_bars": len(self.shown),
             "bars": self.shown,
             "last_bar_time": self.last_bar_time,
+            "working": sorted(self.working.values(), key=lambda o: o["tag"]),
+            "uses_stops": self.uses_stops,
             "warm_bars": self.warm_bars,
             "incomplete_bars": sorted(self.bars.incomplete),
             "pre_open_ignored": self.bars.pre_open_ignored,
         }
+
+
+def _session_anchor(now_ms: int) -> int:
+    """09:15 IST of `now_ms`'s day, in unix seconds (the bars are anchored there)."""
+    t = now_ms // 1000
+    return t - (t + 19_800) % 86_400 + 9 * 3600 + 15 * 60
