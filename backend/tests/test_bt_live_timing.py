@@ -190,3 +190,11 @@ def test_a_walk_forward_request_carries_live_timing() -> None:
             "start": "2024-10-03", "end": "2026-06-30", "mode": "options"}
     assert parse_walk_forward(body)["live_timing"] is True
     assert parse_walk_forward({**body, "live_timing": False})["live_timing"] is False
+
+
+def test_a_saved_run_shows_late_entries() -> None:
+    from app.backtest.execute import _index_summary, _trade
+
+    res = go({1: [stop("BUY", 105.0)]}, {(9, 25): (100, 106, 100, 104), (9, 26): (103, 103.5, 102.5, 103)})
+    assert _index_summary(res)["late_entries"] == 1
+    assert _trade(res.trades[0], None)["late"] is True

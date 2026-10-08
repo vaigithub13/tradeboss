@@ -252,6 +252,7 @@ def _index_summary(result: BacktestResult) -> dict[str, Any]:
         "gross_pnl": metrics.get("gross_pnl"),
         "total_charges": metrics.get("total_charges"),
         "total_slippage": metrics.get("total_slippage"),
+        "late_entries": sum(1 for trade in result.trades if trade.late),
     }
 
 
@@ -273,6 +274,7 @@ def _trade(trade: Trade, option: dict[str, Any] | None) -> dict[str, Any]:
         "exit_reason": trade.exit_reason,
         "entry_tag": trade.entry_tag,
         "exit_tag": trade.exit_tag,
+        "late": trade.late,
     }
     if option is not None:
         row["option"] = {
