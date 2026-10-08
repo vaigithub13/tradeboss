@@ -12,7 +12,11 @@ Matching rules (approved, see tests/test_bt_fills.py, test_bt_intrabar.py):
   `ambiguous` (stop-before-target is the pessimistic assumption);
 * an entry that fills at the open lets its bracket children work in the SAME bar; an entry that
   triggers inside the bar lets its stop work (flagged ambiguous) but its target only from the next bar;
-* a fill never changes the past: everything here is driven bar by bar.
+* a fill never changes the past: everything here is driven bar by bar;
+* live timing (the engine's `live_timing`): an order works from one minute after its bar ended. A stop whose
+  level the index touched in that lag minute fills at the next minute's open and is flagged `late` (paper learns
+  the level then and fills at the live price). A cancel by the strategy takes effect at the same minute
+  (`cancel_delay`), so the level it replaces still works through the lag minute, as in paper.
 """
 
 from __future__ import annotations
@@ -55,6 +59,9 @@ class Order:
     ambiguous_in: int | None = None
     stop_points: float | None = None
     target_points: float | None = None
+    lag_from: int | None = None  # live timing: start of the lag minute(s) before min_t
+    lag_crossed: bool = False  # the level was touched in the lag minute: fill at the open when it works
+    cancel_at: int | None = None  # a deferred cancel by the strategy (live timing)
 
 
 @dataclass
@@ -70,6 +77,7 @@ class _Open:
     gap: bool = False
     ambiguous: bool = False
     optimistic: bool = False
+    late: bool = False
     entry_at_open: bool = True
     exit_at_open: bool = True
 
@@ -90,6 +98,7 @@ class BacktestBroker:
         self.trades: list[Trade] = []
         self._realized = Decimal("0")
         self.pyramiding: int | None = None  # 0: an opposite entry reverses, a same-side entry does not add
+        self.cancel_delay = 0  # live timing: a strategy's cancel takes effect this many seconds after it is asked
 
     # ------------------------------------------------------------------ views (for ctx)
     def positions(self) -> PositionView:
@@ -107,6 +116,7 @@ class BacktestBroker:
             {"id": o.id, "side": o.side, "type": o.type, "price": o.price, "lots": o.lots, "tag": o.tag,
              "reduce_only": o.reduce_only}
             for o in sorted(self._working.values(), key=lambda x: x.id)
+            if o.cancel_at is None
         ]
 
     # ------------------------------------------------------------------ placing / cancelling
@@ -114,7 +124,7 @@ class BacktestBroker:
         self.events.append({"kind": kind, "t": int(t), **kw})
 
     def place(self, signal: Signal, *, t: int, ref_price: float, min_t: int,
-              block: tuple[str, bool] | None = None, **_: Any) -> int | None:
+              block: tuple[str, bool] | None = None, lag_from: int | None = None, **_: Any) -> int | None:
         """Register a signal as a working order. `block` = (reason, also_reduce_only): the order is
         recorded but can never fill (no next bar / after square-off) and is reported as `unfilled`."""
         pos = self.lots
@@ -146,7 +156,8 @@ class BacktestBroker:
                 return None
         order = Order(self._next_id, side, signal.type, signal.price, lots, signal.tag, signal.oco, reduce_only,
                       "exit" if reduce_only else "entry", min_t, signal.stop, signal.target,
-                      stop_points=signal.stop_points, target_points=signal.target_points)
+                      stop_points=signal.stop_points, target_points=signal.target_points,
+                      lag_from=lag_from if signal.type == "SL" else None)
         self._next_id += 1
         self.counters["orders"] += 1
         self._event("order_placed", t, id=order.id, side=side, type=signal.type, price=signal.price, lots=lots,
@@ -176,10 +187,25 @@ class BacktestBroker:
         return True
 
     def cancel_matching(self, tag: str | None, t: int) -> int:
-        victims = [o for o in sorted(self._working.values(), key=lambda x: x.id) if tag is None or o.tag == tag]
+        victims = [o for o in sorted(self._working.values(), key=lambda x: x.id)
+                   if (tag is None or o.tag == tag) and o.cancel_at is None]
         for o in victims:
-            self._drop(o, t, "cancelled")
+            if self.cancel_delay:
+                o.cancel_at = t + self.cancel_delay  # still works until paper would have replaced it
+            else:
+                self._drop(o, t, "cancelled")
         return len(victims)
+
+    def _expire_cancels(self, ts: int) -> None:
+        for o in [o for o in sorted(self._working.values(), key=lambda x: x.id)
+                  if o.cancel_at is not None and o.cancel_at <= ts]:
+            self._drop(o, o.cancel_at or ts, "cancelled")
+
+    def _note_lag_crosses(self, ts: int, hi: float, lo: float) -> None:
+        """Live timing: a stop not working yet whose level this lag minute touched fills when it starts working."""
+        for o in self._working.values():
+            if o.lag_from is not None and o.lag_from <= ts < o.min_t and self._range_trigger(o, hi, lo) is not None:
+                o.lag_crossed = True
 
     def cancel_all(self, t: int, reason: str | None) -> None:
         for o in sorted(self._working.values(), key=lambda x: x.id):
@@ -227,10 +253,11 @@ class BacktestBroker:
             for order in sorted(self._working.values(), key=lambda x: x.id):
                 if order.min_t > ts:
                     continue
-                hit = self._open_fill(order, op)
+                late = order.lag_crossed
+                hit = self._open_fill(order, op) or ((op, False) if late else None)
                 if hit is None:
                     continue
-                self._execute(order, hit[0], ts, gap=hit[1], ambiguous=False, at_open=True, base_s=base_s)
+                self._execute(order, hit[0], ts, gap=hit[1], ambiguous=False, at_open=True, base_s=base_s, late=late)
                 break
             else:
                 break
@@ -238,6 +265,8 @@ class BacktestBroker:
     def on_sub_bar(self, ts: int, op: float, hi: float, lo: float, base_s: int) -> None:
         if not self._working:
             return
+        self._expire_cancels(ts)
+        self._note_lag_crosses(ts, hi, lo)
         self._fill_opens(ts, op, base_s)
         # orders triggered inside the bar
         while self._working:
@@ -325,7 +354,7 @@ class BacktestBroker:
     # ------------------------------------------------------------------ executing a fill
     def _execute(self, order: Order, raw: float, t: int, *, gap: bool, ambiguous: bool, at_open: bool, base_s: int,
                  reason: str | None = None, optimistic: bool = False, children_from: int | None = None,
-                 same_bar: bool = False) -> None:
+                 same_bar: bool = False, late: bool = False) -> None:
         self._working.pop(order.id, None)
         pos = self.lots
         lots = order.lots
@@ -358,9 +387,12 @@ class BacktestBroker:
             self.counters["ambiguous"] += 1
         if optimistic:
             self.counters["optimistic_fills"] = self.counters.get("optimistic_fills", 0) + 1
+        if late:
+            self.counters["late_fills"] = self.counters.get("late_fills", 0) + 1
         self.counters["fills"] += 1
         self._event("fill", t, id=order.id, side=order.side, type=order.type, price=float(price), raw_price=float(raw),
-                    lots=lots, gap=gap, ambiguous=ambiguous, optimistic=optimistic, reason=exit_reason, tag=order.tag)
+                    lots=lots, gap=gap, ambiguous=ambiguous, optimistic=optimistic, reason=exit_reason, tag=order.tag,
+                    late=late)
         dp = _d(price)
 
         def flag(tr: _Open) -> None:
@@ -388,7 +420,7 @@ class BacktestBroker:
         if opening:
             if self.lots == 0:
                 self.lot_size = self.lot_resolver(day)
-                self._open = _Open(sign, t, order.tag, self.lot_size, entry_at_open=at_open)
+                self._open = _Open(sign, t, order.tag, self.lot_size, entry_at_open=at_open, late=late)
                 self._avg = Decimal("0")
             tr = self._open
             assert tr is not None
@@ -474,6 +506,7 @@ class BacktestBroker:
             gap=tr.gap,
             ambiguous=tr.ambiguous,
             optimistic=tr.optimistic,
+            late=tr.late,
             entry_at_open=tr.entry_at_open,
             exit_at_open=tr.exit_at_open,
             entry_fills=len(tr.entries),

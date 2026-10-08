@@ -81,7 +81,10 @@ class Scripted(Strategy):
 
 
 def cfg(**kw: Any) -> BacktestConfig:
-    base: dict[str, Any] = {"timeframe": "1m", "lot_size": 1, "square_off": None, "warmup_bars": 0}
+    """The engine tests pin the matching rules on the old timing (orders work from the bar's end);
+    tests/test_bt_live_timing.py covers live timing, the default."""
+    base: dict[str, Any] = {"timeframe": "1m", "lot_size": 1, "square_off": None, "warmup_bars": 0,
+                            "live_timing": False}
     base.update(kw)
     return BacktestConfig(**base)
 

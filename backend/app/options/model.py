@@ -181,21 +181,6 @@ def _days_to_expiry(day: date, expiry: date, is_trading_day: Any) -> int:
     return n
 
 
-def decision_spot(index_bars: Sequence[dict[str, Any]], entry_time: int, *, same_bar: bool) -> float | None:
-    """Index close known at the signal. `same_bar` = fill at the signal bar's close (optimistic)."""
-    if same_bar:
-        for b in index_bars:
-            if int(b["time"]) == int(entry_time):
-                return float(b["close"])
-    last: float | None = None
-    for b in index_bars:
-        if int(b["time"]) < int(entry_time):
-            last = float(b["close"])
-        else:
-            break
-    return last
-
-
 def _session_map(index_bars: Sequence[dict[str, Any]]) -> tuple[dict[date, dict[str, float]], dict[date, date]]:
     """Per IST day: first open and last close, plus the previous session date."""
     days: dict[date, dict[str, float]] = {}
@@ -353,7 +338,6 @@ def overlay_options(
     step_table = steps or load_default_step_table()
     cost_model = costs if costs is not None else get_cost_model("options")
     ev = events if events is not None else load_default_events()
-    same_bar = bool(result.optimistic)
     sessions, prev_session = _session_map(index_bars)
     vix_hash = _series_digest(vix_bars)
 
@@ -372,7 +356,7 @@ def overlay_options(
             before_history = True
         row = _one_trade(
             trade, index_bars, vix_bars, cfg, cal, lot_table, step_table, cost_model, ev,
-            same_bar, sessions, prev_session, tape,
+            sessions, prev_session, tape,
         )
         if row.get("unpriced"):
             unpriced.append(row)
@@ -537,15 +521,14 @@ def _one_trade(
     steps: StrikeStepTable,
     costs: CostModel,
     events: EventCalendar,
-    same_bar: bool,
     sessions: dict[date, dict[str, float]],
     prev_session: dict[date, date],
     tape: PremiumTape | None,
 ) -> dict[str, Any]:
     entry_d, exit_d = ist_date(trade.entry_time), ist_date(trade.exit_time)
-    spot = decision_spot(index_bars, trade.entry_time, same_bar=same_bar)
-    if spot is None:
-        spot = float(trade.entry_price)
+    # ATM of the index price at the fill moment, as paper picks it: the stop level for a stop fill, the minute's
+    # open for a market fill (or for a stop that gapped or filled late), the bar close for same_bar_close.
+    spot = float(trade.entry_price)
     try:
         contract = choose_contract(
             trade.direction, spot, entry_d,

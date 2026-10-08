@@ -10,6 +10,7 @@ import {
   compareSelection,
   compareSeries,
   compareWarningLines,
+  runLabel,
   formFromRun,
   holdoutFormWarning,
   jumpWindow,
@@ -43,6 +44,19 @@ describe("formFromRun", () => {
     expect(saved.params.range_minutes).toBe(15);
     expect(saved.sessions).toEqual(["normal", "weekend_full"]);
     expect(form.strategy).toBe("opening_range_breakout");
+  });
+
+  it("keeps the old timing for a run saved before live timing existed", () => {
+    expect(formFromRun(config()).live_timing).toBe(false);
+    expect(formFromRun({ ...config(), live_timing: true }).live_timing).toBe(true);
+  });
+});
+
+describe("runLabel timing", () => {
+  it("marks runs on the old bar-end timing", () => {
+    expect(runLabel({ ...config(), strategy: "log_xz", live_timing: true })).toBe("Log XZ 0.5 pt");
+    expect(runLabel({ ...config(), strategy: "log_xz", live_timing: false })).toBe("Log XZ 0.5 pt bar-end");
+    expect(runLabel({ ...config(), strategy: "log_xz" })).toBe("Log XZ 0.5 pt bar-end");
   });
 });
 

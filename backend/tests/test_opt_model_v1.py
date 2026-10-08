@@ -354,3 +354,19 @@ def test_delta_adjusted_is_the_default_and_minute_open_is_labelled_optimistic() 
     assert out.option.trades[0]["entry_premium"] == 80.0
     assert out.option.settings["option_fill"] == "optimistic"
     assert any("optimistic" in warning for warning in out.option.warnings)
+
+
+def test_the_strike_is_atm_of_the_index_fill_price_not_the_minute_before() -> None:
+    """8 Oct 2026: a sell stop at 22521.05 filled at 09:24; the 09:23 close was 22530.55. Paper bought the ATM of
+    the fill (22500 PE); the backtest takes the same strike from the fill price, not the close before it."""
+    fill, ex = ist(2026, 10, 8, 9, 24), ist(2026, 10, 8, 15, 15)
+    index = [bar(fill - 60, 22530.55), {**bar(fill, 22530.6), "low": 22514.5}, bar(ex, 22216.0)]
+    vix = [bar(fill, 13.0), bar(ex, 13.0)]
+    stop_fill = trade(direction="SHORT", entry=(fill, 22521.05), exit=(ex, 22216.0), entry_at_open=False)
+    row = estimate([stop_fill], index, vix).option.trades[0]
+    assert (row["contract"]["kind"], row["contract"]["strike"]) == ("PE", 22500.0)
+    # a market fill uses its own fill price (the minute's open) the same way
+    market = trade(direction="LONG", entry=(fill, 22524.0), exit=(ex, 22216.0))
+    assert estimate([market], index, vix).option.trades[0]["contract"]["strike"] == 22500.0
+    market_up = trade(direction="LONG", entry=(fill, 22526.0), exit=(ex, 22216.0))
+    assert estimate([market_up], index, vix).option.trades[0]["contract"]["strike"] == 22550.0

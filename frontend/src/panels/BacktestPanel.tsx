@@ -224,7 +224,22 @@ export function BacktestPanel() {
           </label>
         </div>
       )}
-      <p className="text-white/40">Square-off 15:15. Fills at the next bar open. Index costs are zero.</p>
+      <label className="flex items-center gap-2">
+        <input
+          aria-label="Live timing"
+          type="checkbox"
+          checked={form.live_timing ?? true}
+          onChange={(e) => setForm({ live_timing: e.target.checked })}
+        />
+        Live timing (orders one minute after the bar closes, as paper)
+      </label>
+      <p className="text-white/40">
+        Square-off 15:15.{" "}
+        {form.live_timing ?? true
+          ? "Market fills at the open one minute after the bar closes; a stop works from then, and a level crossed in that minute fills late at its open."
+          : "Fills at the next bar open (bar-end timing)."}{" "}
+        Index costs are zero.
+      </p>
       <button
         type="button"
         className="rounded bg-sky-700 px-3 py-1.5 text-white disabled:opacity-40"

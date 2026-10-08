@@ -1,7 +1,7 @@
 """End-of-day check: the live signals against the normal backtest on the same day.
 
 The backtest is the real engine (`run_backtest`) on the stored candles, with the same strategy and
-parameters. A backtest entry fills at the next bar's open, so its decision bar starts one bar earlier.
+parameters, on live timing: a market entry fills one minute after its decision bar ends, as in paper.
 Each mismatch gets a reason: a live gap, a different bar, or the same bar with a different state.
 """
 
@@ -13,7 +13,7 @@ from typing import Any
 
 from app.backtest.contracts import Strategy
 from app.backtest.costs import get_cost_model
-from app.backtest.engine import BacktestConfig, run_backtest
+from app.backtest.engine import LIVE_LAG_S, BacktestConfig, run_backtest
 from app.backtest.sources import StoreSource
 from app.data.resampler import resample
 from app.data.store import CandleStore
@@ -77,11 +77,12 @@ def compare_signals(
     return diffs
 
 
-def entry_bar(entry_time: int, step: int, *, basis: str) -> int:
-    """The bar a backtest entry is compared on. `decision`: a market order filled at the next bar's open, so the
-    bar before. `fill`: a stop filled inside a bar, so the bar (anchored at 09:15 IST) that holds the fill minute."""
+def entry_bar(entry_time: int, step: int, *, basis: str, lag: int = LIVE_LAG_S) -> int:
+    """The bar a backtest entry is compared on. `decision`: a market order filled `lag` seconds after its bar ended
+    (live timing; 0 on the old timing), so the bar that ended then. `fill`: a stop filled inside a bar, so the bar
+    (anchored at 09:15 IST) that holds the fill minute."""
     if basis == "decision":
-        return entry_time - step
+        return entry_time - lag - step
     anchor = entry_time - (entry_time + 19_800) % 86_400 + 9 * 3600 + 15 * 60
     return entry_time - (entry_time - anchor) % step
 
@@ -102,8 +103,9 @@ def backtest_day(store: CandleStore, symbol: str, day: date, strategy: Strategy,
     )
     result = run_backtest(strategy, StoreSource(store, symbol), config)
     step = 60 * int(timeframe[:-1])
+    lag = LIVE_LAG_S if config.live_timing else 0
     entries = [
-        {"time": entry_bar(t.entry_time, step, basis=basis), "side": "BUY" if t.direction == "LONG" else "SELL"}
+        {"time": entry_bar(t.entry_time, step, basis=basis, lag=lag), "side": "BUY" if t.direction == "LONG" else "SELL"}
         for t in result.trades
     ]
     start = int(datetime(day.year, day.month, day.day, tzinfo=IST).timestamp())

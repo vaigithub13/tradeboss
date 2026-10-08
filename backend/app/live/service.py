@@ -41,6 +41,7 @@ from app.live.overlay import LiveOverlay
 from app.live.persist import ReconcileState, is_stored, upsert_bars
 from app.live.reconcile import reconcile_missed, reconcile_today
 from app.live.recorder import BINARY, RECV, SENT, Recorder, recording_path
+from app.options.history import OptionHistoryStore, capture_session
 from app.paper.catchup import PAPER_BAR_SOURCES, replay_into
 from app.paper.desk import SLOTS, PaperDesk
 from app.paper.live import PaperError, PaperRunner, session_factory
@@ -104,6 +105,8 @@ class LiveConfig:
     spread_recorder_enabled: bool = False
     spreads_dir: Path | None = None
     paper_dir: Path | None = None
+    #: after the reconcile, the nearest weekly's options (ATM +/- 5 over the day's range) go here; None = off
+    option_history_dir: Path | None = None
 
 
 def _hhmm(s: str) -> dtime:
@@ -119,6 +122,7 @@ class _Flags:
     next_rest_poll: float = 0.0
     rest_status: dict[str, Any] | None = None
     close_log_written: bool = False
+    options_captured_day: date | None = None
 
 
 class LiveService:
@@ -322,6 +326,22 @@ class LiveService:
                     now_ms=self.engine.current_ts,
                 )
 
+    def _resend_index_to_paper(self, key: str) -> None:
+        """After a backfill (or a release) of the index: every final minute of the day goes to paper again. The
+        engine re-sends only its last two bars, and minutes that arrived while the index was withheld were never
+        sent; paper ignores the ones it already has and rebuilds the bars the gap left short."""
+        if key != NIFTY_INDEX_KEY:
+            return
+        with self._elock:
+            minutes = [b for b in self.engine.bars(key) if b.source in PAPER_BAR_SOURCES]
+            now_ms = self.engine.current_ts
+        for b in minutes:
+            self.paper.on_index_bar(
+                {"time": b.time_s, "open": b.open, "high": b.high, "low": b.low, "close": b.close,
+                 "volume": b.volume or 0, "source": b.source},
+                now_ms=now_ms,
+            )
+
     def _sync_key(self, key: str) -> None:
         """Replace the overlay for `key` with everything the engine has (after backfill / release)."""
         with self._elock:
@@ -351,6 +371,7 @@ class LiveService:
             with self._elock:
                 self.engine.apply_backfill(req.key, bars)
             self._drain()
+            self._resend_index_to_paper(req.key)
             self._sync_key(req.key)
             await self.hub.broadcast_reload({symbol_dir_name(req.key)})
             log.info("backfilled %s: %d bars for %d..%d", req.key, len(bars), req.first_minute, req.last_minute)
@@ -425,7 +446,36 @@ class LiveService:
         if reports and all(r.ok for r in reports):
             self._flags.reconciled_day = day
             self.paper.reconcile_check(self.store, PAPER_SYMBOL, day)
+            await self.capture_options(day)
         return reports
+
+    async def capture_options(self, day: date) -> dict[str, Any] | None:
+        """After the close, once a day: the nearest weekly's 1m option bars, ATM +/- 5 over the day's index range,
+        into the option store, so paper-vs-backtest comparisons price from stored bars."""
+        if self.cfg.option_history_dir is None or self._flags.options_captured_day == day:
+            return None
+        client = self.client_factory()
+        index = current_index(self.cfg.instruments_dir)
+        with self._elock:
+            bars = self.engine.bars(NIFTY_INDEX_KEY, include_withheld=True)
+        if client is None or index is None or not bars:
+            log.warning("option capture for %s skipped: %s", day,
+                        "no Upstox token" if client is None else "no instrument snapshot" if index is None else "no index bars")
+            return None
+        day_range = (min(b.low for b in bars), max(b.high for b in bars))
+        try:
+            result = await asyncio.to_thread(
+                capture_session, day, day_range, client=client, instruments=index,
+                store=OptionHistoryStore(self.cfg.option_history_dir), today=day,
+            )
+        except Exception as exc:  # noqa: BLE001 - the script can be run by hand
+            log.warning("option capture for %s failed: %s: %s", day, type(exc).__name__, exc)
+            return None
+        self._flags.options_captured_day = day
+        level = logging.WARNING if result["failed"] or result["empty"] else logging.INFO
+        log.log(level, "option capture %s: expiry %s, %d strikes, %d stored, %d empty, %d failed", day,
+                result["expiry"], len(result["strikes"]), result["fetched"], result["empty"], result["failed"])
+        return result
 
     async def _startup_reconcile(self) -> None:
         client = self.client_factory()
@@ -467,6 +517,7 @@ class LiveService:
                 with self._elock:
                     self.engine.release(req.key)
                 self._drain()
+                self._resend_index_to_paper(req.key)
                 self._sync_key(req.key)
                 log.warning("backfill for %s still missing after %.0fs: showing live bars, gap stays marked", req.key, waited)
             if now - self._last_attempt.get(req.key, -1e9) >= BACKFILL_RETRY_S:
@@ -648,6 +699,7 @@ def build_service() -> LiveService:
         spread_recorder_enabled=settings.spread_recorder_enabled,
         spreads_dir=settings.data_dir / "spreads",
         paper_dir=settings.data_dir / "paper",
+        option_history_dir=settings.data_dir / "option_history",
     )
     enabled = settings.live_feed_enabled and settings.upstox_token_value() is not None
     return LiveService(cfg, get_store(), client_factory=make_client, enabled=enabled)

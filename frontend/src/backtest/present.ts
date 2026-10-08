@@ -16,6 +16,9 @@ export interface RunConfig {
   /** option-premium exits as fractions of the entry premium (0.3 = +30%); absent or null = off */
   premium_target_pct?: number | null;
   premium_stop_pct?: number | null;
+  /** true: orders work one minute after the bar closes, as in paper. false or absent (runs saved before
+   * 8 Oct 2026): from the bar's end. */
+  live_timing?: boolean;
   kind?: "walk_forward" | "holdout";
   train_months?: number;
   test_months?: number;
@@ -40,7 +43,12 @@ export function formFromRun(config: RunConfig): RunConfig {
     ...config,
     params: { ...config.params },
     sessions: [...config.sessions],
+    live_timing: config.live_timing === true,
   };
+}
+
+export function isLiveTiming(config: Pick<RunConfig, "live_timing">): boolean {
+  return config.live_timing === true;
 }
 
 export function warningLines(warnings: string[], gitDirty: boolean): string[] {
@@ -107,7 +115,9 @@ export function compareSelection(
   return { ok: true, ids: unique };
 }
 
-export function runLabel(config: Pick<RunConfig, "strategy" | "slippage_points" | "mode"> & { kind?: string }): string {
+export function runLabel(
+  config: Pick<RunConfig, "strategy" | "slippage_points" | "mode" | "live_timing"> & { kind?: string },
+): string {
   const name =
     config.strategy === "opening_range_breakout"
       ? "ORB"
@@ -124,7 +134,8 @@ export function runLabel(config: Pick<RunConfig, "strategy" | "slippage_points" 
                 : config.strategy;
   const slip = config.mode === "options" ? ` ${config.slippage_points} pt` : "";
   const prefix = config.kind === "walk_forward" ? "WF " : "";
-  return `${prefix}${name}${slip}`;
+  const timing = isLiveTiming(config) ? "" : " bar-end";
+  return `${prefix}${name}${slip}${timing}`;
 }
 
 export function HOLDOUT_COUNT(peeks: number): string {

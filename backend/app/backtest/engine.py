@@ -7,6 +7,12 @@ Per signal-timeframe bar i:
   3. its signals become orders that may fill from the NEXT bar (or, only if asked for and then
      flagged optimistic, at this bar's close).
 
+Live timing (`live_timing`, the default): paper decides a bar when its last minute is exchange-final, one minute
+after the bar ends, so orders work from then. A market signal fills at the open of that minute; a stop works from
+it, and a level the index touched in the lag minute fills at that minute's open (flagged `late`); a cancel by the
+strategy takes effect then too. `live_timing=False` is the old timing, where everything works from the bar's end.
+It applies to 1m matching with `next_open`; the Pine bar path and `same_bar_close` keep their own timing.
+
 Candles and indicators are the chart's own code (`CandleStore`, `resample`, `registry.compute`).
 Indicators are computed once over the series and revealed one value per bar; tests/test_bt_lookahead.py
 proves that this equals computing on the past only, and that replacing the future changes nothing.
@@ -44,6 +50,7 @@ INTRADAY_MIN = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60}
 OPEN_MIN, CLOSE_MIN = 9 * 60 + 15, 15 * 60 + 30
 DEFAULT_SQUARE_OFF = "15:15"
 FILL_MODES = ("next_open", "same_bar_close")
+LIVE_LAG_S = 60  # paper decides a bar when its last minute is exchange-final, one minute after the bar ends
 Sub = tuple[int, float, float, float, float]  # time, open, high, low, close of one base bar
 
 
@@ -72,6 +79,7 @@ class BacktestConfig:
     end: str | None = None  # last IST date traded
     session_types: tuple[str, ...] = DEFAULT_INCLUDED_SESSION_TYPES
     fill_mode: str = "next_open"  # or "same_bar_close" (optimistic, flagged in the result)
+    live_timing: bool = True  # orders work from one minute after the bar ends, as in paper (see the module doc)
     square_off: str | None = "default"  # None, "HH:MM" or "default" (15:15)
     warmup_bars: int = 500
     lot_size: int | None = None  # fixed lot size; None -> lot_table + underlying (dated)
@@ -114,6 +122,7 @@ class BacktestConfig:
         return {
             "timeframe": self.timeframe, "start": self.start, "end": self.end,
             "session_types": sorted(self.session_types), "fill_mode": self.fill_mode,
+            "live_timing": self.live_timing,
             "square_off": None if sq is None else f"{sq // 60:02d}:{sq % 60:02d}",
             "warmup_bars": self.warmup_bars, "lot_size": self.lot_size, "underlying": self.underlying,
             "lot_table": None if self.lot_table is None or self.lot_size is not None else self.lot_table.to_dict(),
@@ -337,6 +346,11 @@ def run_backtest(
 
     broker = BacktestBroker(cost_model=cfg.cost_model, slippage=cfg.slippage, lot_resolver=lot_on, events=events,
                             counters=counters)
+    lag = LIVE_LAG_S if cfg.live_timing and cfg.fill_mode == "next_open" and intraday and not pine_path else 0
+    if lag and base != 1:
+        lag = 0
+        warnings.append(f"live timing needs 1m source bars: off for this {base}m source (orders work from the bar's end)")
+    broker.cancel_delay = lag
     broker.pyramiding = getattr(strategy, "pyramiding", None)
     history = History()
     frame = candles_to_frame(series.bars)
@@ -419,9 +433,10 @@ def run_backtest(
                     block = ("after_square_off", False)
             elif nxt_first is None or (intraday and dates[k + 1] != dates[k] and not overnight):
                 block = ("no_next_bar", True)
-            elif sq_active and dates[k + 1] == dates[k] and _tod(nxt_first) >= sq:  # type: ignore[operator]
+            elif sq_active and dates[k + 1] == dates[k] and _tod(max(nxt_first, end_t + lag)) >= sq:  # type: ignore[operator]
                 block = ("after_square_off", False)
-            oid = broker.place(sig, t=end_t, ref_price=float(bar["close"]), min_t=end_t, block=block)
+            oid = broker.place(sig, t=end_t, ref_price=float(bar["close"]), min_t=end_t + lag, block=block,
+                               lag_from=end_t if lag else None)
             if immediate and oid is not None:
                 broker.fill_now(oid, float(bar["close"]), lasts[k], end_t)
 

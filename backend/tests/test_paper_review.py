@@ -103,4 +103,5 @@ def test_a_stop_strategy_is_compared_on_the_bar_its_fill_is_in() -> None:
 
     fill_minute = NINE_FIFTEEN + 300 + 3 * 60  # 09:23, inside the 09:20 bar
     assert entry_bar(fill_minute, 300, basis="fill") == NINE_TWENTY
-    assert entry_bar(NINE_TWENTY, 300, basis="decision") == NINE_FIFTEEN
+    assert entry_bar(NINE_TWENTY, 300, basis="decision", lag=0) == NINE_FIFTEEN  # old timing: the next bar's open
+    assert entry_bar(NINE_TWENTY + 60, 300, basis="decision") == NINE_FIFTEEN  # live timing: one minute later

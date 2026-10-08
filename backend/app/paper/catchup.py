@@ -17,8 +17,9 @@ from app.live.spreads.decode import depth_quotes
 from app.paper.session import PaperSession
 from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY
 
-#: exchange-final minutes only: the paper strategy never sees a tick-built minute
-PAPER_BAR_SOURCES = ("i1", "session_end", "official")
+#: exchange-final minutes only (and the intraday API's completed minutes fetched for a feed gap): the paper
+#: strategy never sees a tick-built minute
+PAPER_BAR_SOURCES = ("i1", "session_end", "official", "backfill")
 
 
 class _Stop(Exception):

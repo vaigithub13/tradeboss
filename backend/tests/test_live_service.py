@@ -417,3 +417,60 @@ def test_the_websocket_route_serves_a_view_through_a_real_hub(cdir: Path, tmp_pa
         assert svc.hub.watched_symbols() == set() and svc.hub.clients == []  # the tab left
     finally:
         del app.state.live
+
+
+def test_after_an_index_backfill_every_final_minute_goes_to_paper_again() -> None:
+    """The engine re-sends only its last two bars after a backfill: paper gets the whole day's final minutes."""
+    import threading
+    from types import SimpleNamespace
+
+    from app.live.model import Bar
+    from app.live.service import LiveService
+    from app.upstox.instruments import NIFTY_INDEX_KEY
+
+    base = 29857213  # 8 Oct 2026 09:43 IST, in minutes since the epoch
+    bars = [Bar(base - 1, 1, 1, 1, 1, 0, None, "i1"), Bar(base, 2, 2, 2, 2, 0, None, "backfill"),
+            Bar(base + 1, 3, 3, 3, 3, None, None, "tick")]
+    got: list[dict] = []
+    stub = SimpleNamespace(
+        _elock=threading.Lock(),
+        engine=SimpleNamespace(bars=lambda key: bars, current_ts=123),
+        paper=SimpleNamespace(on_index_bar=lambda bar, now_ms: got.append({**bar, "now": now_ms})),
+    )
+    LiveService._resend_index_to_paper(stub, "NSE_FO|1")  # not the index: nothing
+    assert got == []
+    LiveService._resend_index_to_paper(stub, NIFTY_INDEX_KEY)
+    assert [(g["time"], g["source"], g["now"]) for g in got] == [((base - 1) * 60, "i1", 123), (base * 60, "backfill", 123)]
+
+
+def test_after_the_reconcile_the_days_options_are_captured_once(monkeypatch, tmp_path) -> None:
+    import asyncio
+    import threading
+    from datetime import date
+    from types import SimpleNamespace
+
+    from app.live import service as svc
+    from app.live.model import Bar
+
+    calls: list[tuple] = []
+
+    def fake_capture(day, day_range, **kw):  # noqa: ANN001, ANN003, ANN202
+        calls.append((day, day_range, kw["today"]))
+        return {"expiry": "2026-10-13", "strikes": [22500.0], "fetched": 2, "empty": 0, "failed": 0}
+
+    monkeypatch.setattr(svc, "capture_session", fake_capture)
+    monkeypatch.setattr(svc, "current_index", lambda _dir: object())
+    bars = [Bar(29857000, 22500, 22599.05, 22490, 22520, 0, None, "official"),
+            Bar(29857001, 22300, 22310, 22179.9, 22200, 0, None, "official")]
+    stub = SimpleNamespace(
+        cfg=SimpleNamespace(option_history_dir=tmp_path, instruments_dir=tmp_path),
+        client_factory=lambda: object(), _elock=threading.Lock(), _flags=svc._Flags(),
+        engine=SimpleNamespace(bars=lambda key, include_withheld=False: bars),
+    )
+    day = date(2026, 10, 8)
+    result = asyncio.run(svc.LiveService.capture_options(stub, day))
+    assert result is not None and calls == [(day, (22179.9, 22599.05), day)]
+    assert asyncio.run(svc.LiveService.capture_options(stub, day)) is None and len(calls) == 1  # once a day
+    stub.cfg.option_history_dir = None
+    stub._flags = svc._Flags()
+    assert asyncio.run(svc.LiveService.capture_options(stub, day)) is None and len(calls) == 1  # off

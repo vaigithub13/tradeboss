@@ -219,3 +219,42 @@ def test_a_signal_on_the_1510_bar_is_not_traded_because_its_fill_would_be_after_
     assert strat.seen[-1] == ist_ms(15, 10) // 1000
     assert [(r["side"], r["status"], r["note"]) for r in out] == [("BUY", "unfilled", "after the 15:15 square-off")]
     assert s.book.position is None
+
+
+# ---------------------------------------------------------------- feed gaps
+def test_a_bar_rebuilt_from_a_backfilled_minute_is_decided_late_and_its_signal_says_so() -> None:
+    strat = Scripted({0: "BUY"})
+    s = session(strat)
+    quote = lambda sess, now: quote_both(sess, now, ce_bid=99.0, ce_ask=100.0, pe_bid=50.0, pe_ask=51.0)  # noqa: E731
+    gap = [(9, 15, 22600.0), (9, 16, 22600.0), (9, 18, 22600.0), (9, 19, 22600.0), (9, 20, 22600.0)]
+    assert feed(s, gap, quotes_at=quote) == []  # 09:17 is missing: the 09:15 bar waits
+    assert strat.seen == []
+    now = ist_ms(9, 21) + 5_000
+    quote(s, now)
+    out = s.on_index_minute({**minute(9, 17, 22600.0), "source": "backfill"}, now_ms=now)
+    assert strat.seen == [ist_ms(9, 15) // 1000]
+    (rec,) = out
+    assert rec["status"] == "filled" and rec["note"].startswith("late after gap")
+    assert rec["decided_at_ms"] == now
+    snap = s.snapshot()
+    assert snap["late_bars"] == [ist_ms(9, 15) // 1000] and snap["incomplete_bars"] == []
+    assert snap["bars"][0]["late_after_gap"] is True
+
+
+def test_a_gap_never_filled_is_logged_and_kept_in_the_day_file(caplog) -> None:
+    s = session(Scripted({}))
+    feed(s, [(9, 15, 22600.0), (9, 16, 22600.0), (9, 18, 22600.0), (9, 19, 22600.0)]
+         + run_minutes((9, 20), (9, 22)))
+    assert s.snapshot()["given_up_bars"] == [ist_ms(9, 15) // 1000]
+    assert any("09:15 never completed after a feed gap" in r.message for r in caplog.records)
+
+
+def test_a_late_bar_decided_after_the_square_off_is_not_traded() -> None:
+    s = session(Scripted({0: "BUY"}))
+    quote = lambda sess, now: quote_both(sess, now, ce_bid=99.0, ce_ask=100.0, pe_bid=50.0, pe_ask=51.0)  # noqa: E731
+    feed(s, [(15, 5, 22600.0), (15, 6, 22600.0), (15, 8, 22600.0), (15, 9, 22600.0)], quotes_at=quote)
+    now = ist_ms(15, 15) + 2_000
+    quote(s, now)
+    (rec,) = s.on_index_minute({**minute(15, 7, 22600.0), "source": "backfill"}, now_ms=now)
+    assert rec["status"] == "unfilled" and "after the 15:15 square-off" in rec["note"]
+    assert s.book.position is None

@@ -34,6 +34,7 @@ class Trade:
     exit_at_open: bool = True
     entry_fills: int = 1  # more than one means the entry price is an average
     exit_fills: int = 1
+    late: bool = False  # live timing: the entry stop was crossed in the decision lag and filled when it started working
 
 
 def canonical(obj: Any) -> str:

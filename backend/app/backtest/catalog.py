@@ -93,7 +93,8 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
 
 _TOP = {
     "strategy", "params", "symbol", "timeframe", "start", "end", "sessions",
-    "mode", "strike_offset", "slippage_points", "option_fill", *("premium_target_pct", "premium_stop_pct"),
+    "mode", "strike_offset", "slippage_points", "option_fill", "live_timing",
+    *("premium_target_pct", "premium_stop_pct"),
 }
 #: option-premium exits: settings of the option overlay, not strategy parameters
 PREMIUM_EXIT_KEYS = ("premium_target_pct", "premium_stop_pct")
@@ -204,6 +205,7 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
         raise RunRequestError("slippage_points must be a number >= 0")
     option_fill = _option_fill(body.get("option_fill", "delta_adjusted"))
+    live_timing = _live_timing(body.get("live_timing", True))
     premium = parse_premium_exits(body)
     if premium and mode != "options":
         raise RunRequestError("premium exits apply to options mode")
@@ -220,7 +222,15 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
         "strike_offset": offset,
         "slippage_points": float(slip),
         "option_fill": option_fill,
+        "live_timing": live_timing,
     }
+
+
+def _live_timing(value: Any) -> bool:
+    """On (the default): orders work from one minute after the bar ends, as in paper. Off: from the bar's end."""
+    if not isinstance(value, bool):
+        raise RunRequestError("live_timing must be true or false")
+    return value
 
 
 def build_strategy(config: dict[str, Any]) -> Strategy:

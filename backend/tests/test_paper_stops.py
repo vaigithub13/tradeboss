@@ -136,3 +136,57 @@ def test_a_level_crossed_while_the_bar_was_being_decided_fills_when_the_stop_is_
     assert len(out) == 1 and out[0]["side"] == "SELL" and out[0]["status"] == "filled"
     assert out[0]["time"] == ist_ms(9, 20) // 1000 and "before the order was armed" in out[0]["note"]
     assert out[0]["index_price"] == 22596.0  # filled at the live price when armed, not at the level
+
+
+# ---------------------------------------------------------------- ATM is taken at the fill moment
+def _recording(s) -> list[float]:
+    spots: list[float] = []
+    inner = s.choose
+
+    def choose(direction, spot, on):  # noqa: ANN001, ANN202
+        spots.append(spot)
+        return inner(direction, spot, on)
+
+    s.choose = choose
+    return spots
+
+
+def test_a_market_fill_takes_atm_from_the_live_index_when_it_fills_not_the_bar_close() -> None:
+    s = tps.session(tps.Scripted({0: "BUY"}))
+    spots = _recording(s)
+    for h, m, close in run_minutes((9, 15), (9, 18), 22600.0):
+        quotes(s, ist_ms(h, m))
+        s.on_index_minute(minute(h, m, close), now_ms=ist_ms(h, m) + 60_000)
+    tick(s, 9, 20, 30, 22631.0)  # the index after the bar ended, before the 09:19 minute is final
+    quotes(s, ist_ms(9, 20) + 50_000)
+    s.on_index_minute(minute(9, 19, 22600.0), now_ms=ist_ms(9, 20) + 50_000)  # decided at 09:20:50
+    (rec,) = [r for r in s.signals if r["side"] == "BUY"]
+    assert spots == [22631.0] and rec["index_price"] == 22631.0
+
+
+def test_a_market_fill_with_no_tick_since_the_bar_ended_uses_the_bar_close() -> None:
+    s = tps.session(tps.Scripted({0: "BUY"}))
+    spots = _recording(s)
+    for h, m, close in run_minutes((9, 15), (9, 19), 22600.0):
+        quotes(s, ist_ms(h, m))
+        s.on_index_minute(minute(h, m, close), now_ms=ist_ms(h, m) + 60_000)
+    assert spots == [22600.0]
+
+
+def test_a_stop_fill_takes_atm_from_its_level_and_a_late_fill_from_the_live_price() -> None:
+    _strat, s = armed_session({0: [("BUY", 22610.0, "LE")]})
+    spots = _recording(s)
+    tick(s, 9, 21, 5, 22626.0)  # crosses 22610 with a jump: the backtest fills at the level, so ATM of 22610
+    assert spots == [22610.0]
+
+    strat = Stops({0: [("SELL", 22590.0, "SE")]})
+    late = tps.session(strat)
+    spots = _recording(late)
+    for h, m, close in run_minutes((9, 15), (9, 18), 22600.0):
+        quotes(late, ist_ms(h, m))
+        late.on_index_minute(minute(h, m, close), now_ms=ist_ms(h, m) + 60_000)
+    tick(late, 9, 20, 10, 22585.0)
+    tick(late, 9, 20, 40, 22596.0)
+    quotes(late, ist_ms(9, 20) + 50_000)
+    late.on_index_minute(minute(9, 19, 22600.0), now_ms=ist_ms(9, 20) + 50_000)
+    assert spots == [22596.0]

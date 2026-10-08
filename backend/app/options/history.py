@@ -282,7 +282,12 @@ class UpstoxHistorySource:
         ]
 
     def candles(self, ref: ContractRef, expiry: date, from_date: date, to_date: date) -> list[dict[str, Any]]:
+        """1-minute candles for [from_date, to_date]. The current session of a listed contract comes from the
+        intraday endpoint: the historical endpoint has no data for it yet."""
         rows: list[Any] = []
+        session = not self._expired(expiry) and from_date <= self.today <= to_date
+        if session:
+            to_date = self.today - timedelta(days=1)
         start = from_date
         while start <= to_date:
             end = min(to_date, start + timedelta(days=MAX_WINDOW_DAYS - 1))
@@ -291,6 +296,8 @@ class UpstoxHistorySource:
             else:
                 rows += self.client.historical_candles(ref.key, start, end, unit="minutes", interval=1)
             start = end + timedelta(days=1)
+        if session:
+            rows += self.client.intraday_candles(ref.key, unit="minutes", interval=1)
         return parse_candles(rows)
 
     @property
@@ -434,13 +441,42 @@ def capture_listed_day(
             seen = {b["t"] for b in existing}
             merged = existing + [b for b in bars if b["t"] not in seen]
             if not merged:
-                store.note_source_empty(expiry, ref.strike, ref.kind, day, day, when)
+                if day < when:  # the current session may not be published yet: never mark it, so it is retried
+                    store.note_source_empty(expiry, ref.strike, ref.kind, day, day, when)
                 stats.empty += 1
                 continue
             store.write(expiry, ref, merged, label)
             stats.fetched += 1
             stats.empty += 0 if bars else 1
     return stats
+
+
+CAPTURE_WINDOW = 5  # strikes each side of ATM, over the day's whole range
+
+
+def capture_session(
+    day: date,
+    day_range: tuple[float, float],
+    *,
+    client: Any,
+    instruments: InstrumentIndex,
+    store: OptionHistoryStore,
+    today: date,
+    window: int = CAPTURE_WINDOW,
+    underlying: str = "NIFTY",
+) -> dict[str, Any]:
+    """After the close: store one session of the nearest weekly expiry's options, ATM +/- `window` at every minute of
+    the day (`day_range` = the index's low and high). Paper fills and backtests then price from the same store."""
+    from app.backtest.expiry import load_default_calendar
+    from app.options.strikes import load_default_step_table
+
+    expiry = load_default_calendar().next_expiry(day).date
+    step = load_default_step_table().step(underlying, day)
+    strikes = plan_strikes({day: day_range}, step, window=window)
+    src = UpstoxHistorySource(client, instruments, today=today)
+    stats = capture_listed_day(src, store, day, expiry, strikes, label="live-recorded", today=today)
+    return {"day": day.isoformat(), "expiry": expiry.isoformat(), "strikes": strikes, "fetched": stats.fetched,
+            "empty": stats.empty, "not_listed": stats.not_listed, "failed": stats.failed}
 
 
 def default_history_store() -> OptionHistoryStore:

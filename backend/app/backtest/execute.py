@@ -143,6 +143,7 @@ def _engine_config(config: dict[str, Any]) -> BacktestConfig:
         lot_size=None if nifty else 1,
         contract=(lambda day: (calendar.next_expiry(day, "weekly").date, "weekly")) if nifty else None,
         cost_model=get_cost_model("zero"),
+        live_timing=bool(config.get("live_timing", True)),
     )
 
 

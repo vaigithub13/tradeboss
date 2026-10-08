@@ -1,14 +1,20 @@
 """One paper-trading day: closed live bars in, strategy signals out, paper fills and the book updated.
 
 The strategy is the same object a backtest runs (`Strategy.on_bar`), fed only closed bars in order.
-The index signal picks the option: BUY -> ATM call, SELL -> ATM put, both on the nearest weekly.
+The index signal picks the option: BUY -> ATM call, SELL -> ATM put, both on the nearest weekly. ATM is taken at
+the fill moment, as the backtest does: the live index price for a market signal (and for a stop crossed while its
+bar was being decided), the stop level for a stop the index crosses.
 A signal decided at a closed bar is filled at the live quote at that moment (`now_ms`), or the model
 if there is no fresh quote. A signal that cannot be filled is recorded as unfilled and opens nothing.
 Open positions are squared off at 15:15, like the backtest's default square-off.
+
+A bar rebuilt after a feed gap (see `ClosedBars`) is decided when it completes, late; its signals say so in their
+note ("late after gap") and are traded at the live price then, unless that is at or after 15:15.
 """
 
 from __future__ import annotations
 
+import logging
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import asdict
@@ -28,7 +34,11 @@ from app.paper.pricing import MODEL_SLIPPAGE_POINTS
 from app.paper.quotes import QuoteBook
 from app.strategies.pine_common import minute_of
 
+log = logging.getLogger("tradeboss.paper")
+
 SQUARE_OFF_MIN = 15 * 60 + 15
+LATE_NOTE = "late after gap: the bar was rebuilt from backfilled minutes and decided when it completed"
+OHLCV = ("time", "open", "high", "low", "close", "volume")
 TICK_MEMORY_MS = 10 * 60_000  # longer than any bar's decision lag
 WARMUP_BARS = BacktestConfig().warmup_bars  # the backtest warms its strategy on this many bars before the day
 TAG_REASON = {
@@ -113,6 +123,7 @@ class PaperSession:
         #: recent index prices (ms, price): a level crossed while a bar was being decided fills on arming
         self._ticks: deque[tuple[int, float]] = deque()
         self._fresh: set[str] = set()  # stops armed by the bar being decided now
+        self._given_up_seen = 0
 
     # ---------------------------------------------------------------- input
     def warm(self, bars: Iterable[dict[str, Any]]) -> None:
@@ -140,6 +151,8 @@ class PaperSession:
         self.warm_bars = int(saved.get("warm_bars", 0))
         self.uses_stops = bool(saved.get("uses_stops", False))
         self.bars.incomplete = set(saved.get("incomplete_bars", []))
+        self.bars.late = set(saved.get("late_bars", []))
+        self.bars.given_up = list(saved.get("given_up_bars", []))
         self.resume_after = saved.get("last_bar_time")
         self.last_bar_time = self.resume_after
         o = saved.get("open")
@@ -169,6 +182,10 @@ class PaperSession:
         self._spot = float(minute["close"])
         for bar in self.bars.on_minute(minute):
             out += self._on_closed_bar(bar, now_ms)
+        for t in self.bars.given_up[self._given_up_seen:]:
+            log.warning("paper: the %s bar at %s never completed after a feed gap: not decided (incomplete)",
+                        self.timeframe, _hhmm(t))
+        self._given_up_seen = len(self.bars.given_up)
         return out
 
     def on_clock(self, now_ms: int) -> bool:
@@ -196,11 +213,15 @@ class PaperSession:
             return []
         self.last_bar_time = t
         self.shown.append(bar)
+        clean = {k: bar[k] for k in OHLCV if k in bar}  # the strategy sees the bar, not the gap flag
         out = []
-        for sig in self._step(bar):
+        for sig in self._step(clean):
             if sig.type == "MARKET":
-                out.append(self._act(sig, bar, now_ms))
+                out.append(self._act(sig, clean, now_ms))
         out += self._fill_crossed_on_arming(now_ms)
+        if bar.get("late_after_gap"):
+            for rec in out:
+                rec["note"] = LATE_NOTE + (f"; {rec['note']}" if rec["note"] else "")
         return out
 
     def _fill_crossed_on_arming(self, now_ms: int) -> list[dict[str, Any]]:
@@ -289,17 +310,26 @@ class PaperSession:
             "symbol": None, "key": None, "status": "unfilled", "fill_source": None, "fill_price": None, "note": note,
         }
         self.signals.append(rec)
-        self._enter(rec, direction, price, now_ms, index_time=now_ms // 1000, close_reason="reverse")
+        spot = price if note else float(order["price"])  # a late fill is at the live price, a stop fill at its level
+        self._enter(rec, direction, spot, now_ms, index_time=now_ms // 1000, close_reason="reverse")
         if rec["status"] == "filled":
             self._side = 1 if direction == "LONG" else -1
         return [rec]
 
+    def _fill_time_spot(self, bar: dict[str, Any]) -> float:
+        """The live index price now, for a market fill; the bar's close when no tick has come since the bar ended."""
+        end_ms = (int(bar["time"]) + self._bar_s) * 1000
+        if self._ticks and self._ticks[-1][0] >= end_ms:
+            return self._ticks[-1][1]
+        return float(bar["close"])
+
     def _act(self, sig: Signal, bar: dict[str, Any], now_ms: int) -> dict[str, Any]:
+        spot = self._fill_time_spot(bar)
         rec: dict[str, Any] = {
             "time": int(bar["time"]),
             "decided_at_ms": now_ms,
             "side": sig.side,
-            "index_price": float(bar["close"]),
+            "index_price": spot,
             "reason": TAG_REASON.get(sig.tag, sig.tag),
             "symbol": None,
             "key": None,
@@ -315,8 +345,9 @@ class PaperSession:
                 self._square_off(now_ms, reason="exit")
                 rec["status"] = "filled"
             return rec
-        if minute_of(int(bar["time"]) + self._bar_s) >= SQUARE_OFF_MIN:
-            # the fill would come on the next bar, at or after 15:15: the backtest blocks it too (after_square_off)
+        if minute_of(int(bar["time"]) + self._bar_s) >= SQUARE_OFF_MIN or not self._tradable(now_ms):
+            # the fill would come on the next bar, at or after 15:15: the backtest blocks it too (after_square_off);
+            # a bar decided late after a gap can also be decided after 15:15
             rec["note"] = "after the 15:15 square-off"
             return rec
         direction = "LONG" if sig.side == "BUY" else "SHORT"
@@ -325,7 +356,7 @@ class PaperSession:
             rec["note"] = "already in that position"
             return rec
 
-        self._enter(rec, direction, float(bar["close"]), now_ms, index_time=int(bar["time"]), close_reason="signal")
+        self._enter(rec, direction, spot, now_ms, index_time=int(bar["time"]), close_reason="signal")
         return rec
 
     def _enter(self, rec: dict[str, Any], direction: str, spot: float, now_ms: int, *, index_time: int,
@@ -426,8 +457,14 @@ class PaperSession:
             "uses_stops": self.uses_stops,
             "warm_bars": self.warm_bars,
             "incomplete_bars": sorted(self.bars.incomplete),
+            "late_bars": sorted(self.bars.late),
+            "given_up_bars": list(self.bars.given_up),
             "pre_open_ignored": self.bars.pre_open_ignored,
         }
+
+
+def _hhmm(t: int) -> str:
+    return f"{minute_of(t) // 60:02d}:{minute_of(t) % 60:02d}"
 
 
 def _session_anchor(now_ms: int) -> int:

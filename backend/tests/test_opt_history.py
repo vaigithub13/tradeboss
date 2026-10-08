@@ -339,3 +339,73 @@ def test_capture_listed_day_merges_a_new_session_into_the_recorded_store(tmp_pat
         store, D("2026-09-29"), ContractRef(25100.0, "CE", "NSE_FO|9", "x", 65), bars("2026-09-29", 1),
     )
     assert (25100.0, "CE") in {(b.strike, b.kind) for b in store.read(D("2026-09-29"))}
+
+
+# ---------------------------------------------------------------- the current session (after the close)
+class FakeTodayClient(FakeExpiredClient):
+    """The historical endpoint has nothing for the current session; the intraday endpoint has it."""
+
+    def __init__(self, today: str, *, intraday_empty: bool = False) -> None:
+        super().__init__()
+        self.today, self.intraday_empty = today, intraday_empty
+
+    def historical_candles(self, key: str, from_date: date, to_date: date, *, unit: str = "minutes", interval: int = 1):  # noqa: ANN201
+        self.calls.append(("active_candles", key, from_date, to_date))
+        assert to_date < D(self.today), "the historical endpoint has no data for the current session"
+        return rows_for(to_date.isoformat(), base=200.0)
+
+    def intraday_candles(self, key: str, *, unit: str = "minutes", interval: int = 1):  # noqa: ANN201
+        self.calls.append(("intraday", key))
+        return [] if self.intraday_empty else rows_for(self.today, base=300.0)
+
+
+def test_the_current_session_of_a_listed_expiry_comes_from_the_intraday_endpoint() -> None:
+    fake = FakeTodayClient("2026-10-08")
+    src = UpstoxHistorySource(fake, None, today=D("2026-10-08"))  # type: ignore[arg-type]
+    ref = ContractRef(22500.0, "PE", "NSE_FO|44613", "NIFTY 22500 PE 13 OCT 26", 65)
+    today = src.candles(ref, D("2026-10-13"), D("2026-10-08"), D("2026-10-08"))
+    assert fake.calls == [("intraday", "NSE_FO|44613")] and len(today) == 3 and today[0]["open"] == 300.0
+    fake.calls.clear()
+    span = src.candles(ref, D("2026-10-13"), D("2026-10-06"), D("2026-10-08"))
+    assert fake.calls == [("active_candles", "NSE_FO|44613", D("2026-10-06"), D("2026-10-07")),
+                          ("intraday", "NSE_FO|44613")]
+    assert len(span) == 6
+
+
+def test_an_empty_answer_for_the_current_session_is_not_marked_source_empty(tmp_path: Path) -> None:
+    """8 Oct 2026: a capture on the day asked the historical endpoint, got nothing, and marked all 22 contracts
+    source_empty, which would have kept them from being fetched again. The current session is never marked."""
+    from app.upstox.instruments import Instrument, InstrumentIndex
+
+    listed = InstrumentIndex([
+        Instrument(f"NSE_FO|{kind}", f"NIFTY 22500 {kind} 13 OCT 26", "NIFTY", "option", "NSE_FO", kind,
+                   expiry=D("2026-10-13"), strike=22500.0, lot_size=65, underlying_key="NSE_INDEX|Nifty 50")
+        for kind in ("CE", "PE")
+    ])
+    src = UpstoxHistorySource(FakeTodayClient("2026-10-08", intraday_empty=True), listed, today=D("2026-10-08"))  # type: ignore[arg-type]
+    store = OptionHistoryStore(tmp_path)
+    stats = capture_listed_day(src, store, D("2026-10-08"), D("2026-10-13"), [22500.0], today=D("2026-10-08"))
+    assert (stats.fetched, stats.empty) == (0, 2)
+    assert option_source_empty_report(tmp_path) == []
+    assert not list(tmp_path.glob("*.done.json"))
+
+
+def test_capture_session_stores_the_current_weekly_atm_plus_minus_five_over_the_days_range(tmp_path: Path) -> None:
+    from app.options.history import capture_session
+    from app.upstox.instruments import Instrument, InstrumentIndex
+
+    expiry = D("2026-10-13")
+    listed = [
+        Instrument(f"NSE_FO|{int(k)}{kind}", f"NIFTY {int(k)} {kind} 13 OCT 26", "NIFTY", "option", "NSE_FO", kind,
+                   expiry=expiry, strike=float(k), lot_size=65, underlying_key="NSE_INDEX|Nifty 50")
+        for k in range(21700, 23101, 50) for kind in ("CE", "PE")
+    ]
+    fake = FakeTodayClient("2026-10-08")
+    store = OptionHistoryStore(tmp_path)
+    result = capture_session(D("2026-10-08"), (22179.9, 22599.05), client=fake, instruments=InstrumentIndex(listed),
+                             store=store, today=D("2026-10-08"))
+    assert result["expiry"] == "2026-10-13"
+    assert result["strikes"][0] == 21950.0 and result["strikes"][-1] == 22850.0  # ATM(low) - 5 .. ATM(high) + 5
+    assert result["fetched"] == 2 * len(result["strikes"]) and result["empty"] == 0
+    assert {c[0] for c in fake.calls} == {"intraday"}
+    assert (22500.0, "PE") in {(b.strike, b.kind) for b in store.read(expiry)}
