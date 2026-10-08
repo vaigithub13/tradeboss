@@ -17,7 +17,7 @@ from app.exits.rules import ExitRule, parse_exit_rule
 from app.backtest.costs import load_default_cost_table
 from app.backtest.expiry import load_default_calendar
 from app.backtest.lots import load_default_lot_table
-from app.live.model import ist_date
+from app.live.model import ist_date, ist_ms_of_day
 from app.live.spreads.decode import depth_quotes
 from app.options.contract import OptionContract, choose_contract
 from app.options.strikes import load_default_step_table
@@ -31,6 +31,12 @@ from app.paper.store import load_day, save_day, weekly_summary
 from app.upstox.instruments import current_index
 
 MakeSession = Callable[[date, str, dict[str, Any]], PaperSession]
+SESSION_END_MS = (15 * 60 + 30) * 60_000  # 15:30 IST: a Start after this replays the day, it does not trade it
+
+
+def session_over(day: date, now_ms: int) -> bool:
+    """True when `day`'s session had ended at `now_ms` (a later day, or 15:30 IST passed)."""
+    return ist_date(now_ms) > day or (ist_date(now_ms) == day and ist_ms_of_day(now_ms) >= SESSION_END_MS)
 
 
 class PaperError(RuntimeError):
@@ -112,15 +118,25 @@ class PaperRunner:
         self.session: PaperSession | None = None
         self.eod_check: dict[str, Any] | None = None
         self._wanted_sent: frozenset[str] = frozenset()
+        self.source = "live"  # live, or replay: a run started after its day's session ended
+
+    @property
+    def save_dir(self) -> Path:
+        """Where this run's day file goes: the slot directory when live, its `replay/` folder for a replay, so a
+        replay never writes a live day file."""
+        return self.directory if self.source == "live" else self.directory / "replay"
 
     # ------------------------------------------------------------------ control
-    def start(self, day: date, strategy: str, params: dict[str, Any]) -> None:
+    def start(self, day: date, strategy: str, params: dict[str, Any], now_ms: int | None = None) -> None:
         """Start (or resume) today's strategy. The session warms on the stored bars, catches up on the day's
         recorded feed, and resumes from today's file if there is one, so the signals do not depend on when
-        this was called."""
+        this was called. What the catch-up decides is marked `replay`. With `now_ms` after the day's session
+        ended, the whole run is a replay: it goes to the replay folder and ends when the catch-up is done."""
         if self.state == "running":
             raise AlreadyRunning("a strategy is already running")
-        saved = load_day(self.directory, day)
+        replay = now_ms is not None and session_over(day, now_ms)
+        source = "replay" if replay else "live"
+        saved = load_day(self.directory if not replay else self.directory / "replay", day)
         if saved is not None and (saved.get("requested_strategy") != strategy
                                   or saved.get("requested_params") != dict(params)):
             raise SettingsMismatch(
@@ -133,12 +149,22 @@ class PaperRunner:
                              "signals only); run it without them, or test them in a backtest")
         if saved is not None:
             session.restore(saved)
+        self.source = source
+        if replay:
+            session.counted_sources = ("live", "replay")
         self.session = session
         self.day, self.strategy, self.params = day, strategy, dict(params)
         self.eod_check = None
         if self._catch_up is not None:
-            self._catch_up(session, day)
+            session.source = "replay"
+            try:
+                self._catch_up(session, day)
+            finally:
+                session.source = source
         self.state, self.ended_by = "running", None
+        if replay:
+            session.end_of_day()
+            self.state, self.ended_by = "stopped", "replay finished"
         self._save()
         self._sync_wanted()
 
@@ -271,6 +297,7 @@ class PaperRunner:
             "day": None if self.day is None else self.day.isoformat(),
             "strategy": self.strategy,
             "params": self.params,
+            "source": self.source,
             "wanted_keys": sorted(self.wanted_keys()),
         }
         if self.session is not None:
@@ -290,11 +317,12 @@ class PaperRunner:
         if self.session is None or self.day is None:
             return
         extra = {"eod_check": self.eod_check} if self.eod_check is not None else {}
-        save_day(self.directory, self.day, {
+        save_day(self.save_dir, self.day, {
             "state": self.state,
             "ended_by": self.ended_by,
             "requested_strategy": self.strategy,
             "requested_params": self.params,
             **self.session.snapshot(),
+            "source": self.source,
             **extra,
         })

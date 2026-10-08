@@ -1,6 +1,7 @@
 import { getJson, postJson } from "./client";
 import type { PaperMark, PaperSignal } from "../paper/present";
 import type { ExitCounts, ReportRow } from "../report/present";
+import type { PaperTradeRow } from "../paper/trades";
 
 /** One paper slot ("1".."4"): its own strategy, position and P&L. */
 export interface PaperStatus {
@@ -19,6 +20,8 @@ export interface PaperStatus {
   /** one row per closed trade (backend app/exits/report.py) */
   report?: ReportRow[];
   exit_rule?: { kind: string; stop: number; target: number } | null;
+  /** live, or replay: a run started after the day's session ended (kept apart, never counted) */
+  source?: "live" | "replay";
 }
 
 export interface PaperWeek {
@@ -46,3 +49,6 @@ export const fetchPaperWeek = (slot: string, day: string): Promise<PaperWeek> =>
 
 export const stopPaper = (slot: string): Promise<PaperStatus> =>
   postJson<PaperStatus>(`/api/paper/stop?slot=${encodeURIComponent(slot)}`, {});
+
+/** Every paper trade over the slots, one row each (live days only). */
+export const fetchPaperTrades = (): Promise<{ rows: PaperTradeRow[] }> => getJson<{ rows: PaperTradeRow[] }>("/api/paper/trades");

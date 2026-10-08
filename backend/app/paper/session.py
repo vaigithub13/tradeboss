@@ -31,7 +31,7 @@ from app.backtest.context import History, PastBars, PositionView
 from app.backtest.contracts import Signal
 from app.backtest.costs import CostTable
 from app.backtest.engine import BacktestConfig
-from app.exits.report import reason_counts, report_row
+from app.exits.report import reason_counts
 from app.exits.rules import ExitRule, first_hit, index_levels, premium_levels
 from app.live.model import ist_ms_of_day
 from app.live.spreads.decode import DepthQuote
@@ -134,6 +134,12 @@ class PaperSession:
         self._ticks: deque[tuple[int, float]] = deque()
         self._fresh: set[str] = set()  # stops armed by the bar being decided now
         self._given_up_seen = 0
+        #: where the signals and trades being made now come from: "live", or "replay" while the runner catches up
+        #: from the recording (and for a whole replay run)
+        self.source = "live"
+        #: the sources the day's totals count: live only, unless the whole run is a replay
+        self.counted_sources: tuple[str, ...] = ("live",)
+        self._last_index: float | None = None  # the newest index price (the Nifty level recorded at an exit)
 
     # ---------------------------------------------------------------- input
     def warm(self, bars: Iterable[dict[str, Any]]) -> None:
@@ -173,7 +179,7 @@ class PaperSession:
                 expiry=date.fromisoformat(o["expiry"]), lots=o["lots"], units=o["units"], lot_size=o["lot_size"],
                 entry=entry, index_entry_time=o["index_entry_time"], reason=o["reason"],
                 levels=o.get("levels"), signal_time=o.get("signal_time"), trigger_index=o.get("trigger_index"),
-                index_entry=o.get("index_entry"), delta=o.get("delta"),
+                index_entry=o.get("index_entry"), delta=o.get("delta"), source=o.get("source", "live"),
             )
             self.book.position = pos
             # The contract is only needed to price an exit by the model: its kind, strike and expiry are kept.
@@ -301,6 +307,7 @@ class PaperSession:
         """The live index price (exchange time). Fills the first working stop it crosses: the option is bought at
         the live ask now. Returns the signal records it made."""
         self._ticks.append((now_ms, float(price)))
+        self._last_index = float(price)
         while self._ticks and self._ticks[0][0] < now_ms - TICK_MEMORY_MS:
             self._ticks.popleft()
         if self.exit_rule is not None:
@@ -326,6 +333,7 @@ class PaperSession:
             "time": bar_time, "decided_at_ms": now_ms, "side": order["side"], "index_price": price,
             "order_price": order["price"], "reason": f"{order['side'].lower()} stop {tag} at {order['price']:.2f}",
             "symbol": None, "key": None, "status": "unfilled", "fill_source": None, "fill_price": None, "note": note,
+            "source": self.source,
         }
         self.signals.append(rec)
         spot = price if note else float(order["price"])  # a late fill is at the live price, a stop fill at its level
@@ -365,6 +373,7 @@ class PaperSession:
             "fill_source": None,
             "fill_price": None,
             "note": "",
+            "source": self.source,
         }
         self.signals.append(rec)
         if sig.side == "EXIT":
@@ -408,7 +417,7 @@ class PaperSession:
             if exit_fill is None:
                 rec["note"] = "could not close the open position: no quote and no model price"
                 return
-            self.book.close(exit_fill, index_exit_time=index_time, reason=close_reason)
+            self.book.close(exit_fill, index_exit_time=index_time, reason=close_reason, index_exit=spot)
         self._contract_of[key] = contract
         self.wanted.add(key)
         self.book.open(Position(
@@ -418,6 +427,7 @@ class PaperSession:
             levels=self._levels(direction, spot, entry.price, points), signal_time=signal_time,
             trigger_index=trigger, index_entry=spot,
             delta=self._delta(contract, spot, now_ms) if self.exit_rule is not None else None,
+            source=self.source,
         ))
         rec.update(status="filled", symbol=contract.symbol, key=key, fill_source=entry.source,
                    fill_price=entry.price)
@@ -476,25 +486,18 @@ class PaperSession:
         if exit_fill is None:
             log.warning("paper: %s on %s but no quote and no model price: still open, checked again", reason, p.symbol)
             return False
-        self.book.close(exit_fill, index_exit_time=now_ms // 1000, reason=reason)
+        self.book.close(exit_fill, index_exit_time=now_ms // 1000, reason=reason, index_exit=self._index_now())
         return True
+
+    def _index_now(self) -> float | None:
+        """The Nifty level now: the newest index tick, else the newest final minute's close."""
+        return self._last_index if self._last_index is not None else self._spot
 
     def report_rows(self) -> list[dict[str, Any]]:
         """The trade report (app/exits/report.py): one row per closed trade."""
-        rows = []
-        for t in self.book.trades:
-            levels = t.get("levels") or {}
-            rows.append(report_row(
-                signal_time=t.get("signal_time"), trigger_index=t.get("trigger_index"),
-                fill_time=int(t["entry_at_ms"]) // 1000, contract=t["symbol"], entry_premium=float(t["entry_price"]),
-                entry_source="real" if t["entry_source"] == "quote" else str(t["entry_source"]),
-                units=int(t["units"]), rule=self.exit_rule, direction=t["direction"],
-                index_entry=t.get("index_entry"), delta=t.get("delta"),
-                index_stop=levels.get("index_stop"), index_target=levels.get("index_target"),
-                exit_time=int(t["exit_at_ms"]) // 1000, exit_premium=float(t["exit_price"]),
-                exit_reason=t["exit_reason"], net=float(t["net"]),
-            ))
-        return rows
+        from app.paper.trades import trade_report_row
+
+        return [trade_report_row(t, self.exit_rule) for t in self.book.trades]
 
     def prepare(self, spot: float) -> None:
         """Ask for the ATM call and put of the nearest weekly, so a signal finds its quote already subscribed."""
@@ -518,9 +521,10 @@ class PaperSession:
                 "time": None, "decided_at_ms": now_ms, "side": "EXIT", "index_price": self._spot,
                 "reason": "square-off", "symbol": p.symbol, "key": p.key, "status": "unfilled",
                 "fill_source": None, "fill_price": None, "note": "square-off: no quote and no model price",
+                "source": self.source,
             })
             return
-        self.book.close(exit_fill, index_exit_time=now_ms // 1000, reason=reason)
+        self.book.close(exit_fill, index_exit_time=now_ms // 1000, reason=reason, index_exit=self._index_now())
 
     def _fill(self, side: str, key: str, contract: OptionContract, units: int, spot: float,
               now_ms: int) -> Fill | None:
@@ -546,9 +550,12 @@ class PaperSession:
         return {int(b["time"]): b for b in self.shown}
 
     def snapshot(self) -> dict[str, Any]:
-        entries = [s for s in self.signals if s["side"] in ("BUY", "SELL")]
+        counted = self.counted_sources
+        entries = [s for s in self.signals if s["side"] in ("BUY", "SELL") and s.get("source", "live") in counted]
         report = self.report_rows()
-        unfilled = sum(1 for s in self.signals if s["status"] == "unfilled")
+        live_trades = [t for t in self.book.trades if t.get("source", "live") in counted]
+        other_trades = [t for t in self.book.trades if t.get("source", "live") not in counted]
+        unfilled = sum(1 for s in self.signals if s["status"] == "unfilled" and s.get("source", "live") in self.counted_sources)
         p = self.book.position
         return {
             "strategy": {"name": getattr(self.strategy, "name", "?"), "params": dict(getattr(self.strategy, "params", {}))},
@@ -557,8 +564,10 @@ class PaperSession:
             "signals": self.signals,
             "trades": self.book.trades,
             "open": None if p is None else {**asdict(p), "expiry": p.expiry.isoformat(), "entry": asdict(p.entry)},
-            "summary": {**summarise(self.book.trades, signals=len(entries), unfilled=unfilled),
-                        "exits": reason_counts(report)},
+            "summary": {**summarise(live_trades, signals=len(entries), unfilled=unfilled),
+                        "exits": reason_counts([r for r in report if r["source"] in counted]),
+                        **({"replay": summarise(other_trades, signals=0, unfilled=0)} if other_trades else {})},
+            "source": self.source if self.counted_sources != ("live",) else "live",
             "report": report,
             "exit_rule": None if self.exit_rule is None else self.exit_rule.to_dict(),
             "closed_bars": len(self.shown),

@@ -31,6 +31,16 @@ export interface PositionView {
   optionLabel: string | null;
 }
 
+/** A stored result to show instead of the one computed from the bars (a paper trade drawn from the Trades view). */
+export interface FixedOutcome {
+  status: "target" | "stop";
+  endTime: number;
+  exitPrice: number | null;
+  pnlRupees: number | null;
+  /** the centre label's lines */
+  centre: string[];
+}
+
 let published: PositionView[] = [];
 const listeners = new Set<() => void>();
 
@@ -64,6 +74,7 @@ export function positionViews(
   lots: Readonly<Record<string, number>>,
   notes: Readonly<Record<string, string>>,
   cursor: number | null,
+  fixed: Readonly<Record<string, FixedOutcome>> = {},
 ): PositionView[] {
   const bars = candles.map(asBar);
   return drawings.filter((drawing) => isPositionTool(drawing.tool)).flatMap((drawing) => {
@@ -75,9 +86,25 @@ export function positionViews(
     const settings = drawing.position ?? defaultPositionSettings();
     const levels = positionLevels(side, drawing.anchors);
     const size = positionSize(levels, settings, lots[drawing.id] ?? 0);
-    const outcome = positionOutcome(side, drawing.anchors, bars, minutes, cursor, size.quantity);
+    const stored = fixed[drawing.id];
+    const computed = positionOutcome(side, drawing.anchors, bars, minutes, cursor, size.quantity);
+    const outcome: PositionOutcome = stored
+      ? {
+          ...computed,
+          status: stored.status,
+          endTime: stored.endTime,
+          exitPrice: stored.exitPrice,
+          pnlPoints: stored.exitPrice == null ? null : (stored.exitPrice - entry.price) * (side === "long" ? 1 : -1),
+          pnlRupees: stored.pnlRupees,
+        }
+      : computed;
     const optionLabel = settings.options ? notes[drawing.id] ?? null : null;
-    const labels = positionLabels(levels, size, outcome, settings.compact, optionLabel);
+    const toolLabels = positionLabels(levels, size, outcome, settings.compact, optionLabel);
+    const labels = stored
+      ? toolLabels.map((label) => label.role === "centre"
+        ? { ...label, text: stored.centre.join("\n"), lines: stored.centre, tooltip: "paper trade (stored result)" }
+        : label)
+      : toolLabels;
     return [{
       id: drawing.id,
       labels,

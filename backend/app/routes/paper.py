@@ -15,7 +15,8 @@ from app.live.model import ist_date
 from app.live.service import LiveService
 from app.paper.desk import UnknownSlot
 from app.paper.live import AlreadyRunning, NotRunning, PaperError, PaperRunner, UnsupportedSettings
-from app.paper.store import weekly_summary
+from app.paper.store import load_day, weekly_summary
+from app.paper.trades import trade_rows
 
 router = APIRouter(prefix="/api/paper")
 STRATEGIES = {
@@ -82,7 +83,7 @@ async def start(body: StartBody, request: Request) -> dict[str, Any]:
     now = _now_ms(svc)
     day = ist_date(now)
     try:
-        runner.start(day, body.strategy, body.params)
+        runner.start(day, body.strategy, body.params, now_ms=now)  # after 15:30 it replays the day, apart
     except AlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (KeyError, ValueError, TypeError, UnsupportedSettings) as exc:
@@ -103,12 +104,26 @@ async def stop(request: Request, slot: str = Query("1")) -> dict[str, Any]:
 
 
 @router.get("/day")
-async def day_file(request: Request, day: date = Query(...), slot: str = Query("1")) -> dict[str, Any]:
+async def day_file(request: Request, day: date = Query(...), slot: str = Query("1"),
+                   replay: bool = Query(False)) -> dict[str, Any]:
+    """A slot's live day file, or with replay=true the replay of that day (a Start after the close)."""
     svc = _service(request)
-    saved = _runner(svc, slot).day_file(day)
+    runner = _runner(svc, slot)
+    saved = load_day(runner.directory / "replay", day) if replay else runner.day_file(day)
     if saved is None:
         raise HTTPException(status_code=404, detail=f"no paper day for {day.isoformat()} in slot {slot}")
     return saved
+
+
+@router.get("/trades")
+async def trades(request: Request, slot: str | None = Query(None), from_day: date | None = Query(None, alias="from"),
+                 to_day: date | None = Query(None, alias="to"), include_replay: bool = Query(False)) -> dict[str, Any]:
+    """Every paper trade over the slots (live days only, unless include_replay): one row each."""
+    svc = _service(request)
+    dirs = {name: runner.directory for name, runner in svc.paper.runners.items()}
+    rows = trade_rows(dirs, from_day=from_day, to_day=to_day, slot=slot, include_replay=include_replay,
+                      candles=getattr(svc, "store", None))
+    return {"rows": rows}
 
 
 @router.get("/week")

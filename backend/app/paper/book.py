@@ -103,6 +103,7 @@ class Position:
     trigger_index: float | None = None  # the stop level, or the index at a market fill
     index_entry: float | None = None  # the index price the contract was chosen from
     delta: float | None = None  # the model's delta at entry (report estimates)
+    source: str = "live"  # live, or replay (decided while catching up from the recording)
 
 
 class PaperBook:
@@ -115,7 +116,8 @@ class PaperBook:
             raise RuntimeError("a paper position is already open")
         self.position = position
 
-    def close(self, exit_fill: Fill, *, index_exit_time: int, reason: str) -> dict[str, Any]:
+    def close(self, exit_fill: Fill, *, index_exit_time: int, reason: str,
+              index_exit: float | None = None) -> dict[str, Any]:
         if self.position is None:
             raise RuntimeError("no paper position to close")
         p = self.position
@@ -159,6 +161,8 @@ class PaperBook:
             "trigger_index": p.trigger_index,
             "index_entry": p.index_entry,
             "delta": p.delta,
+            "index_exit": index_exit,
+            "source": p.source,
         }
         self.trades.append(trade)
         self.position = None

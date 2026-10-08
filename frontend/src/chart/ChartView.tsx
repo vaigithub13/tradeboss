@@ -52,6 +52,7 @@ import { whitespaceTimes } from "../draw/model";
 import { loadOptionNotes, loadPositionLots, loadPositionMinutes, positionViews, publishPositionViews } from "../draw/positionFeed";
 import { isPositionTool } from "../draw/position";
 import { useDrawStore } from "../draw/store";
+import { usePaperTradesStore } from "../store/paperTradesStore";
 import { useChartStore } from "../store/chartStore";
 
 const UP = "#26a69a";
@@ -154,9 +155,14 @@ export function ChartView({
     .filter((item) => isPositionTool(item.tool) && item.position?.options)
     .map((item) => `${item.id}:${item.anchors.map((anchor) => `${anchor.time},${anchor.price}`).join(";")}:${item.position?.riskMode}:${item.position?.accountSize}:${item.position?.riskPercent}:${item.position?.riskRupees}`)
     .join("|");
+  // a paper trade picked in the Trades view, drawn like a position (NIFTY50 only; never saved with the drawings)
+  const tradeOverlay = usePaperTradesStore((s) => s.overlay);
+  const overlay = tradeOverlay && symbol === "NIFTY50" ? tradeOverlay : null;
+  const sceneDrawings = useMemo(() => (overlay ? [...drawDrawings, overlay.drawing] : drawDrawings), [drawDrawings, overlay]);
   const views = useMemo(
-    () => positionViews(drawDrawings, candles, positionMinutes, positionLots, positionNotes, cursor),
-    [drawDrawings, candles, positionMinutes, positionLots, positionNotes, cursor],
+    () => positionViews(sceneDrawings, candles, positionMinutes, positionLots, positionNotes, cursor,
+      overlay ? { [overlay.drawing.id]: overlay.fixed } : {}),
+    [sceneDrawings, candles, positionMinutes, positionLots, positionNotes, cursor, overlay],
   );
   const outcomeKey = views.map((view) => `${view.id}:${view.outcome.status}:${view.outcome.endTime ?? ""}:${view.outcome.exitPrice ?? ""}`).join("|");
   const viewsRef = useRef(views);
@@ -425,8 +431,8 @@ export function ChartView({
   }, [candles, timeframe, holidays]);
 
   useEffect(() => {
-    publishPositionViews(views);
-  }, [views]);
+    publishPositionViews(overlay ? views.filter((view) => view.id !== overlay.drawing.id) : views);
+  }, [views, overlay]);
 
   useEffect(() => {
     if (!positionKey) {
@@ -459,7 +465,7 @@ export function ChartView({
 
   useEffect(() => {
     drawPrimitiveRef.current?.setScene({
-      drawings: drawDrawings,
+      drawings: sceneDrawings,
       timeframe,
       cursor,
       hideAll: drawHide,
@@ -483,7 +489,7 @@ export function ChartView({
         stopColor: view.stopColor,
       })),
     });
-  }, [drawDrawings, timeframe, cursor, drawHide, drawSelected, drawDraft, drawHover, drawTool, holidays, weekendSessions, views]);
+  }, [sceneDrawings, timeframe, cursor, drawHide, drawSelected, drawDraft, drawHover, drawTool, holidays, weekendSessions, views]);
 
   const fvgKey = items
     .filter((item) => item.type === "fvg" && item.visible)

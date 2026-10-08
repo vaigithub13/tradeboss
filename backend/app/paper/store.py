@@ -63,8 +63,8 @@ def weekly_summary(directory: Path, any_day: date) -> dict[str, Any]:
     for offset in range(7):
         d = monday + timedelta(days=offset)
         saved = load_day(directory, d)
-        if saved is None:
-            continue
+        if saved is None or saved.get("source", "live") != "live":
+            continue  # replays never count (they are written to replay/, which is not read here)
         s = saved.get("summary", {})
         exits = s.get("exits") or {}
         days.append({"date": d.isoformat(), **{k: s.get(k, 0) for k in TOTAL_KEYS},

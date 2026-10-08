@@ -249,3 +249,24 @@ def test_the_strategies_route_offers_the_exit_rules(tmp_path) -> None:
     c = client_for(Fixture(tmp_path, {}).runner)
     body = c.get("/api/paper/strategies").json()
     assert [r["name"] for r in body["exit_rules"]] == ["premium_1to2", "atr_1to2"]
+
+
+def test_a_start_after_the_close_replays_apart_from_the_live_files(tmp_path) -> None:
+    fx = Fixture(tmp_path, {})
+    c = client_for(fx.runner, now=ms(22, 1))
+    body = c.post("/api/paper/start", json={"strategy": "log_xz"}).json()
+    assert body["source"] == "replay" and body["state"] == "stopped" and body["ended_by"] == "replay finished"
+    assert load_day(tmp_path, DAY) is None and load_day(tmp_path / "replay", DAY)["source"] == "replay"
+    assert c.get("/api/paper/day", params={"day": "2026-10-05"}).status_code == 404
+    assert c.get("/api/paper/day", params={"day": "2026-10-05", "replay": "true"}).json()["source"] == "replay"
+
+
+def test_the_trades_route_lists_every_slots_trades(tmp_path) -> None:
+    fx = Fixture(tmp_path, {0: "BUY"})
+    c = client_for(fx.runner)
+    c.post("/api/paper/start", json={"strategy": "log_xz"})
+    fx.feed([(9, m, 22600.0) for m in range(15, 22)])
+    fx.runner.stop(ms(9, 30))
+    rows = c.get("/api/paper/trades").json()["rows"]
+    assert len(rows) == 1 and rows[0]["slot"] == "1" and rows[0]["exit_reason"] == "stopped by user"
+    assert c.get("/api/paper/trades", params={"slot": "2"}).json()["rows"] == []

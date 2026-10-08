@@ -5,6 +5,10 @@ import { EXIT_RULES, SLOT_DEFAULTS, exitLabel, formatRupees, markLine, paperRows
 import { exitCountsLine } from "../report/present";
 import { TradeReport } from "../report/TradeReport";
 import { usePaperStore } from "../store/paperStore";
+import { usePaperTradesStore } from "../store/paperTradesStore";
+import { useDragResize } from "../ui/useDragResize";
+
+const maxWidth = () => Math.max(320, Math.floor(window.innerWidth * 0.7));
 
 const STRATEGIES = [
   { name: "log_xz", label: "Log XZ (RMA 14, 5m)" },
@@ -26,11 +30,32 @@ export function PaperPanel() {
   }, [refresh]);
 
   const disabled = status?.state === "disabled";
+  const tradesOpen = usePaperTradesStore((s) => s.open);
+  const setTradesOpen = usePaperTradesStore((s) => s.setOpen);
+  const { size, onPointerDown } = useDragResize("paper.panel.width", 384, 280, maxWidth, "x", -1);
 
   return (
-    <aside className="flex h-full w-96 shrink-0 flex-col gap-3 overflow-y-auto border-l border-white/10 bg-[#0b0f14] p-3 text-xs text-white/80">
+    <aside
+      className="relative flex h-full shrink-0 flex-col gap-3 overflow-y-auto border-l border-white/10 bg-[#0b0f14] p-3 text-xs text-white/80"
+      style={{ width: size }}
+    >
+      <div
+        role="separator"
+        aria-label="Resize the paper panel"
+        className="absolute inset-y-0 left-0 w-1.5 cursor-col-resize hover:bg-sky-500/30"
+        onPointerDown={onPointerDown}
+      />
       <div>
-        <h2 className="text-sm font-semibold text-white">Live signals (paper)</h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-sm font-semibold text-white">Live signals (paper)</h2>
+          <button
+            type="button"
+            className="rounded border border-white/15 px-2 py-0.5"
+            onClick={() => setTradesOpen(!tradesOpen)}
+          >
+            Trades
+          </button>
+        </div>
         <p className="text-white/50">No orders are sent. Fills are paper: live quotes, or the model flagged as modelled.</p>
       </div>
       {pollError && <div className="text-red-400">{pollError}</div>}
@@ -122,6 +147,9 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
       <div className="text-white/60">
         state: {status?.state ?? "…"}
         {status?.ended_by ? ` (${status.ended_by})` : ""}
+        {status?.source === "replay" && (
+          <span className="ml-2 text-amber-300">replay: started after the close, kept apart, not counted</span>
+        )}
       </div>
       <div>Open P&amp;L: {markLine(status?.mark ?? null)}</div>
       <div>

@@ -14,6 +14,8 @@ import { DataTokenBadge } from "./panels/DataTokenBadge";
 import { LiveBadge } from "./panels/LiveBadge";
 import { SnapshotBadge } from "./panels/SnapshotBadge";
 import { PaperPanel } from "./panels/PaperPanel";
+import { PaperTrades } from "./panels/PaperTrades";
+import { usePaperTradesStore } from "./store/paperTradesStore";
 import { paperMarkers, type PaperSignal } from "./paper/present";
 import { usePaperStore } from "./store/paperStore";
 import { SessionsMenu } from "./panels/SessionsMenu";
@@ -203,6 +205,20 @@ export default function App() {
       markers.push(...paperMarkers(slot.signals ?? NO_PAPER_SIGNALS, times, slot.slot === "1" ? "" : `${slot.slot}·`));
     }
   }
+  const tradeOverlay = usePaperTradesStore((s) => s.overlay);
+  const paperFocus = usePaperTradesStore((s) => s.focus);
+  const chartFocus = !paperFocus ? focus : !focus || paperFocus.token > focus.token ? paperFocus : focus;
+  if (symbol === "NIFTY50" && tradeOverlay) {
+    for (const m of tradeOverlay.markers) {
+      markers.push({
+        time: snapBar(m.time) as UTCTimestamp,
+        position: m.kind === "entry" ? (m.long ? "belowBar" : "aboveBar") : m.long ? "aboveBar" : "belowBar",
+        shape: m.kind === "exit" ? "circle" : m.long ? "arrowUp" : "arrowDown",
+        color: m.kind === "exit" ? "#e2e8f0" : m.long ? "#26a69a" : "#ef5350",
+        text: m.kind === "entry" ? "entry" : "exit",
+      });
+    }
+  }
   markers.sort((a, b) => Number(a.time) - Number(b.time));
   const pickTime = (time: number): void => {
     const trade = activeRun?.result?.trades.find((item) => item.entry_time === time || item.exit_time === time);
@@ -287,7 +303,7 @@ export default function App() {
             onNeedOlder={() => void loadOlder()}
             onNeedNewer={() => void loadNewer()}
             markers={markers}
-            focus={focus}
+            focus={chartFocus}
             onPickTime={pickTime}
             tradeCard={
               <>
@@ -334,6 +350,7 @@ export default function App() {
         {paperOpen && <PaperPanel />}
       </main>
       <BacktestResults />
+      <PaperTrades />
       </div>
       <AnalysisPanel
         symbol={symbol}
