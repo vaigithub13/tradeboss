@@ -75,3 +75,28 @@ def weekly_summary(directory: Path, any_day: date) -> dict[str, Any]:
     year, week, _ = any_day.isocalendar()
     return {"week": f"{year}-W{week:02d}", "days": days, "totals": totals, "exits": exit_totals,
             "excluded": [d["date"] for d in days if d["dry_run"] is not None]}
+
+
+def mark_replay(directory: Path, day: date) -> Path:
+    """Move a day file that a replay wrote into the live folder (a Start after the close, before replays were kept
+    apart) to `replay/`, marked as a replay: the file, its signals and its trades. Returns the new path."""
+    src = day_path(directory, day)
+    if not src.exists():
+        raise FileNotFoundError(f"no day file {src}")
+    dst = day_path(directory / "replay", day)
+    if dst.exists():
+        raise FileExistsError(f"{dst} exists already")
+    body = json.loads(src.read_text(encoding="utf-8"))
+    body["source"] = "replay"
+    if body.get("state") == "running":
+        body["state"], body["ended_by"] = "stopped", "replay finished"
+    for key in ("signals", "trades", "report"):
+        body[key] = [{**item, "source": "replay"} for item in body.get(key, [])]
+    if isinstance(body.get("open"), dict):
+        body["open"] = {**body["open"], "source": "replay"}
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dst.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(body, indent=2, sort_keys=True), encoding="utf-8")
+    os.replace(tmp, dst)
+    src.unlink()
+    return dst

@@ -752,3 +752,22 @@ windows = 28 combinations per walk-forward, 168 over the six.
   the other six sum to −8,952. One window carries it, as before.
 - Run ids: full Log XZ none / premium / ATR 0397b9b4 / 960928dc / bdd7e742; Price Channel cc103c05 / d5b6de89 /
   fdbbac07; walk-forward Log XZ dc4720a9 / dc9dd61f / 2029ca3b; Price Channel 34c88cb6 / d3a7d5a6 / 8b082bb3.
+
+## Paper: live vs replay kept apart; Trades view (2026-10-08, night)
+
+- Found: slots 3 and 4 were started at 22:01, after the close. The Start caught up from the recording and wrote
+  that replay as the live 8 Oct day (slot 4 +3,128.44, and a W41 week total). Now a Start after the day's session
+  ended (15:30 IST) is a replay: it writes only `slotN/replay/<day>.json` (source replay), never the live file,
+  and ends when the catch-up is done. In a live day every signal and trade carries its source (live, or replay
+  for what the catch-up decided after a late Start or a restart); the day summary and the week count live trades
+  of live days only (`summary.replay` lists the rest). Files from before sources were run live and count.
+- Cleanup of 8 Oct (slots 3 and 4): the backend that wrote them was still running (old code) and would write them
+  back as live when it stops, so they were not moved tonight. After stopping it (one Ctrl+C):
+  `cd backend && uv run python -m scripts.paper_mark_replay --day 2026-10-08 --slot 3 --slot 4`.
+- Trades view (`GET /api/paper/trades`, the panel's Trades button): one row per trade over all slots, slot and date
+  filters, the asked columns in order, IST HH:MM:SS, 2 decimals, net green/red, sticky header, horizontal
+  scroll, sortable, CSV, a totals row (trades, wins, net, average R, exits by reason). Bottom drawer (drag to
+  resize, full screen) and a resizable side panel; sizes remembered in the browser. A row click switches the
+  chart to NIFTY50, jumps there and draws the trade like the position tool from its stored levels and result
+  (not saved with the drawings). Older trades take the signal bar and trigger from their signal record and the
+  Nifty at exit from the 1m candles (marked ≈); new trades store the Nifty at exit.

@@ -112,3 +112,24 @@ def test_a_trade_keeps_the_nifty_price_at_exit(tmp_path) -> None:
     r.session.on_clock(ms(15, 15))
     t = r.session.book.trades[-1]
     assert t["index_exit"] == 22633.5 and t["index_entry"] == 22600.0
+
+
+def test_a_replay_left_in_the_live_folder_is_moved_apart_and_stops_counting(tmp_path) -> None:
+    """8 Oct 2026: slots 3 and 4 were started at 22:01 and their replay was written as a live day."""
+    import pytest
+
+    from app.paper.store import mark_replay
+
+    base = {"trades": 1, "wins": 1, "gross": 3201.25, "charges": 72.81, "net": 3128.44, "modelled_legs": 0,
+            "signals": 1, "unfilled": 0}
+    save_day(tmp_path, DAY, {"state": "running", "summary": base, "signals": [{"time": 1}], "trades": [{"net": 1}],
+                             "report": [{"net": 1}], "open": None})
+    assert weekly_summary(tmp_path, DAY)["totals"]["net"] == 3128.44
+    moved = mark_replay(tmp_path, DAY)
+    assert moved == tmp_path / "replay" / f"{DAY.isoformat()}.json" and load_day(tmp_path, DAY) is None
+    body = load_day(tmp_path / "replay", DAY)
+    assert body["source"] == "replay" and body["state"] == "stopped" and body["ended_by"] == "replay finished"
+    assert body["signals"][0]["source"] == body["trades"][0]["source"] == body["report"][0]["source"] == "replay"
+    assert weekly_summary(tmp_path, DAY)["days"] == []
+    with pytest.raises(FileNotFoundError):
+        mark_replay(tmp_path, DAY)

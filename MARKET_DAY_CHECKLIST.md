@@ -26,6 +26,8 @@ For every trading day (first used for Monday sessions). Times are IST.
   the slot's default), no exits: the week's comparison. From 9 Oct also strategy 3 (Log XZ) and strategy 4
   (Price Channel 20) with the "1:2 premium (−20% / +40%)" exit rule (the slots' defaults). A Start late in the day catches up from the recording, so the signals are the same.
 - Paper squares off at 15:15:00 at the live bid.
+- A Start after 15:30 replays the day from the recording into `data/paper/slotN/replay/` (marked replay); it never
+  touches the live day files or the totals. The panel's Trades button lists every live trade over the slots.
 
 ## After the close
 
