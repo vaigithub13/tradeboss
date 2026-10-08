@@ -640,3 +640,60 @@ has no same-day data):
   0.35 / 0.35 out (the 15:15 square-off, ITM by then).
 - Health: one backend process 08:33-17:11, no restarts, 4 warnings (2 Upstox market-status retries at 09:44,
   2 reconnects), no errors; clean shutdown with the spread report and both day files.
+
+## Live timing, ATM at the fill, gap bars, option capture (2026-10-08, after the close)
+
+Decided after forward-test day 1. Code on `0c1d425` and `219c6da`; the research runs below are saved on `219c6da`,
+tree clean. Holdout not run, peek count unchanged.
+
+- **Live timing** (backtest setting, default on; off = the old bar-end timing, still selectable in the form, the
+  run request and walk-forward). A market signal fills at the open of the minute after the bar closes, the minute
+  paper decides it in. A stop works from that minute; a level the index touched in the lag minute fills at that
+  minute's open, flagged `late` (paper: "crossed before the order was armed"). A strategy's cancel takes effect at
+  the same minute, so a replaced level still works through the lag minute, as in paper. Needs 1m source bars (off,
+  with a warning, on a coarser source); the Pine bar path and same_bar_close keep their own timing. A saved run
+  shows `late` per trade and `late_entries` in the index summary. Test: 8 Oct Log XZ fills at 09:26 (paper 09:26:00).
+- **ATM at the fill.** The option overlay takes ATM from the index fill price: the stop level for a stop fill, the
+  minute's open for a market fill (or a stop that gapped or filled late). It used the last 1m close before the
+  fill. Paper now takes a market fill's ATM from the live index at the fill (it used the bar close), a stop fill's
+  from its level, and a late fill's from the live price at arming.
+- **8 Oct again, both changes, priced from the stored bars:** Log XZ 22500 PE entry 140.10 at 09:26 (paper 139.50),
+  net +9,428.94 (paper +9,516.62; the gap was −640.64). Price Channel 22500 PE (was 22550) entry 125.58 at 09:24
+  (paper 126.25), net +10,373.24 (paper +10,378.24).
+- **Feed gaps.** Backfilled minutes count as final for paper. A bar left short waits up to 180 s (exchange time) for
+  the reconnect backfill; the service re-sends the index's final minutes to paper after an index backfill or
+  release (the engine re-sent only its last two bars, and minutes that arrived while the index was withheld never
+  reached paper). The rebuilt bar and any bar due behind it are decided late, in order; their signals say
+  "late after gap" and nothing opens at or after 15:15. A gap never filled is given up, logged as a warning and
+  listed in the day file (`given_up_bars`); `late_bars` lists the rebuilt ones. 8 Oct, from the log: the 09:43 and
+  09:49 backfills landed (09:44:47, 09:50:18) before the next minute was final, so the 09:40 and 09:45 bars would
+  have completed (inferred, not replayed: the feed recording holds no backfill responses).
+- **Option capture.** The current session of a listed contract comes from the intraday endpoint (the historical one
+  has no same-day data), and an empty answer for the current session is never marked source_empty (the 8 Oct
+  marker that blocked all 22 contracts). `capture_session` stores the nearest weekly, ATM ±5 over the day's
+  range; the backend runs it after the 15:45 reconcile, the script by hand (`--day`, `--window`). Stored now:
+  13 Oct expiry, 8 Oct (38 contracts, 14,630 bars) and 7 Oct (28 contracts).
+- Stale worktree: `main` was checked out in a 5 Oct benchmark worktree (`scratchpad/before`, unused, its `data`
+  was a symlink to the real data). Symlink removed first, then the worktree; `main` is checked out in the repo.
+
+Before / after, options, real premiums, delta-adjusted, slippage 0.2, sessions normal + weekend_full,
+2024-10-03 .. 2026-06-30. "Before" is the 7 Oct code (rerun today on `539f99d`: Price Channel 5m and Log XZ
+reproduce exactly); the middle column is today's code with live timing off, so it isolates ATM-at-the-fill.
+
+| run | before ₹ | ATM at fill only ₹ | after (both) ₹ | trades | max DD before → after ₹ | late entries |
+|---|---:|---:|---:|---:|---:|---:|
+| Price Channel 5m L20 | 128,704.61 | 115,659.96 | 102,176.66 | 1,089 | 62,099 → 71,756 | 152 |
+| Price Channel 15m L40 | 45,299.77 | 44,486.93 | 48,267.73 | 342 | 80,718 → 81,357 | 45 |
+| Log XZ 5m RMA 14 | −103,881.02 | −106,781.97 | −132,155.42 | 1,669 | 162,497 → 165,983 | 0 |
+| WF 5m L20 / 15m L40 (2 combos) | +27,100.26 (373) | +10,922.22 (306) | +8,666.09 (306) | | 60,873 → 57,922 | |
+| WF length 20/40 × 5m/15m (4) | +20,913.11 (426) | +4,204.39 (359) | +8,666.09 (306) | | 74,438 → 57,922 | |
+
+- Index ₹ (same runs): Price Channel 5m 633,199.75 → 611,456.75; 15m 240,411.50 → 240,476.00; Log XZ 298,905.00 →
+  216,318.25. Log XZ's one-minute-later market fills cost 82,587 index ₹ over 1,669 trades.
+- Walk-forward after, test windows (both grids chose the same): +35,012 (15m L40), −3,490 (15m L40), −13,758
+  (5m L20), −9,004 (5m L20), no choice, no choice, −93 (15m L40). Before, window 7 chose 5m L20 and made +19,483;
+  with ATM at the fill its train result ranks 15m L40 first. One window carries the result.
+- Run ids (after / ATM-only): PC 5m 27352b0b / 380f7331, PC 15m ebc0aa0e / 5c66cd0e, Log XZ ef091bad / 4a9b564c,
+  WF2 4e9994b6 / 4d3ecc5e, WF4 35140f91 / fa22d675.
+- Price Channel 5m L20 stays positive at 0.2 (+102,177) but most of the 7 Oct margin over 1.0 slippage is gone; the
+  walk-forward out-of-sample is +8,666 on 306 trades, close to flat. Log XZ is worse.

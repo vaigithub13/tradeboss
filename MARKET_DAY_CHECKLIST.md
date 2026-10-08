@@ -30,7 +30,11 @@ For every trading day (first used for Monday sessions). Times are IST.
 
 - 15:45: the reconcile runs (retried until 16:30). Check `data/live-state/reconcile.json`: today
   `intraday_reconciled`, yesterday `final`.
-- The spread report is in `data/spreads/reports/<day>.md`; the paper day file `data/paper/<day>.json` has `eod_check`.
+- After a successful reconcile the backend stores the day's option bars (nearest weekly, ATM ±5 over the day's range)
+  in `data/option_history/`; the log says `option capture <day>: expiry …`. By hand:
+  `cd backend && uv run python -m scripts.capture_option_day [--day YYYY-MM-DD]`.
+- The spread report is in `data/spreads/reports/<day>.md`; the paper day file `data/paper/<day>.json` has `eod_check`,
+  and `late_bars` / `given_up_bars` for bars a feed gap left short (rebuilt from the backfill, or given up).
 - After 16:10: stop `npm run session` with ONE Ctrl+C and wait for "Application shutdown complete" (at most a few
   seconds). The shutdown writes the spread report and the paper day file. Stopping before 15:45 logs a warning:
   the reconcile, the paper end-of-day check and the full-day spread report then do not run.
