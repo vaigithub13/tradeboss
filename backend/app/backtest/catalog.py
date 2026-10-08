@@ -93,7 +93,7 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
 
 _TOP = {
     "strategy", "params", "symbol", "timeframe", "start", "end", "sessions",
-    "mode", "strike_offset", "slippage_points", "option_fill", "live_timing",
+    "mode", "strike_offset", "slippage_points", "option_fill", "live_timing", "exit_rule",
     *("premium_target_pct", "premium_stop_pct"),
 }
 #: option-premium exits: settings of the option overlay, not strategy parameters
@@ -207,6 +207,7 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
     option_fill = _option_fill(body.get("option_fill", "delta_adjusted"))
     live_timing = _live_timing(body.get("live_timing", True))
     premium = parse_premium_exits(body)
+    exit_rule = parse_exit_setting(body.get("exit_rule"), mode=mode, premium=premium, params=params)
     if premium and mode != "options":
         raise RunRequestError("premium exits apply to options mode")
     return {
@@ -223,7 +224,26 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
         "slippage_points": float(slip),
         "option_fill": option_fill,
         "live_timing": live_timing,
+        "exit_rule": exit_rule,
     }
+
+
+def parse_exit_setting(value: Any, *, mode: str, premium: dict[str, Any], params: dict[str, Any]) -> dict[str, Any] | None:
+    """The run's exit rule (app/exits/rules.py), as a plain dict, or None. One exit setting at a time: not with the
+    older premium_* fields nor with a strategy's own use_stop / use_target."""
+    from app.exits.rules import parse_exit_rule
+
+    try:
+        rule = parse_exit_rule(value)
+    except ValueError as exc:
+        raise RunRequestError(f"exit_rule: {exc}") from exc
+    if rule is None:
+        return None
+    if premium or params.get("use_stop") or params.get("use_target"):
+        raise RunRequestError("one exit setting at a time: exit_rule, or premium_* / use_stop / use_target")
+    if rule.kind == "premium" and mode != "options":
+        raise RunRequestError("a premium exit rule applies to options mode")
+    return rule.to_dict()
 
 
 def _live_timing(value: Any) -> bool:
@@ -242,7 +262,12 @@ def build_strategy(config: dict[str, Any]) -> Strategy:
         slug = name.split(":", 1)[1]
         return IsolatedStrategy(USER_DIR / f"{slug}.py", **dict(config.get("params") or {}))
     cls, _fields = _CATALOG[name]
-    return cls(**config["params"])
+    strategy: Strategy = cls(**config["params"])
+    if config.get("exit_rule"):
+        from app.exits.rules import WithExits, parse_exit_rule
+
+        strategy = WithExits(strategy, parse_exit_rule(config["exit_rule"]))  # type: ignore[arg-type]
+    return strategy
 
 
 def _coerce(key: str, value: Any, field: _Field) -> Any:

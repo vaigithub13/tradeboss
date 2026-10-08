@@ -16,6 +16,7 @@ from app.backtest.catalog import (
     _CATALOG,
     _date,
     _live_timing,
+    parse_exit_setting,
     _option_fill,
     _sessions,
     parse_premium_exits,
@@ -268,7 +269,7 @@ def last_chosen_params(result: dict[str, Any] | None) -> dict[str, Any] | None:
 def parse_walk_forward(body: dict[str, Any]) -> dict[str, Any]:
     allowed = {
         "kind", "strategy", "symbol", "timeframe", "start", "end", "sessions",
-        "mode", "strike_offset", "slippage_points", "option_fill", "live_timing", "train_months", "test_months",
+        "mode", "strike_offset", "slippage_points", "option_fill", "live_timing", "exit_rule", "train_months", "test_months",
         "step_months", "min_trades", "max_combinations", "include_forward", "grid",
     }
     extra = sorted(set(body) - allowed)
@@ -318,6 +319,7 @@ def parse_walk_forward(body: dict[str, Any]) -> dict[str, Any]:
         raise RunRequestError("slippage_points must be a number >= 0")
     option_fill = _option_fill(body.get("option_fill", "delta_adjusted"))
     live_timing = _live_timing(body.get("live_timing", True))
+    exit_rule = parse_exit_setting(body.get("exit_rule"), mode="options", premium={}, params={})
     sessions = _sessions(body.get("sessions", ["normal", "weekend_full"]))
     grid = _expand_grid(strategy, body.get("grid"), timeframe, max_combinations)
     windows = build_windows(start, research_end, train_months, test_months, step_months)
@@ -340,6 +342,7 @@ def parse_walk_forward(body: dict[str, Any]) -> dict[str, Any]:
         "slippage_points": float(slip),
         "option_fill": option_fill,
         "live_timing": live_timing,
+        "exit_rule": exit_rule,
         "train_months": train_months,
         "test_months": test_months,
         "step_months": step_months,
@@ -438,6 +441,7 @@ def child_backtest_config(config: dict[str, Any], params: dict[str, Any], start:
         "slippage_points": config["slippage_points"],
         "option_fill": config.get("option_fill", "delta_adjusted"),
         "live_timing": bool(config.get("live_timing", True)),
+        "exit_rule": config.get("exit_rule"),
     }
 
 

@@ -25,6 +25,8 @@ from app.backtest.sources import StoreSource
 from app.backtest.walkforward import child_backtest_config, run_walk_forward
 from app.config import settings
 from app.data.store import CandleStore
+from app.exits.report import reason_counts, report_row
+from app.exits.rules import ExitRule, parse_exit_rule
 from app.options.history import default_history_store
 from app.options.model import OptionModelConfig, canonical_option_fill, load_option_model, overlay_options
 
@@ -105,7 +107,8 @@ def execute_walk_forward(config: dict[str, Any], report: Report) -> dict[str, An
     return {
         "run_id": digest({
             "kind": "walk_forward",
-            "config": {key: config[key] for key in ("strategy", "grid", "start", "research_end", "slippage_points")},
+            "config": {key: config.get(key) for key in ("strategy", "grid", "start", "research_end", "slippage_points",
+                                                         "timeframe", "live_timing", "exit_rule")},
             "windows": result["windows"],
             "summary": result["summary"]["option"],
         }),
@@ -172,9 +175,17 @@ def _model(config: dict[str, Any]) -> OptionModelConfig:
         carry_basis=shipped.carry_basis,
         real_premiums=shipped.real_premiums,
         vix_scales=shipped.vix_scales,
-        premium_target_pct=config.get("premium_target_pct"),
-        premium_stop_pct=config.get("premium_stop_pct"),
+        premium_target_pct=_premium_exit(config, "target"),
+        premium_stop_pct=_premium_exit(config, "stop"),
     )
+
+
+def _premium_exit(config: dict[str, Any], which: str) -> float | None:
+    """The option overlay's premium level: from a premium exit rule, else the older premium_* field."""
+    rule = config.get("exit_rule")
+    if rule and rule.get("kind") == "premium":
+        return float(rule[which])
+    return config.get(f"premium_{which}_pct")
 
 
 def _load_underlyings(config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
@@ -220,8 +231,11 @@ def _view(result: BacktestResult, option: Any, config: dict[str, Any]) -> dict[s
         {"entry_time": t.entry_time, "net_pnl": t.net_pnl, "flags": []} for t in result.trades
     ]
     metrics_for_split = option.option.metrics if option is not None else result.metrics
+    rule = parse_exit_rule(config.get("exit_rule"))
+    report_rows, exit_counts = _report_rows(result.trades, by_id, rule=rule, step=_step_s(config["timeframe"]))
     return {
-        "summary": {"index": _index_summary(result), "option": summary_option},
+        "summary": {"index": _index_summary(result), "option": summary_option, "exits": exit_counts},
+        "report": report_rows,
         "equity": {
             "index": equity_and_drawdown(index_records),
             "option": equity_and_drawdown(option_records),
@@ -235,6 +249,56 @@ def _view(result: BacktestResult, option: Any, config: dict[str, Any]) -> dict[s
         },
         "mode": config["mode"],
     }
+
+
+def _step_s(timeframe: str) -> int:
+    from app.backtest.engine import INTRADAY_MIN
+
+    return 60 * INTRADAY_MIN.get(timeframe, 0)
+
+
+def _raw_exit(trade: Trade, option: dict[str, Any] | None) -> str:
+    """The exit as the report names it before categorising: a premium exit of the option, the index bracket's stop
+    or target, the square-off, the session end, or else a reversal (the next signal closed it)."""
+    if option is not None and str(option.get("exit_reason", "")).startswith("premium_"):
+        return str(option["exit_reason"])
+    if trade.exit_tag.endswith(":stop"):
+        return "index_stop"
+    if trade.exit_tag.endswith(":target"):
+        return "index_target"
+    if trade.exit_reason in ("square_off", "session_end", "end_of_data"):
+        return trade.exit_reason
+    return "reversal"
+
+
+def _report_rows(trades: list[Trade], option_by_id: dict[int, dict[str, Any]], *, rule: ExitRule | None,
+                 step: int) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """The trade report (app/exits/report.py), one row per trade, and the exits by kind."""
+    rows = []
+    for t in trades:
+        opt = option_by_id.get(t.id)
+        if opt is not None and opt.get("unpriced"):
+            opt = None
+        rows.append({"id": t.id, **report_row(
+            signal_time=None if t.signal_time is None else t.signal_time - step,
+            trigger_index=t.entry_price,
+            fill_time=t.entry_time,
+            contract=opt["contract"]["symbol"] if opt else "index",
+            entry_premium=float(opt["entry_fill"]) if opt else t.entry_price,
+            entry_source=str(opt["entry_source"]) if opt else "index",
+            units=int(opt["units"]) if opt else t.units,
+            rule=rule,
+            direction=t.direction,
+            index_entry=t.entry_price,
+            delta=opt.get("entry_delta") if opt else (1.0 if t.direction == "LONG" else -1.0),
+            index_stop=t.stop_level,
+            index_target=t.target_level,
+            exit_time=int(opt["exit_time"]) if opt else t.exit_time,
+            exit_premium=float(opt["exit_fill"]) if opt else t.exit_price,
+            exit_reason=_raw_exit(t, opt),
+            net=float(opt["net_pnl"]) if opt else t.net_pnl,
+        )})
+    return rows, reason_counts(rows)
 
 
 def _index_summary(result: BacktestResult) -> dict[str, Any]:

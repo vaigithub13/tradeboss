@@ -23,6 +23,7 @@ from app.options.bs import PricingError, bs_forward_delta, bs_forward_price, sna
 
 class OptionOverlayError(ValueError):
     """The trade is not one entry fill and one exit fill, so it cannot be priced as one option."""
+from app.exits.rules import first_hit
 from app.options.contract import OptionContract, choose_contract
 from app.options.events import EventCalendar, load_default_events
 from app.options.history import default_history_store
@@ -661,6 +662,7 @@ def _one_trade(
         "entry_date": entry_d.isoformat(),
         "exit_date": exit_d.isoformat(),
         "index_entry": float(trade.entry_price),
+        "entry_delta": entry_delta,
         "index_exit": exit_spot,
         "iv": iv_in,
         "iv_exit": iv_out,
@@ -722,22 +724,27 @@ def _premium_walk(
         ohlc = bar_at(expiry, strike, kind, t)
         if ohlc is not None:
             o, h, lo, _c = (float(x) for x in ohlc)
-            if not first:  # the entry minute's open is the entry itself
-                if stop is not None and o <= stop:
-                    return _Walk((t, o, "premium_stop"), o if high is None else max(high, o), True)
-                if target is not None and o >= target:
-                    return _Walk((t, o, "premium_target"), o if high is None else max(high, o), True)
-            hit_stop = stop is not None and lo <= stop
-            hit_target = target is not None and h >= target
-            if hit_stop:  # both in one minute: the stop first, as the engine does
-                # the minute's high may come after the stop: only its open counts toward the best open profit
-                return _Walk((t, stop, "premium_stop"), o if high is None else max(high, o), True)  # type: ignore[arg-type]
-            if hit_target:
-                return _Walk((t, target, "premium_target"), target if high is None else max(high, target), True)  # type: ignore[arg-type]
+            # the entry minute's open is the entry itself: only the range of that minute counts
+            hit = first_hit(stop, target, _inside(o, stop, target) if first else o, h, lo, long=True)
+            if hit is not None:
+                reason, price = hit
+                if reason == "stop":
+                    # the minute's high may come after the stop: only its open counts toward the best open profit
+                    return _Walk((t, price, "premium_stop"), o if high is None else max(high, o), True)
+                return _Walk((t, price, "premium_target"), max(o, price) if high is None else max(high, o, price), True)
             high = h if high is None else max(high, h)
         first = False
         t += 60
     return _Walk(None, high, high is not None)
+
+
+def _inside(o: float, stop: float | None, target: float | None) -> float:
+    """The open moved just inside (stop, target), so only the minute's range can trigger."""
+    if stop is not None and o <= stop:
+        return stop + 1e-9
+    if target is not None and o >= target:
+        return target - 1e-9
+    return o
 
 
 def _expiry_close_ts(expiry: date) -> int:

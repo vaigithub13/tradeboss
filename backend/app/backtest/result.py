@@ -35,6 +35,9 @@ class Trade:
     entry_fills: int = 1  # more than one means the entry price is an average
     exit_fills: int = 1
     late: bool = False  # live timing: the entry stop was crossed in the decision lag and filled when it started working
+    signal_time: int | None = None  # when the entry order was placed: the end of the bar that decided it
+    stop_level: float | None = None  # the bracket's index stop and target, when the entry had one
+    target_level: float | None = None
 
 
 def canonical(obj: Any) -> str:

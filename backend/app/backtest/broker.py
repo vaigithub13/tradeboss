@@ -32,6 +32,7 @@ from app.backtest.context import PositionView
 from app.backtest.costs import CostModel, Slippage
 from app.backtest.result import Trade
 from app.backtest.sources import ist_date
+from app.exits.rules import index_levels
 
 CENT = Decimal("0.01")
 PRICE_Q = Decimal("0.000001")
@@ -62,6 +63,7 @@ class Order:
     lag_from: int | None = None  # live timing: start of the lag minute(s) before min_t
     lag_crossed: bool = False  # the level was touched in the lag minute: fill at the open when it works
     cancel_at: int | None = None  # a deferred cancel by the strategy (live timing)
+    placed_t: int | None = None  # the decision time (bar end) that placed it
 
 
 @dataclass
@@ -80,6 +82,9 @@ class _Open:
     late: bool = False
     entry_at_open: bool = True
     exit_at_open: bool = True
+    signal_time: int | None = None
+    stop_level: float | None = None
+    target_level: float | None = None
 
 
 class BacktestBroker:
@@ -157,7 +162,7 @@ class BacktestBroker:
         order = Order(self._next_id, side, signal.type, signal.price, lots, signal.tag, signal.oco, reduce_only,
                       "exit" if reduce_only else "entry", min_t, signal.stop, signal.target,
                       stop_points=signal.stop_points, target_points=signal.target_points,
-                      lag_from=lag_from if signal.type == "SL" else None)
+                      lag_from=lag_from if signal.type == "SL" else None, placed_t=t)
         self._next_id += 1
         self.counters["orders"] += 1
         self._event("order_placed", t, id=order.id, side=side, type=signal.type, price=signal.price, lots=lots,
@@ -406,6 +411,10 @@ class BacktestBroker:
                 tr.charges[k] = tr.charges.get(k, Decimal("0")) + v
             tr.slip += abs(dp - _d(raw)) * units if order.type != "LIMIT" else Decimal("0")
 
+        if closing and opening:
+            # a reversal: the closed position's bracket must not work against the new one
+            for other in [o for o in sorted(self._working.values(), key=lambda x: x.id) if o.kind in ("stop", "target")]:
+                self._drop(other, t, "reversed")
         if closing:
             tr = self._open
             assert tr is not None
@@ -420,7 +429,8 @@ class BacktestBroker:
         if opening:
             if self.lots == 0:
                 self.lot_size = self.lot_resolver(day)
-                self._open = _Open(sign, t, order.tag, self.lot_size, entry_at_open=at_open, late=late)
+                self._open = _Open(sign, t, order.tag, self.lot_size, entry_at_open=at_open, late=late,
+                                   signal_time=order.placed_t)
                 self._avg = Decimal("0")
             tr = self._open
             assert tr is not None
@@ -451,10 +461,13 @@ class BacktestBroker:
         long = order.side == "BUY"
         stop = order.stop
         target = order.target
+        direction = "LONG" if long else "SHORT"
         if order.stop_points is not None:
-            stop = round(fill_price - order.stop_points, 2) if long else round(fill_price + order.stop_points, 2)
+            stop = index_levels(direction, fill_price, order.stop_points, 0.0)[0]
         if order.target_points is not None:
-            target = round(fill_price + order.target_points, 2) if long else round(fill_price - order.target_points, 2)
+            target = index_levels(direction, fill_price, 0.0, order.target_points)[1]
+        if self._open is not None:
+            self._open.stop_level, self._open.target_level = stop, target
         for kind, level in (("stop", stop), ("target", target)):
             if level is None:
                 continue
@@ -507,6 +520,9 @@ class BacktestBroker:
             ambiguous=tr.ambiguous,
             optimistic=tr.optimistic,
             late=tr.late,
+            signal_time=tr.signal_time,
+            stop_level=tr.stop_level,
+            target_level=tr.target_level,
             entry_at_open=tr.entry_at_open,
             exit_at_open=tr.exit_at_open,
             entry_fills=len(tr.entries),
