@@ -1,18 +1,19 @@
 import { Fragment, useEffect, useState } from "react";
 
-import { PAPER_SLOTS, type PaperStatus } from "../api/paper";
-import { formatRupees, markLine, paperRows, parseParams } from "../paper/present";
+import { PAPER_SLOTS, fetchPaperWeek, type PaperStatus, type PaperWeek } from "../api/paper";
+import { EXIT_RULES, SLOT_DEFAULTS, exitLabel, formatRupees, markLine, paperRows, parseParams, startParams } from "../paper/present";
+import { exitCountsLine } from "../report/present";
+import { TradeReport } from "../report/TradeReport";
 import { usePaperStore } from "../store/paperStore";
 
 const STRATEGIES = [
   { name: "log_xz", label: "Log XZ (RMA 14, 5m)" },
   { name: "price_channel", label: "Price Channel (length 20, 5m)" },
 ];
-/** slot 1 forward-tests the original; slot 2 the Price Channel the 7 Oct walk-forward chose */
-const DEFAULT_STRATEGY: Record<string, string> = { "1": "log_xz", "2": "price_channel" };
 const POLL_MS = 3000;
 
-/** Live signals (paper): two strategies side by side on the live feed, each with its own position and P&L. No orders. */
+/** Live signals (paper): four strategies side by side on the live feed, each with its own position and P&L. No orders.
+ * Slots 1 and 2 are the week's comparison (no exits); 3 and 4 default to the same strategies with 1:2 premium exits. */
 export function PaperPanel() {
   const status = usePaperStore((s) => s.status);
   const pollError = usePaperStore((s) => s.errors[""] ?? null);
@@ -45,8 +46,20 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
   const error = usePaperStore((s) => s.errors[slot] ?? null);
   const start = usePaperStore((s) => s.start);
   const stop = usePaperStore((s) => s.stop);
-  const [strategy, setStrategy] = useState(DEFAULT_STRATEGY[slot] ?? "log_xz");
+  const [strategy, setStrategy] = useState(SLOT_DEFAULTS[slot]?.strategy ?? "log_xz");
+  const [exit, setExit] = useState(SLOT_DEFAULTS[slot]?.exit ?? "");
   const [paramsText, setParamsText] = useState("");
+  const [week, setWeek] = useState<PaperWeek | null>(null);
+  const day = status?.day ?? null;
+  const closed = status?.trades?.length ?? 0;
+  useEffect(() => {
+    if (!day) return;
+    let live = true;
+    fetchPaperWeek(slot, day).then((w) => live && setWeek(w)).catch(() => live && setWeek(null));
+    return () => {
+      live = false;
+    };
+  }, [slot, day, closed]);
   const running = status?.state === "running";
   const summary = status?.summary ?? null;
   const parsed = parseParams(paramsText);
@@ -55,7 +68,7 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
   return (
     <section className="flex flex-col gap-2 rounded border border-white/10 p-2" aria-label={`Paper strategy ${slot}`}>
       <h3 className="font-semibold text-white">Strategy {slot}</h3>
-      <div className="flex items-center gap-2">
+      <div className="flex flex-wrap items-center gap-2">
         <select
           aria-label={`Strategy ${slot}`}
           className="rounded border border-white/15 bg-transparent px-2 py-1"
@@ -69,17 +82,33 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
             </option>
           ))}
         </select>
+        <select
+          aria-label={`Exit rule ${slot}`}
+          className="rounded border border-white/15 bg-transparent px-2 py-1"
+          value={running ? String(status?.params?.exit_rule ?? "") : exit}
+          disabled={running}
+          onChange={(e) => setExit(e.target.value)}
+        >
+          {EXIT_RULES.map((r) => (
+            <option key={r.name} value={r.name} className="bg-[#0b0f14]">
+              {r.label}
+            </option>
+          ))}
+        </select>
         <button
           type="button"
           className="rounded border border-white/15 px-3 py-1 disabled:opacity-40"
           disabled={disabled || (!running && parsed.params === undefined)}
-          onClick={() => void (running ? stop(slot) : start(slot, strategy, parsed.params ?? {}))}
+          onClick={() => void (running ? stop(slot) : start(slot, strategy, startParams(parsed.params ?? {}, exit)))}
         >
           {running ? "Stop" : "Start"}
         </button>
       </div>
       {running ? (
-        <div className="text-white/50">params: {shownParams}</div>
+        <div className="text-white/50">
+          params: {shownParams}
+          {exitLabel(status?.params) ? ` · exits: ${exitLabel(status?.params)}` : ""}
+        </div>
       ) : (
         <input
           aria-label={`Params ${slot}`}
@@ -99,6 +128,12 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
         Day: net {formatRupees(summary?.net ?? null)} · trades {summary?.trades ?? 0} · wins {summary?.wins ?? 0} ·
         modelled legs {summary?.modelled_legs ?? 0}
       </div>
+      <div className="text-white/60">Day exits: {exitCountsLine(summary?.exits)}</div>
+      {week && (
+        <div className="text-white/60">
+          Week {week.week}: net {formatRupees(week.totals.net)} · trades {week.totals.trades} · exits {exitCountsLine(week.exits)}
+        </div>
+      )}
       {error && <div className="text-red-400">{error}</div>}
 
       <table className="w-full table-fixed text-left tabular-nums">
@@ -135,6 +170,7 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
           ))}
         </tbody>
       </table>
+      <TradeReport rows={status?.report ?? []} counts={summary?.exits} />
     </section>
   );
 }

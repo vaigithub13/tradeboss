@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 TOTAL_KEYS = ("trades", "wins", "gross", "charges", "net", "modelled_legs", "signals", "unfilled")
+EXIT_KEYS = ("target", "stop", "reversal", "square-off", "other")
 
 
 def day_path(directory: Path, day: date) -> Path:
@@ -65,9 +66,12 @@ def weekly_summary(directory: Path, any_day: date) -> dict[str, Any]:
         if saved is None:
             continue
         s = saved.get("summary", {})
-        days.append({"date": d.isoformat(), **{k: s.get(k, 0) for k in TOTAL_KEYS}, "dry_run": marks.get(d.isoformat())})
+        exits = s.get("exits") or {}
+        days.append({"date": d.isoformat(), **{k: s.get(k, 0) for k in TOTAL_KEYS},
+                     "exits": {k: int(exits.get(k, 0)) for k in EXIT_KEYS}, "dry_run": marks.get(d.isoformat())})
     counted = [d for d in days if d["dry_run"] is None]
     totals = {k: round(sum(d[k] for d in counted), 2) for k in TOTAL_KEYS}
+    exit_totals = {k: sum(d["exits"][k] for d in counted) for k in EXIT_KEYS}
     year, week, _ = any_day.isocalendar()
-    return {"week": f"{year}-W{week:02d}", "days": days, "totals": totals,
+    return {"week": f"{year}-W{week:02d}", "days": days, "totals": totals, "exits": exit_totals,
             "excluded": [d["date"] for d in days if d["dry_run"] is not None]}

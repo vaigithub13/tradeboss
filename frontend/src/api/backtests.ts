@@ -1,3 +1,4 @@
+import type { ExitCounts, ReportRow } from "../report/present";
 import { getJson, postJson } from "./client";
 import type { RunConfig } from "../backtest/present";
 
@@ -85,7 +86,9 @@ export interface RunResult {
   windows?: WalkWindow[];
   degradation?: { window: number; train_net_per_trade: number; test_net_per_trade: number; ratio: number }[];
   param_changes?: number;
-  summary: { index: SideSummary; option: SideSummary | null };
+  summary: { index: SideSummary; option: SideSummary | null; exits?: ExitCounts };
+  /** one row per trade (backend app/exits/report.py) */
+  report?: ReportRow[];
   equity: { index: EquityPoint[]; option: EquityPoint[] };
   trades: ResultTrade[];
   breakdowns: {

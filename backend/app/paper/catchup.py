@@ -57,6 +57,9 @@ def replay_into(
         if engine.current_ts > 0:
             if NIFTY_INDEX_KEY in engine.ticked:
                 session.on_index_tick(engine.ticked[NIFTY_INDEX_KEY], now_ms=engine.current_ts)
+            for key, ltp in engine.ticked.items():
+                if key.startswith("NSE_FO|"):
+                    session.on_option_tick(key, ltp, now_ms=engine.current_ts)
             session.on_clock(engine.current_ts)
 
     try:

@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any
 
 from app.backtest.catalog import build_strategy
+from app.backtest.contracts import Strategy
+from app.exits.rules import ExitRule, parse_exit_rule
 from app.backtest.costs import load_default_cost_table
 from app.backtest.expiry import load_default_calendar
 from app.backtest.lots import load_default_lot_table
@@ -51,6 +53,17 @@ class SettingsMismatch(PaperError):
     """Today's file was written by another strategy or other parameters; starting would mix them."""
 
 
+def paper_strategy(strategy: str, params: dict[str, Any]) -> tuple[Strategy, ExitRule | None]:
+    """The strategy a slot runs and its exit rule. The rule travels in the params (`exit_rule`, e.g.
+    "premium_1to2"), so the same-settings check, a restart and the end-of-day backtest all see it; the strategy is
+    built exactly as the backtest builds it with that exit_rule."""
+    rest = dict(params)
+    rule = parse_exit_rule(rest.pop("exit_rule", None))
+    built = build_strategy({"strategy": strategy, "params": rest,
+                            "exit_rule": None if rule is None else rule.to_dict()})
+    return built, rule
+
+
 def choose_nearest_weekly_atm(direction: str, spot: float, on: date) -> OptionContract:
     return choose_contract(direction, spot, on, calendar=load_default_calendar(),
                            lots=load_default_lot_table(), steps=load_default_step_table())
@@ -65,9 +78,11 @@ def session_factory(instruments_dir: Path, vix: VixSeries, store: CandleStore, s
         if index is None:
             raise PaperError("no instrument snapshot yet, so option contracts cannot be chosen")
         key_of = {i.symbol: i.key for i in index.instruments}
+        built, rule = paper_strategy(strategy, params)
         session = PaperSession(
             day=day,
-            strategy=build_strategy({"strategy": strategy, "params": params}),
+            strategy=built,
+            exit_rule=rule,
             choose=choose_nearest_weekly_atm,
             key_for=key_of.get,
             quotes=QuoteBook(),
@@ -167,7 +182,7 @@ class PaperRunner:
         self.eod_check = end_of_day_check(
             day=self.day, live_entries=entries, live_bars=s.live_bars(), incomplete=s.bars.incomplete,
             store=store, symbol=symbol,
-            make_strategy=lambda: build_strategy({"strategy": strategy, "params": params}),
+            make_strategy=lambda: paper_strategy(strategy, params)[0],
             basis="fill" if s.uses_stops else "decision",
         )
         self._save()
@@ -209,10 +224,19 @@ class PaperRunner:
             self._sync_wanted()
 
     def on_index_tick(self, price: float, *, now_ms: int) -> None:
-        """The live index price: fills a working stop it crosses (stop-order strategies)."""
+        """The live index price: fills a working stop it crosses (stop-order strategies), and checks an ATR exit."""
         if self.state != "running" or self.session is None or self.day is None or ist_date(now_ms) != self.day:
             return
-        if self.session.on_index_tick(price, now_ms=now_ms):
+        closed = len(self.session.book.trades)
+        if self.session.on_index_tick(price, now_ms=now_ms) or len(self.session.book.trades) != closed:
+            self._save()
+            self._sync_wanted()
+
+    def on_option_tick(self, key: str, price: float, *, now_ms: int) -> None:
+        """A traded price of an option: checks a premium exit on the open contract."""
+        if self.state != "running" or self.session is None or self.day is None or ist_date(now_ms) != self.day:
+            return
+        if self.session.on_option_tick(key, price, now_ms=now_ms):
             self._save()
             self._sync_wanted()
 
@@ -252,7 +276,8 @@ class PaperRunner:
         if self.session is not None:
             snap = self.session.snapshot()
             out.update(signals=snap["signals"], trades=snap["trades"], summary=snap["summary"],
-                       position=snap["open"], mark=self.session.mark(now_ms))
+                       position=snap["open"], mark=self.session.mark(now_ms), report=snap["report"],
+                       exit_rule=snap["exit_rule"])
         return out
 
     def day_file(self, day: date) -> dict[str, Any] | None:

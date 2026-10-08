@@ -1,7 +1,8 @@
 import { getJson, postJson } from "./client";
 import type { PaperMark, PaperSignal } from "../paper/present";
+import type { ExitCounts, ReportRow } from "../report/present";
 
-/** One paper slot ("1" or "2"): its own strategy, position and P&L. */
+/** One paper slot ("1".."4"): its own strategy, position and P&L. */
 export interface PaperStatus {
   slot: string;
   state: "running" | "stopped" | "disabled";
@@ -12,9 +13,19 @@ export interface PaperStatus {
   wanted_keys: string[];
   signals: PaperSignal[];
   trades: { symbol: string; net: number; exit_reason: string }[];
-  summary: { trades: number; wins: number; net: number; modelled_legs: number } | null;
+  summary: { trades: number; wins: number; net: number; modelled_legs: number; exits?: ExitCounts } | null;
   position: { symbol: string } | null;
   mark: PaperMark | null;
+  /** one row per closed trade (backend app/exits/report.py) */
+  report?: ReportRow[];
+  exit_rule?: { kind: string; stop: number; target: number } | null;
+}
+
+export interface PaperWeek {
+  week: string;
+  totals: { trades: number; net: number };
+  exits: ExitCounts;
+  excluded: string[];
 }
 
 /** Both slots; `state` is running when either runs. */
@@ -23,12 +34,15 @@ export interface PaperDeskStatus {
   slots: PaperStatus[];
 }
 
-export const PAPER_SLOTS = ["1", "2"] as const;
+export const PAPER_SLOTS = ["1", "2", "3", "4"] as const;
 
 export const fetchPaperStatus = (): Promise<PaperDeskStatus> => getJson<PaperDeskStatus>("/api/paper/status");
 
 export const startPaper = (slot: string, strategy: string, params: Record<string, unknown>): Promise<PaperStatus> =>
   postJson<PaperStatus>("/api/paper/start", { strategy, params, slot });
+
+export const fetchPaperWeek = (slot: string, day: string): Promise<PaperWeek> =>
+  getJson<PaperWeek>(`/api/paper/week?slot=${encodeURIComponent(slot)}&day=${encodeURIComponent(day)}`);
 
 export const stopPaper = (slot: string): Promise<PaperStatus> =>
   postJson<PaperStatus>(`/api/paper/stop?slot=${encodeURIComponent(slot)}`, {});

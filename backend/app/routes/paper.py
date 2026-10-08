@@ -28,7 +28,7 @@ STRATEGIES = {
 class StartBody(BaseModel):
     strategy: str = "log_xz"
     params: dict[str, Any] = Field(default_factory=dict)
-    #: "1" or "2": two strategies run side by side, each with its own position and P&L
+    #: "1".."4": strategies run side by side, each with its own position and P&L
     slot: str = "1"
 
 
@@ -54,9 +54,14 @@ def _slot_status(svc: LiveService, slot: str, now: int) -> dict[str, Any]:
     return {"slot": slot, **_runner(svc, slot).status(now)}
 
 
+EXIT_RULES = {"premium_1to2": "1:2 premium (-20% / +40%)", "atr_1to2": "1:2 index ATR(14) (1x / 2x)"}
+
+
 @router.get("/strategies")
 def strategies() -> dict[str, Any]:
-    return {"strategies": [{"name": k, **v} for k, v in STRATEGIES.items()]}
+    """The strategies paper runs, and the exit rules a slot can add (sent as params.exit_rule)."""
+    return {"strategies": [{"name": k, **v} for k, v in STRATEGIES.items()],
+            "exit_rules": [{"name": k, "label": v} for k, v in EXIT_RULES.items()]}
 
 
 @router.get("/status")

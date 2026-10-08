@@ -15,6 +15,7 @@ import {
 import type { Timeframe } from "../api/client";
 import { useBacktestStore } from "../store/backtestStore";
 import { useChartStore } from "../store/chartStore";
+import { TradeReport } from "../report/TradeReport";
 
 const inr = (n: number | null | undefined): string =>
   n == null ? "—" : n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -109,6 +110,7 @@ function DoneRun({ run }: { run: BacktestRun }) {
       </div>
       <Breakdowns run={run} />
       <Trades run={run} />
+      {result.report && <TradeReport rows={result.report} counts={result.summary.exits} withDate />}
     </div>
   );
 }

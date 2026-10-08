@@ -97,6 +97,12 @@ class Position:
     entry: Fill
     index_entry_time: int
     reason: str
+    #: exit-rule levels {index_stop, index_target, premium_stop, premium_target}; None without a rule
+    levels: dict[str, float | None] | None = None
+    signal_time: int | None = None  # start of the bar whose decision placed the entry
+    trigger_index: float | None = None  # the stop level, or the index at a market fill
+    index_entry: float | None = None  # the index price the contract was chosen from
+    delta: float | None = None  # the model's delta at entry (report estimates)
 
 
 class PaperBook:
@@ -148,6 +154,11 @@ class PaperBook:
             "win": net > 0,
             "entry_reason": p.reason,
             "exit_reason": reason,
+            "levels": p.levels,
+            "signal_time": p.signal_time,
+            "trigger_index": p.trigger_index,
+            "index_entry": p.index_entry,
+            "delta": p.delta,
         }
         self.trades.append(trade)
         self.position = None

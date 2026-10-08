@@ -8,6 +8,12 @@ A signal decided at a closed bar is filled at the live quote at that moment (`no
 if there is no fresh quote. A signal that cannot be filled is recorded as unfilled and opens nothing.
 Open positions are squared off at 15:15, like the backtest's default square-off.
 
+Exit rules (app/exits/rules.py, the backtest's levels and hit rule): `premium` checks every traded price of the
+open contract against -stop / +target of the entry fill and sells at the bid; the index position stays, as in the
+backtest's option overlay, so a same-direction entry afterwards is cancelled. `atr` checks every index price
+against the bracket from the index fill (the strategy's signal carries the ATR distances) and sells at the bid;
+the index position is then flat. Opposite signals and the 15:15 square-off still close trades.
+
 A bar rebuilt after a feed gap (see `ClosedBars`) is decided when it completes, late; its signals say so in their
 note ("late after gap") and are traded at the live price then, unless that is at or after 15:15.
 """
@@ -25,6 +31,8 @@ from app.backtest.context import History, PastBars, PositionView
 from app.backtest.contracts import Signal
 from app.backtest.costs import CostTable
 from app.backtest.engine import BacktestConfig
+from app.exits.report import reason_counts, report_row
+from app.exits.rules import ExitRule, first_hit, index_levels, premium_levels
 from app.live.model import ist_ms_of_day
 from app.live.spreads.decode import DepthQuote
 from app.options.contract import OptionContract
@@ -90,6 +98,7 @@ class PaperSession:
         bar_minutes: int = 5,
         lots: int = 1,
         symbol: str = "NIFTY50",
+        exit_rule: ExitRule | None = None,
     ) -> None:
         if lots < 1:
             raise ValueError("lots must be >= 1")
@@ -104,6 +113,7 @@ class PaperSession:
         self.wanted: set[str] = set()  # option keys this session needs quoted (the live feed subscribes them)
         self.lots = lots
         self.symbol = symbol
+        self.exit_rule = exit_rule
         self.timeframe = f"{bar_minutes}m"
         self.bars = ClosedBars(bar_minutes)
         self.book = PaperBook()
@@ -162,6 +172,8 @@ class PaperSession:
                 direction=o["direction"], key=o["key"], symbol=o["symbol"], kind=o["kind"], strike=o["strike"],
                 expiry=date.fromisoformat(o["expiry"]), lots=o["lots"], units=o["units"], lot_size=o["lot_size"],
                 entry=entry, index_entry_time=o["index_entry_time"], reason=o["reason"],
+                levels=o.get("levels"), signal_time=o.get("signal_time"), trigger_index=o.get("trigger_index"),
+                index_entry=o.get("index_entry"), delta=o.get("delta"),
             )
             self.book.position = pos
             # The contract is only needed to price an exit by the model: its kind, strike and expiry are kept.
@@ -215,9 +227,10 @@ class PaperSession:
         self.shown.append(bar)
         clean = {k: bar[k] for k in OHLCV if k in bar}  # the strategy sees the bar, not the gap flag
         out = []
+        before = self._side
         for sig in self._step(clean):
             if sig.type == "MARKET":
-                out.append(self._act(sig, clean, now_ms))
+                out.append(self._act(sig, clean, now_ms, side_before=before))
         out += self._fill_crossed_on_arming(now_ms)
         if bar.get("late_after_gap"):
             for rec in out:
@@ -279,7 +292,9 @@ class PaperSession:
             return
         self.uses_stops = True
         tag = sig.tag or sig.side
-        self.working[tag] = {"side": sig.side, "price": float(sig.price), "tag": tag, "active_ms": end * 1000}
+        self.working[tag] = {"side": sig.side, "price": float(sig.price), "tag": tag, "active_ms": end * 1000,
+                             "signal_time": int(bar["time"]), "stop_points": sig.stop_points,
+                             "target_points": sig.target_points}
         self._fresh.add(tag)
 
     def on_index_tick(self, price: float, *, now_ms: int) -> list[dict[str, Any]]:
@@ -288,6 +303,9 @@ class PaperSession:
         self._ticks.append((now_ms, float(price)))
         while self._ticks and self._ticks[0][0] < now_ms - TICK_MEMORY_MS:
             self._ticks.popleft()
+        if self.exit_rule is not None:
+            self._spot = float(price)  # the model fallback for an exit prices at the live index
+        self._check_index_exit(float(price), now_ms)  # a protective level first, as the broker does
         if not self.working or not self._tradable(now_ms):
             return []  # (before a restart's last decided bar: that time was already decided)
         for tag, order in sorted(self.working.items(), key=lambda kv: kv[1]["active_ms"]):
@@ -301,7 +319,7 @@ class PaperSession:
     def _trigger(self, tag: str, order: dict[str, Any], price: float, now_ms: int, note: str = "") -> list[dict[str, Any]]:
         del self.working[tag]
         direction = "LONG" if order["side"] == "BUY" else "SHORT"
-        if self.book.position is not None and self.book.position.direction == direction:
+        if self._holds(direction):
             return []  # already in that position: the broker cancels it (pyramiding 0)
         bar_time = (now_ms // 1000) - ((now_ms // 1000) - _session_anchor(now_ms)) % self._bar_s
         rec: dict[str, Any] = {
@@ -311,7 +329,9 @@ class PaperSession:
         }
         self.signals.append(rec)
         spot = price if note else float(order["price"])  # a late fill is at the live price, a stop fill at its level
-        self._enter(rec, direction, spot, now_ms, index_time=now_ms // 1000, close_reason="reverse")
+        self._enter(rec, direction, spot, now_ms, index_time=now_ms // 1000, close_reason="reverse",
+                    signal_time=order.get("signal_time"), trigger=float(order["price"]),
+                    points=(order.get("stop_points"), order.get("target_points")))
         if rec["status"] == "filled":
             self._side = 1 if direction == "LONG" else -1
         return [rec]
@@ -323,7 +343,15 @@ class PaperSession:
             return self._ticks[-1][1]
         return float(bar["close"])
 
-    def _act(self, sig: Signal, bar: dict[str, Any], now_ms: int) -> dict[str, Any]:
+    def _holds(self, direction: str, side: int | None = None) -> bool:
+        """Already in that position? With an exit rule the index position decides (after a premium exit the
+        option is sold but the index trade is open, as in the backtest); without one, the paper book does."""
+        if self.exit_rule is None:
+            return self.book.position is not None and self.book.position.direction == direction
+        held = self._side if side is None else side
+        return held == (1 if direction == "LONG" else -1)
+
+    def _act(self, sig: Signal, bar: dict[str, Any], now_ms: int, side_before: int | None = None) -> dict[str, Any]:
         spot = self._fill_time_spot(bar)
         rec: dict[str, Any] = {
             "time": int(bar["time"]),
@@ -351,16 +379,18 @@ class PaperSession:
             rec["note"] = "after the 15:15 square-off"
             return rec
         direction = "LONG" if sig.side == "BUY" else "SHORT"
-        if self.book.position is not None and self.book.position.direction == direction:
+        if self._holds(direction, side_before):
             rec["status"] = "skipped"
             rec["note"] = "already in that position"
             return rec
 
-        self._enter(rec, direction, spot, now_ms, index_time=int(bar["time"]), close_reason="signal")
+        self._enter(rec, direction, spot, now_ms, index_time=int(bar["time"]), close_reason="signal",
+                    signal_time=int(bar["time"]), trigger=spot, points=(sig.stop_points, sig.target_points))
         return rec
 
     def _enter(self, rec: dict[str, Any], direction: str, spot: float, now_ms: int, *, index_time: int,
-               close_reason: str) -> None:
+               close_reason: str, signal_time: int | None = None, trigger: float | None = None,
+               points: tuple[float | None, float | None] = (None, None)) -> None:
         """Buy the ATM option for `direction` at the live ask (closing an open one at the bid first)."""
         contract = self.choose(direction, spot, self.day)
         key = self.key_for(contract.symbol)
@@ -385,9 +415,86 @@ class PaperSession:
             direction=direction, key=key, symbol=contract.symbol, kind=contract.kind, strike=contract.strike,
             expiry=contract.expiry, lots=self.lots, units=units, lot_size=contract.lot_size, entry=entry,
             index_entry_time=index_time, reason=rec["reason"],
+            levels=self._levels(direction, spot, entry.price, points), signal_time=signal_time,
+            trigger_index=trigger, index_entry=spot,
+            delta=self._delta(contract, spot, now_ms) if self.exit_rule is not None else None,
         ))
         rec.update(status="filled", symbol=contract.symbol, key=key, fill_source=entry.source,
                    fill_price=entry.price)
+
+    # ------------------------------------------------------------ exit rules
+    def _levels(self, direction: str, index_fill: float, premium_fill: float,
+                points: tuple[float | None, float | None]) -> dict[str, float | None] | None:
+        rule = self.exit_rule
+        if rule is None:
+            return None
+        levels: dict[str, float | None] = {"index_stop": None, "index_target": None,
+                                           "premium_stop": None, "premium_target": None}
+        if rule.kind == "premium":
+            levels["premium_stop"], levels["premium_target"] = premium_levels(premium_fill, rule)
+        elif points[0] is not None and points[1] is not None:
+            levels["index_stop"], levels["index_target"] = index_levels(direction, index_fill, points[0], points[1])
+        return levels
+
+    def _delta(self, contract: OptionContract, spot: float, now_ms: int) -> float | None:
+        """The model's delta at entry (for the report's estimated levels), by a small difference in the index."""
+        if self.model_price is None:
+            return None
+        up, down = self.model_price(contract, spot + 5.0, now_ms), self.model_price(contract, spot - 5.0, now_ms)
+        if up is None or down is None:
+            return None
+        return round((float(up) - float(down)) / 10.0, 4)
+
+    def on_option_tick(self, key: str, price: float, *, now_ms: int) -> bool:
+        """A traded price of an option (exchange time). Under a premium rule it is checked against the open
+        contract's stop and target; a hit sells at the bid. True when this closed the position."""
+        p = self.book.position
+        if (self.exit_rule is None or self.exit_rule.kind != "premium" or p is None or p.key != key
+                or p.levels is None or not self._tradable(now_ms)):
+            return False
+        hit = first_hit(p.levels.get("premium_stop"), p.levels.get("premium_target"), price, price, price, long=True)
+        if hit is None:
+            return False
+        return self._exit_on_rule(f"premium_{hit[0]}", now_ms)
+
+    def _check_index_exit(self, price: float, now_ms: int) -> bool:
+        p = self.book.position
+        if (self.exit_rule is None or self.exit_rule.kind != "atr" or p is None or p.levels is None
+                or p.levels.get("index_stop") is None or not self._tradable(now_ms)):
+            return False
+        hit = first_hit(p.levels["index_stop"], p.levels.get("index_target"), price, price, price,
+                        long=p.direction == "LONG")
+        if hit is None or not self._exit_on_rule(f"index_{hit[0]}", now_ms):
+            return False
+        self._side = 0  # the bracket closed the index position, as the broker's does
+        return True
+
+    def _exit_on_rule(self, reason: str, now_ms: int) -> bool:
+        p = self.book.position
+        assert p is not None
+        exit_fill = self._fill("SELL", p.key, self._contract_of[p.key], p.units, self._spot or p.entry.price, now_ms)
+        if exit_fill is None:
+            log.warning("paper: %s on %s but no quote and no model price: still open, checked again", reason, p.symbol)
+            return False
+        self.book.close(exit_fill, index_exit_time=now_ms // 1000, reason=reason)
+        return True
+
+    def report_rows(self) -> list[dict[str, Any]]:
+        """The trade report (app/exits/report.py): one row per closed trade."""
+        rows = []
+        for t in self.book.trades:
+            levels = t.get("levels") or {}
+            rows.append(report_row(
+                signal_time=t.get("signal_time"), trigger_index=t.get("trigger_index"),
+                fill_time=int(t["entry_at_ms"]) // 1000, contract=t["symbol"], entry_premium=float(t["entry_price"]),
+                entry_source="real" if t["entry_source"] == "quote" else str(t["entry_source"]),
+                units=int(t["units"]), rule=self.exit_rule, direction=t["direction"],
+                index_entry=t.get("index_entry"), delta=t.get("delta"),
+                index_stop=levels.get("index_stop"), index_target=levels.get("index_target"),
+                exit_time=int(t["exit_at_ms"]) // 1000, exit_premium=float(t["exit_price"]),
+                exit_reason=t["exit_reason"], net=float(t["net"]),
+            ))
+        return rows
 
     def prepare(self, spot: float) -> None:
         """Ask for the ATM call and put of the nearest weekly, so a signal finds its quote already subscribed."""
@@ -440,6 +547,7 @@ class PaperSession:
 
     def snapshot(self) -> dict[str, Any]:
         entries = [s for s in self.signals if s["side"] in ("BUY", "SELL")]
+        report = self.report_rows()
         unfilled = sum(1 for s in self.signals if s["status"] == "unfilled")
         p = self.book.position
         return {
@@ -449,7 +557,10 @@ class PaperSession:
             "signals": self.signals,
             "trades": self.book.trades,
             "open": None if p is None else {**asdict(p), "expiry": p.expiry.isoformat(), "entry": asdict(p.entry)},
-            "summary": summarise(self.book.trades, signals=len(entries), unfilled=unfilled),
+            "summary": {**summarise(self.book.trades, signals=len(entries), unfilled=unfilled),
+                        "exits": reason_counts(report)},
+            "report": report,
+            "exit_rule": None if self.exit_rule is None else self.exit_rule.to_dict(),
             "closed_bars": len(self.shown),
             "bars": self.shown,
             "last_bar_time": self.last_bar_time,

@@ -249,10 +249,13 @@ class LiveService:
             self.engine.on_frame(raw, wall)
             now_ms = self.engine.current_ts
             index_price = self.engine.ticked.get(NIFTY_INDEX_KEY)
+            option_prices = {k: v for k, v in self.engine.ticked.items() if k.startswith("NSE_FO|")}
         self._drain()
         if now_ms > 0:
             if index_price is not None:
                 self.paper.on_index_tick(index_price, now_ms=now_ms)  # stop orders fire on the live index price
+            for key, ltp in option_prices.items():
+                self.paper.on_option_tick(key, ltp, now_ms=now_ms)  # premium exits on the contract's traded price
             self.paper.on_clock(now_ms)  # 15:15:00 square-off at this frame's quote (exchange time)
         self._record_spreads(raw)
 

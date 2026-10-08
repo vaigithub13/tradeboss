@@ -11,6 +11,7 @@ import {
   compareSeries,
   compareWarningLines,
   runLabel,
+  exitSuffix,
   formFromRun,
   holdoutFormWarning,
   jumpWindow,
@@ -168,5 +169,17 @@ describe("premium exit percent", () => {
     expect(percentToFraction("0")).toBeNull();
     expect(fractionToPercent(0.3)).toBe("30");
     expect(fractionToPercent(null)).toBe("");
+  });
+});
+
+describe("exit rule in the form and the label", () => {
+  it("names the 1:2 rules and maps a saved rule back to the form", () => {
+    expect(exitSuffix(null)).toBe("");
+    expect(exitSuffix("premium_1to2")).toBe(" 1:2 premium");
+    expect(exitSuffix({ kind: "atr", stop: 1, target: 2 })).toBe(" 1:2 ATR");
+    expect(runLabel({ ...config(), strategy: "price_channel", live_timing: true, exit_rule: { kind: "premium", stop: 0.2, target: 0.4 } }))
+      .toBe("Channel 0.5 pt 1:2 premium");
+    expect(formFromRun({ ...config(), exit_rule: { kind: "atr", stop: 1, target: 2 } }).exit_rule).toBe("atr_1to2");
+    expect(formFromRun(config()).exit_rule).toBeNull();
   });
 });

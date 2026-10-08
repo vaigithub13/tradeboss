@@ -224,6 +224,19 @@ export function BacktestPanel() {
           </label>
         </div>
       )}
+      <label className="flex flex-col gap-1">
+        Exit rule
+        <select
+          aria-label="Exit rule"
+          className="rounded border border-white/10 bg-white/5 px-2 py-1"
+          value={typeof form.exit_rule === "string" ? form.exit_rule : ""}
+          onChange={(e) => setForm({ exit_rule: e.target.value || null })}
+        >
+          <option value="">no stop / target</option>
+          <option value="premium_1to2" disabled={form.mode !== "options"}>1:2 premium (−20% / +40%)</option>
+          <option value="atr_1to2">1:2 index ATR(14) (1x / 2x)</option>
+        </select>
+      </label>
       <label className="flex items-center gap-2">
         <input
           aria-label="Live timing"

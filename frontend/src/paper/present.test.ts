@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatRupees, markLine, paperMarkers, paperRows, parseParams, shortContract, strikeOf, type PaperSignal } from "./present";
+import { SLOT_DEFAULTS, exitLabel, startParams, formatRupees, markLine, paperMarkers, paperRows, parseParams, shortContract, strikeOf, type PaperSignal } from "./present";
 
 const T0 = 1791171900; // 09:15 IST on 5 Oct 2026
 
@@ -97,5 +97,21 @@ describe("two slots", () => {
     expect(parseParams('{"z_length": 20}')).toEqual({ params: { z_length: 20 } });
     expect(parseParams("[1]").error).toBeTruthy();
     expect(parseParams("{bad").error).toBeTruthy();
+  });
+});
+
+describe("slots and exit rules", () => {
+  it("keeps slots 1 and 2 without exits and gives 3 and 4 the 1:2 premium rule", () => {
+    expect(SLOT_DEFAULTS["1"]).toEqual({ strategy: "log_xz", exit: "" });
+    expect(SLOT_DEFAULTS["2"]).toEqual({ strategy: "price_channel", exit: "" });
+    expect(SLOT_DEFAULTS["3"]).toEqual({ strategy: "log_xz", exit: "premium_1to2" });
+    expect(SLOT_DEFAULTS["4"]).toEqual({ strategy: "price_channel", exit: "premium_1to2" });
+  });
+
+  it("puts the chosen rule into the params, and only then", () => {
+    expect(startParams({ length: 20 }, "premium_1to2")).toEqual({ length: 20, exit_rule: "premium_1to2" });
+    expect(startParams({ length: 20 }, "")).toEqual({ length: 20 });
+    expect(exitLabel({ exit_rule: "atr_1to2" })).toBe("1:2 index ATR(14) (1x / 2x)");
+    expect(exitLabel({})).toBe("");
   });
 });

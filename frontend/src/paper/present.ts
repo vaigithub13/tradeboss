@@ -120,3 +120,28 @@ export function parseParams(text: string): { params?: Record<string, unknown>; e
     return { error: "params are not valid JSON" };
   }
 }
+
+export const EXIT_RULES = [
+  { name: "", label: "no stop / target" },
+  { name: "premium_1to2", label: "1:2 premium (−20% / +40%)" },
+  { name: "atr_1to2", label: "1:2 index ATR(14) (1x / 2x)" },
+] as const;
+
+/** What each slot starts with: 1 and 2 are the week's comparison (no exits); 3 and 4 the same with 1:2 premium. */
+export const SLOT_DEFAULTS: Record<string, { strategy: string; exit: string }> = {
+  "1": { strategy: "log_xz", exit: "" },
+  "2": { strategy: "price_channel", exit: "" },
+  "3": { strategy: "log_xz", exit: "premium_1to2" },
+  "4": { strategy: "price_channel", exit: "premium_1to2" },
+};
+
+/** The params sent to start a slot: the box's params, plus `exit_rule` when one is chosen. */
+export function startParams(params: Record<string, unknown>, exit: string): Record<string, unknown> {
+  return exit ? { ...params, exit_rule: exit } : { ...params };
+}
+
+/** "1:2 premium (−20% / +40%)" for a running slot's params, or "" */
+export function exitLabel(params: Record<string, unknown> | null | undefined): string {
+  const name = params?.exit_rule;
+  return EXIT_RULES.find((r) => r.name && r.name === name)?.label ?? "";
+}

@@ -15,7 +15,7 @@ from tests.test_paper_live import DAY, ms
 
 def desk(tmp_path, scripts: dict[str, dict[int, str]]) -> PaperDesk:
     def make_for(slot: str):
-        return lambda day, strategy, params: tps.session(tps.Scripted(scripts[slot]), model_price=lambda c, sp, ts: 95.0)
+        return lambda day, strategy, params: tps.session(tps.Scripted(scripts.get(slot, {})), model_price=lambda c, sp, ts: 95.0)
 
     return PaperDesk({slot: PaperRunner(PaperDesk.slot_dir(tmp_path, slot), make_for(slot)) for slot in SLOTS})
 
@@ -26,8 +26,9 @@ def feed(d: PaperDesk, minutes) -> None:
 
 
 def test_slot_1_keeps_the_existing_directory_and_slot_2_has_its_own(tmp_path) -> None:
-    assert SLOTS == ("1", "2")
+    assert SLOTS == ("1", "2", "3", "4")
     assert PaperDesk.slot_dir(tmp_path, "1") == tmp_path and PaperDesk.slot_dir(tmp_path, "2") == tmp_path / "slot2"
+    assert PaperDesk.slot_dir(tmp_path, "3") == tmp_path / "slot3" and PaperDesk.slot_dir(tmp_path, "4") == tmp_path / "slot4"
 
 
 def test_two_strategies_trade_on_one_feed_with_separate_positions_and_files(tmp_path) -> None:
@@ -43,7 +44,7 @@ def test_two_strategies_trade_on_one_feed_with_separate_positions_and_files(tmp_
     d.runner("1").stop(ms(9, 30))
     assert d.runner("2").state == "running" and d.state == "running"  # stopping one leaves the other
     statuses = d.status(ms(9, 30))
-    assert [s["slot"] for s in statuses["slots"]] == ["1", "2"]
+    assert [s["slot"] for s in statuses["slots"]] == list(SLOTS)
     assert statuses["slots"][0]["state"] == "stopped" and statuses["slots"][1]["state"] == "running"
 
 
@@ -66,7 +67,7 @@ def test_wanted_keys_are_the_union_and_an_unknown_slot_is_refused(tmp_path) -> N
     keys = d.wanted_keys()
     assert any("CE" in k for k in keys) and any("PE" in k for k in keys)
     with pytest.raises(UnknownSlot):
-        d.runner("3")
+        d.runner("5")
 
 
 def test_a_failure_in_one_slot_never_reaches_the_other_slot_or_the_feed(tmp_path, caplog) -> None:
@@ -92,4 +93,4 @@ def test_index_ticks_reach_each_running_slot(tmp_path) -> None:
         d.runner(slot).start(DAY, "log_xz", {})
         d.runner(slot).session.on_index_tick = lambda price, now_ms, s=slot: seen.append((s, price)) or []
     d.on_index_tick(22610.0, now_ms=ms(9, 22))
-    assert seen == [("1", 22610.0), ("2", 22610.0)]
+    assert seen == [(s, 22610.0) for s in SLOTS]

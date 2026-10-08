@@ -198,3 +198,41 @@ def test_price_channel_paper_fills_match_the_backtest(day: date) -> None:
         make_strategy=lambda: build_strategy(PC), basis="fill",
     )
     assert report["differences"] == [] and report["live_signals"] == report["backtest_signals"]
+
+
+# ---------------------------------------------------------------- exit rules on the recordings (paper vs backtest)
+@pytest.mark.parametrize("day,strategy,params", [
+    (DAY7, "log_xz", {}), (date(2026, 10, 8), "log_xz", {}), (date(2026, 10, 8), "price_channel", {"length": 20}),
+])
+def test_premium_exits_in_paper_match_the_backtest_on_the_recordings(day: date, strategy: str, params: dict) -> None:
+    """The 1:2 premium rule in paper (traded prices of the contract, sold at the bid) against the backtest (the
+    contract's stored 1m bars, live timing): the same trades, the same exit reasons, exits within the same minute."""
+    from app.backtest.catalog import parse_config
+    from app.backtest.execute import execute_run
+    from app.options.history import default_history_store
+    from app.paper.catchup import replay_into
+    from app.paper.live import choose_nearest_weekly_atm, paper_strategy
+
+    missing = _missing(day, need_candles=True)
+    if missing:
+        pytest.skip(missing)
+    if not default_history_store().read(date(2026, 10, 13)):
+        pytest.skip("no stored option bars for the 13 Oct 2026 expiry in data/")
+    strat, rule = paper_strategy(strategy, {**params, "exit_rule": "premium_1to2"})
+    key_of = {i.symbol: i.key for i in index_on(settings.instruments_dir, day).instruments}
+    vix = VixSeries()
+    s = PaperSession(day=day, strategy=strat, choose=choose_nearest_weekly_atm, key_for=key_of.get, quotes=QuoteBook(),
+                     cost_table=load_default_cost_table(), model_price=model_price_for(vix.at), exit_rule=rule)
+    s.warm(stored_warmup(CandleStore(settings.candles_dir), SYMBOL, day))
+    replay_into(s, recording_path(settings.feed_recordings_dir, day), on_vix=vix.add)
+    s.end_of_day()
+    cfg = parse_config({"strategy": strategy, "params": params, "symbol": SYMBOL, "timeframe": "5m",
+                        "start": day.isoformat(), "end": day.isoformat(), "sessions": ["normal", "weekend_full"],
+                        "mode": "options", "slippage_points": 0.2, "exit_rule": "premium_1to2"})
+    backtest = execute_run(cfg, lambda _p: None, hash_data=False)["result"]["report"]
+    paper = s.report_rows()
+    assert len(paper) == len(backtest) > 0
+    for p, b in zip(paper, backtest):
+        assert p["contract"] == b["contract"] and p["fill_time"] // 60 == b["fill_time"] // 60
+        assert p["exit_reason"] == b["exit_reason"], (p, b)
+        assert p["exit_time"] // 60 == b["exit_time"] // 60, (p, b)

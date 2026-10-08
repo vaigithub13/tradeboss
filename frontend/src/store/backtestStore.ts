@@ -71,6 +71,7 @@ const INITIAL: RunConfig = {
   strike_offset: 0,
   slippage_points: 0.5,
   live_timing: true,
+  exit_rule: null,
 };
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
@@ -179,6 +180,7 @@ export const useBacktestStore = create<BacktestState>((set, get) => ({
         strike_offset: form.strike_offset,
         slippage_points: walk.slippage_points,
         live_timing: form.live_timing ?? true,
+        exit_rule: form.exit_rule ?? null,
         train_months: walk.train_months,
         test_months: walk.test_months,
         step_months: walk.step_months,

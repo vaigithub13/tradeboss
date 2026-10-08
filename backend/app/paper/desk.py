@@ -1,6 +1,6 @@
-"""Two paper strategies on one feed: slot 1 and slot 2, each a `PaperRunner` with its own session, position,
-P&L and day files. Slot 1 keeps `data/paper/` (earlier days and dry-run marks stay where they were); slot 2
-writes `data/paper/slot2/`. The feed service talks to the desk as it talked to one runner; the routes pick a slot.
+"""Four paper strategies on one feed: slots 1-4, each a `PaperRunner` with its own session, position, P&L and day
+files. Slot 1 keeps `data/paper/` (earlier days and dry-run marks stay where they were); slot N writes
+`data/paper/slotN/`. The feed service talks to the desk as it talked to one runner; the routes pick a slot.
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from typing import Any
 from app.data.store import CandleStore
 from app.paper.live import PaperError, PaperRunner
 
-SLOTS = ("1", "2")
+SLOTS = ("1", "2", "3", "4")
 log = logging.getLogger("tradeboss.paper.desk")
 
 
@@ -80,6 +80,9 @@ class PaperDesk:
 
     def on_index_tick(self, price: float, *, now_ms: int) -> None:
         self._each("on_index_tick", lambda r: r.on_index_tick(price, now_ms=now_ms))
+
+    def on_option_tick(self, key: str, price: float, *, now_ms: int) -> None:
+        self._each("on_option_tick", lambda r: r.on_option_tick(key, price, now_ms=now_ms))
 
     def on_index_bar(self, bar: dict[str, Any], *, now_ms: int) -> None:
         self._each("on_index_bar", lambda r: r.on_index_bar(bar, now_ms=now_ms))

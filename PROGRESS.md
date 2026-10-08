@@ -697,3 +697,58 @@ reproduce exactly); the middle column is today's code with live timing off, so i
   WF2 4e9994b6 / 4d3ecc5e, WF4 35140f91 / fa22d675.
 - Price Channel 5m L20 stays positive at 0.2 (+102,177) but most of the 7 Oct margin over 1.0 slippage is gone; the
   walk-forward out-of-sample is +8,666 on 306 trades, close to flat. Log XZ is worse.
+
+## 1:2 exit rules and the trade report (2026-10-08, evening)
+
+Code on `12eae80` (backtest) and the paper commit after it. Research runs saved on `12eae80`, tree clean (run from a
+worktree pinned at that commit). Holdout not run, peek count unchanged. Paper slots 1 and 2 are unchanged.
+
+- **Rules** (`app/exits/rules.py`, one module for the backtest and paper): `premium` stop −20% / target +40% of the
+  option's entry fill; `atr` stop 1x / target 2x ATR(14) of the strategy's timeframe from the index fill (ATR as
+  of the bar that placed the entry; an incremental ta.atr, equal to the chart's). Hit rule: a price that opens
+  through a level exits at the open; a minute touching both is the stop. Opposite signals and the 15:15
+  square-off still close trades.
+- **Backtest**: run setting `exit_rule` (form, run request, walk-forward; one exit setting at a time). Premium is
+  the option overlay's premium walk on the contract's real 1m bars (the index trade stays open, so a reversal
+  still closes or opens); ATR is the broker's bracket on the index 1m bars (the index position closes, so a later
+  same-direction signal can enter again). Fixed on the way: a reversal now cancels the closed position's bracket
+  (it could have closed a later position at the old level).
+- **Paper**: the rule travels in a slot's params (`exit_rule`), so the same-settings check, a restart and the
+  end-of-day backtest use it. Premium checks every traded price of the open contract; ATR every index price;
+  a hit sells at the bid. With a rule, the index side decides "already in that position" (after a premium exit
+  a same-direction entry is cancelled, as the backtest broker does). Slots 3 and 4 added: defaults Log XZ and
+  Price Channel 20, both with 1:2 premium. `npm run session` starts none of them by itself.
+- **Trade report** (`app/exits/report.py`): one row per trade in the paper day file, the panel and every
+  backtest result: signal bar, trigger index, fill time, contract, entry premium (real / modelled), index and
+  premium stop/target (the other side estimated through the model delta, marked `~`), exit time and premium,
+  exit reason (target / stop / reversal / square-off), net, R = net / ((entry − premium stop) x units). Daily
+  (`summary.exits`) and weekly (`/api/paper/week` `exits`) counts; the panel shows both per slot.
+- **Paper vs backtest on the recordings** (premium, replayed through paper vs the backtest on the stored option
+  bars): Log XZ 7 Oct (6 trades), Log XZ 8 Oct (1), Price Channel 8 Oct (1): the same trades, exit reasons and
+  exit minutes (a test). Price Channel 7 Oct: 1 of 3 differs: paper bought at 156.25, the delta-adjusted backtest
+  fill was 151.86, so the stop levels differ (stop in paper, reversal in the backtest). ATR: reasons mostly
+  agree, but a 1x ATR stop is close to the noise: on 8 Oct paper's index fill was 22499.85 (the tick at
+  09:26:00.137) and the backtest's 22500.90 (the 09:26 open), stops 22524.65 vs 22525.70, and the 09:30 high
+  22525.55 stopped only paper. Price Channel 8 Oct with ATR diverges after the 09:44 feed gap.
+
+Research: options, real premiums, delta-adjusted, slippage 0.2, live timing on, sessions normal + weekend_full,
+2024-10-03 .. 2026-06-30; Log XZ RMA 14 5m and Price Channel 20 5m. Walk-forward: 6-month train, 2-month test,
+step 2, 7 windows, the default grids (Log XZ length 10/14 x 5m/15m; Price Channel 20/40 x 5m/15m): 4 settings x 7
+windows = 28 combinations per walk-forward, 168 over the six.
+
+| strategy | exits | net ₹ | trades | win % | max DD ₹ | target / stop / reversal / square-off | avg R | WF out-of-sample ₹ (trades, max DD) |
+|---|---|---:|---:|---:|---:|---|---:|---:|
+| Log XZ | none | −132,155.42 | 1,669 | 29.4 | 165,983 | 0 / 0 / 1,266 / 403 | | −15,675.34 (210, 41,696) |
+| Log XZ | 1:2 premium | −161,892.65 | 1,669 | 31.3 | 173,509 | 297 / 549 / 678 / 145 | −0.13 | 0 (no window chose) |
+| Log XZ | 1:2 ATR | −234,565.25 | 1,669 | 31.3 | 236,496 | 408 / 882 / 354 / 25 | −0.21 | −19,154.38 (41, 19,154) |
+| Price Channel 20 | none | 102,176.66 | 1,089 | 36.4 | 71,756 | 0 / 0 / 661 / 428 | | +8,666.09 (306, 57,922) |
+| Price Channel 20 | 1:2 premium | 7,664.85 | 1,089 | 37.3 | 50,923 | 300 / 446 / 184 / 159 | −0.01 | +34,287.35 (352, 38,444) |
+| Price Channel 20 | 1:2 ATR | −167,284.70 | 2,613 | 34.7 | 190,259 | 867 / 1,617 / 40 / 89 | −0.12 | −22,061.03 (110, 51,053) |
+
+- Full window: neither 1:2 rule beats no exits for either strategy. Premium cuts Price Channel's drawdown
+  (71,756 → 50,923) but most of the net with it; ATR is worse everywhere (2,613 Price Channel trades: after a
+  bracket exit the index is flat and the channel re-enters).
+- Price Channel premium walk-forward: +34,287 vs +8,666 without exits, but window 6 alone is +43,239 (40/15m);
+  the other six sum to −8,952. One window carries it, as before.
+- Run ids: full Log XZ none / premium / ATR 0397b9b4 / 960928dc / bdd7e742; Price Channel cc103c05 / d5b6de89 /
+  fdbbac07; walk-forward Log XZ dc4720a9 / dc9dd61f / 2029ca3b; Price Channel 34c88cb6 / d3a7d5a6 / 8b082bb3.

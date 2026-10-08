@@ -19,6 +19,8 @@ export interface RunConfig {
   /** true: orders work one minute after the bar closes, as in paper. false or absent (runs saved before
    * 8 Oct 2026): from the bar's end. */
   live_timing?: boolean;
+  /** "premium_1to2" / "atr_1to2" when starting a run; the saved run holds {kind, stop, target}; null = none */
+  exit_rule?: string | { kind: string; stop: number; target: number } | null;
   kind?: "walk_forward" | "holdout";
   train_months?: number;
   test_months?: number;
@@ -44,7 +46,17 @@ export function formFromRun(config: RunConfig): RunConfig {
     params: { ...config.params },
     sessions: [...config.sessions],
     live_timing: config.live_timing === true,
+    exit_rule: savedExitName(config.exit_rule),
   };
+}
+
+/** The form's name for a saved exit rule (the 1:2 rules); anything else is dropped from the form. */
+function savedExitName(rule: RunConfig["exit_rule"]): string | null {
+  if (!rule) return null;
+  if (typeof rule === "string") return rule;
+  if (rule.kind === "premium" && rule.stop === 0.2 && rule.target === 0.4) return "premium_1to2";
+  if (rule.kind === "atr" && rule.stop === 1 && rule.target === 2) return "atr_1to2";
+  return null;
 }
 
 export function isLiveTiming(config: Pick<RunConfig, "live_timing">): boolean {
@@ -115,8 +127,15 @@ export function compareSelection(
   return { ok: true, ids: unique };
 }
 
+/** " 1:2 premium" / " 1:2 ATR" / "" for a run's exit rule */
+export function exitSuffix(rule: RunConfig["exit_rule"]): string {
+  if (!rule) return "";
+  const kind = typeof rule === "string" ? rule.split("_")[0] : rule.kind;
+  return kind === "premium" ? " 1:2 premium" : kind === "atr" ? " 1:2 ATR" : "";
+}
+
 export function runLabel(
-  config: Pick<RunConfig, "strategy" | "slippage_points" | "mode" | "live_timing"> & { kind?: string },
+  config: Pick<RunConfig, "strategy" | "slippage_points" | "mode" | "live_timing" | "exit_rule"> & { kind?: string },
 ): string {
   const name =
     config.strategy === "opening_range_breakout"
@@ -135,7 +154,7 @@ export function runLabel(
   const slip = config.mode === "options" ? ` ${config.slippage_points} pt` : "";
   const prefix = config.kind === "walk_forward" ? "WF " : "";
   const timing = isLiveTiming(config) ? "" : " bar-end";
-  return `${prefix}${name}${slip}${timing}`;
+  return `${prefix}${name}${slip}${exitSuffix(config.exit_rule)}${timing}`;
 }
 
 export function HOLDOUT_COUNT(peeks: number): string {
