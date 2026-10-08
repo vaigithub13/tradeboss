@@ -607,3 +607,36 @@ Walk-forward (6-month train, 2-month test, step 2, 7 windows), out-of-sample opt
   from live quotes, 5 Oct modelled: no option depth that day). Tests: `test_paper_stops.py`, and the Price Channel
   replay tests in `test_paper_replay.py`.
 - A failure in one paper slot is logged and skipped; the other slot and the feed go on.
+
+## 8 Oct 2026: forward-test day 1 (both slots warm)
+
+Paper, 5m, 1 lot, weekly 13 Oct (DTE 3). Both slots warm (500 bars). End-of-day check: 1 live signal, 1 backtest, no
+differences, in each slot. Holdout not run; the comparison runs below are on 8 Oct only (forward period).
+
+| slot | signal | contract | entry | exit (15:15:00 bid) | net ₹ |
+|---|---|---|---|---|---:|
+| 1 Log XZ RMA 14 | 09:20 bar SELL, filled 09:26:00 | 22500 PE | 139.50 quote (mid 139.30) | 287.25 (mid 287.60) | +9,516.62 |
+| 2 Price Channel 20 | sell stop 22521.05, hit 09:24:37 | 22500 PE | 126.25 quote (mid 126.075) | 287.25 (mid 287.60) | +10,378.24 |
+
+Live vs the backtest's option model (delta-adjusted, slippage 0.2, real premiums from today's intraday 1m bars,
+held in a scratch store; `data/option_history` has no 13 Oct file yet, the capture uses the historical API, which
+has no same-day data):
+- Log XZ: model 128.90 at the 09:25 open, paper 139.50. Paper decides a market signal when the bar's last minute
+  is exchange-final (about a minute after the bar ends), so it fills ~09:26:00. Every live Log XZ entry so far
+  (6, 7, 8 Oct) was decided at bar end + 1:00. Today the PE rose 10.6 points in that minute: −₹689 at entry.
+  Exit 287.25 vs model 286.50 (+₹48.75). Net −₹640.64 vs the model's +10,157.26.
+- Price Channel: 0 late fills (the stop was armed from the 09:15 bar, filled inside the 09:20 bar). Contract
+  differs: the backtest takes the strike from the last index 1m close before the fill minute (09:23 close
+  22530.55 → 22550 PE, entry 149.50, net +11,311.95). Paper takes it at the fill tick (22520.45 → 22500 PE).
+  On the same 22500 PE the model gives 125.58 at 09:24: paper paid 0.67 more (−₹43.55), exit +₹48.75,
+  net +₹5.00 vs the model's +10,373.24. Running total from today: 1 fill, 0 late, −0.67 points at entry.
+- Feed: no data 09:43:35–09:44:35 and 09:49:06–09:50:06; two watchdog reconnects, backfilled. The 09:40 and
+  09:45 5m bars are incomplete in paper (no signal fell there). Reconcile 15:45: Nifty and VIX 0 differences,
+  48704 1 difference (18 expected); 8 Oct `intraday_reconciled`, 5-7 Oct `final`.
+- Nifty official 1m bars are flat at 22216.00 from 15:15 to 15:27 (upstream; the reconcile agrees with them).
+- Spreads, ATM, DTE 3: median 0.30 / p90 0.40 (CE), 0.30 / 0.35 (PE); one-side 1-lot fill 0.15, round trip ₹19.50.
+  CE widened after 13:15 (0.35-0.40, ₹26.00 from 14:15), PE narrowed after 15:00 (0.25). Since 6 Oct, one-side
+  ATM 1-lot fill: 0.05 (DTE 0), 0.175 (DTE 4), 0.15 (DTE 3), mean 0.125. Paper's own legs today: 0.20 / 0.175 in,
+  0.35 / 0.35 out (the 15:15 square-off, ITM by then).
+- Health: one backend process 08:33-17:11, no restarts, 4 warnings (2 Upstox market-status retries at 09:44,
+  2 reconnects), no errors; clean shutdown with the spread report and both day files.
