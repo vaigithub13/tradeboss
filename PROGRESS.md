@@ -771,3 +771,31 @@ windows = 28 combinations per walk-forward, 168 over the six.
   chart to NIFTY50, jumps there and draws the trade like the position tool from its stored levels and result
   (not saved with the drawings). Older trades take the signal bar and trigger from their signal record and the
   Nifty at exit from the 1m candles (marked ≈); new trades store the Nifty at exit.
+
+## 9 Oct 2026: forward-test day 2 (four slots)
+
+All four slots live from the open (warm 500 bars), 75 closed bars each, no incomplete, late-after-gap or given-up
+bars; every signal and trade `live` (no replay entries). End-of-day check: 3 live vs 3 backtest signals, no
+differences, in every slot. Slots 3 and 4's 8 Oct files (the 22:01 replay, rewritten as live by the old backend
+at 08:33) were moved to `replay/` with `scripts.paper_mark_replay` after the backend stopped.
+
+| slot | strategy | trades | target / stop / reversal / square-off | net ₹ | week (live days) net ₹ |
+|---|---|---:|---|---:|---:|
+| 1 | Log XZ | 3 | 0 / 0 / 2 / 1 | +8,577.67 | +18,094.29 (4 trades; 6-7 Oct dry runs out) |
+| 2 | Price Channel 20 | 3 | 0 / 0 / 2 / 1 | +698.89 | +11,077.13 (4) |
+| 3 | Log XZ, 1:2 premium | 3 | 2 / 0 / 1 / 0 | +8,136.52 | +8,136.52 (3) |
+| 4 | Price Channel 20, 1:2 premium | 3 | 1 / 1 / 0 / 1 | +1,996.38 | +1,996.38 (3) |
+
+- Paper vs backtest (live timing, delta-adjusted, slippage 0.2, real premiums from the 15:45 capture): every trade
+  in every slot has the same contract, entry and exit minute, and exit reason. Net: slot 1 +8,577.67 vs
+  +8,558.16, slot 2 +698.89 vs +363.68, slot 3 +8,136.52 vs +8,035.29, slot 4 +1,996.38 vs +1,939.65.
+- Fill-price-driven levels: Price Channel's stop entries filled 0.66-1.36 points under the delta-adjusted model
+  (131.85 vs 133.20, 111.30 vs 111.96, 133.35 vs 134.71), so slot 4's premium levels sat 0.5-1.9 points lower
+  (stop 105.48 vs 106.56, target 184.59 vs 186.48); no exit changed (the 12:54 stop hit both in the same minute).
+  Log XZ market fills were within 0.5 points (levels within 0.7).
+- Spreads 9 Oct, ATM, DTE 2: CE median 0.30 / p90 0.35, PE 0.25 / 0.30; one-side 1-lot fill 0.15 (CE) / 0.125
+  (PE), round trip ₹19.50 / ₹16.25. Since 6 Oct (DTE 0, 4, 3, 2): mean one-side 0.128, round trip ₹16.66. Paper's
+  own legs today: 0.13-0.19 points on average per slot.
+- Health: one backend 08:36-16:17, feed live 08:55-15:40 with no reconnect, no warnings, no errors. Reconcile:
+  8 Oct `final` (historical, 0 differences), 9 Oct `intraday_reconciled` (Nifty, VIX 0 differences; 48704 1 of 14
+  expected). Option capture 15:45: 13 Oct expiry, 17 strikes, 34 stored, 0 empty, 0 failed.
