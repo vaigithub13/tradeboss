@@ -24,7 +24,7 @@ import logging
 from collections import deque
 from collections.abc import Callable, Iterable
 from dataclasses import asdict
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from app.backtest.context import History, PastBars, PositionView
@@ -44,6 +44,7 @@ from app.strategies.pine_common import minute_of
 
 log = logging.getLogger("tradeboss.paper")
 
+IST = timezone(timedelta(hours=5, minutes=30))
 SQUARE_OFF_MIN = 15 * 60 + 15
 LATE_NOTE = "late after gap: the bar was rebuilt from backfilled minutes and decided when it completed"
 OHLCV = ("time", "open", "high", "low", "close", "volume")
@@ -99,6 +100,7 @@ class PaperSession:
         lots: int = 1,
         symbol: str = "NIFTY50",
         exit_rule: ExitRule | None = None,
+        stale_model_price: Callable[[OptionContract, float, int], float | None] | None = None,
     ) -> None:
         if lots < 1:
             raise ValueError("lots must be >= 1")
@@ -110,6 +112,9 @@ class PaperSession:
         self.cost_table = cost_table
         self.model_price = model_price
         self.model_slippage = model_slippage
+        #: the model at the last stored VIX close: the square-off's last resort (no quote, no live VIX)
+        self.stale_model_price = stale_model_price
+        self._square_off_noted: int | None = None  # when a square-off first found no price (one row, then retries)
         self.wanted: set[str] = set()  # option keys this session needs quoted (the live feed subscribes them)
         self.lots = lots
         self.symbol = symbol
@@ -511,20 +516,41 @@ class PaperSession:
         self._square_off(now_ms, reason=reason)
 
     def _square_off(self, now_ms: int, reason: str = "square_off") -> None:
+        """Close at the bid, else the model at the live VIX. Without either: one unfilled row, then the model at
+        the last stored VIX close (flagged in the trade's note), else a quiet retry on every later frame."""
         p = self.book.position
         if p is None:
             return
         contract = self._contract_of[p.key]
-        exit_fill = self._fill("SELL", p.key, contract, p.units, self._spot or p.entry.price, now_ms)
+        spot = self._spot or p.entry.price
+        exit_fill = self._fill("SELL", p.key, contract, p.units, spot, now_ms)
+        note = None
         if exit_fill is None:
-            self.signals.append({
-                "time": None, "decided_at_ms": now_ms, "side": "EXIT", "index_price": self._spot,
-                "reason": "square-off", "symbol": p.symbol, "key": p.key, "status": "unfilled",
-                "fill_source": None, "fill_price": None, "note": "square-off: no quote and no model price",
-                "source": self.source,
-            })
-            return
-        self.book.close(exit_fill, index_exit_time=now_ms // 1000, reason=reason, index_exit=self._index_now())
+            stale = self.stale_model_price
+            if stale is not None:
+                exit_fill = fill("SELL", key=p.key, quotes=self.quotes, now_ms=now_ms, units=p.units, day=self.day,
+                                 cost_table=self.cost_table, model_price=lambda: stale(contract, spot, now_ms),
+                                 model_slippage=self.model_slippage)
+                if exit_fill is not None:
+                    note = "square-off: no quote and no live VIX; priced by the model at the last stored VIX close"
+            if self._square_off_noted is None:
+                self._square_off_noted = now_ms
+                self.signals.append({
+                    "time": None, "decided_at_ms": now_ms, "side": "EXIT", "index_price": self._spot,
+                    "reason": "square-off", "symbol": p.symbol, "key": p.key, "status": "unfilled",
+                    "fill_source": None, "fill_price": None,
+                    "note": "square-off: no quote and no model price"
+                    + ("" if exit_fill is not None else "; retried on every frame until a price exists"),
+                    "source": self.source,
+                })
+            if exit_fill is None:
+                return
+        elif self._square_off_noted is not None:
+            first = datetime.fromtimestamp(self._square_off_noted / 1000, IST).strftime("%H:%M:%S")
+            note = f"square-off delayed: no price at {first}"
+        self._square_off_noted = None
+        self.book.close(exit_fill, index_exit_time=now_ms // 1000, reason=reason, index_exit=self._index_now(),
+                        note=note)
 
     def _fill(self, side: str, key: str, contract: OptionContract, units: int, spot: float,
               now_ms: int) -> Fill | None:

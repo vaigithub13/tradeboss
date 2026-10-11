@@ -117,7 +117,7 @@ class PaperBook:
         self.position = position
 
     def close(self, exit_fill: Fill, *, index_exit_time: int, reason: str,
-              index_exit: float | None = None) -> dict[str, Any]:
+              index_exit: float | None = None, note: str | None = None) -> dict[str, Any]:
         if self.position is None:
             raise RuntimeError("no paper position to close")
         p = self.position
@@ -164,6 +164,8 @@ class PaperBook:
             "index_exit": index_exit,
             "source": p.source,
         }
+        if note:
+            trade["note"] = note  # how an unusual exit was priced (e.g. a square-off without a quote)
         self.trades.append(trade)
         self.position = None
         return trade

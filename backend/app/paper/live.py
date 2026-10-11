@@ -24,7 +24,7 @@ from app.options.strikes import load_default_step_table
 from app.data.store import CandleStore
 from app.paper.check import end_of_day_check
 from app.paper.history import stored_warmup
-from app.paper.pricing import VixSeries, model_price_for
+from app.paper.pricing import VixSeries, last_stored_vix, model_price_for
 from app.paper.quotes import QuoteBook
 from app.paper.session import PaperSession
 from app.paper.store import load_day, save_day, weekly_summary
@@ -94,12 +94,19 @@ def session_factory(instruments_dir: Path, vix: VixSeries, store: CandleStore, s
             quotes=QuoteBook(),
             cost_table=load_default_cost_table(),
             model_price=model_price_for(vix.at),
+            stale_model_price=_stale_model(store, day),
             symbol=symbol,
         )
         session.warm(stored_warmup(store, symbol, day))
         return session
 
     return make
+
+
+def _stale_model(store: CandleStore, day: date) -> Any:
+    """The model priced at the last stored VIX close before the day, for a square-off with no other price."""
+    vix = last_stored_vix(store, day)
+    return None if vix is None else model_price_for(lambda _when: vix)
 
 
 class PaperRunner:

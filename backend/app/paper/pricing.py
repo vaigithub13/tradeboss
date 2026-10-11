@@ -7,6 +7,8 @@ from __future__ import annotations
 
 from bisect import bisect_right
 from collections.abc import Callable
+from datetime import date, datetime, timedelta, timezone
+from typing import Any
 
 from app.options.contract import OptionContract
 from app.options.model import OptionModelConfig, load_option_model
@@ -53,3 +55,18 @@ def model_price_for(vix_at: Callable[[int], float | None], cfg: OptionModelConfi
         return priced(contract.kind, spot, contract.strike, when, contract.expiry, vix, model)
 
     return price
+
+
+VIX_SYMBOL = "NSE_INDEX_India_VIX"
+
+
+def last_stored_vix(store: Any, day: date) -> float | None:
+    """The close of the last stored VIX 1m bar before `day` (IST), or None. The square-off's last resort when
+    there is no quote and no live VIX: an old VIX is a worse price than a live one, so the fill says so."""
+    start = int(datetime(day.year, day.month, day.day, tzinfo=timezone(timedelta(hours=5, minutes=30))).timestamp())
+    try:
+        bars, _minutes = store.load(VIX_SYMBOL, from_time=start - 10 * 86_400, to_time=start - 1)
+    except Exception:  # noqa: BLE001 - no stored VIX is the same as none
+        return None
+    bars = [b for b in bars if int(b["time"]) < start]
+    return float(bars[-1]["close"]) if bars else None
