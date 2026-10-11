@@ -799,3 +799,38 @@ at 08:33) were moved to `replay/` with `scripts.paper_mark_replay` after the bac
 - Health: one backend 08:36-16:17, feed live 08:55-15:40 with no reconnect, no warnings, no errors. Reconcile:
   8 Oct `final` (historical, 0 differences), 9 Oct `intraday_reconciled` (Nifty, VIX 0 differences; 48704 1 of 14
   expected). Option capture 15:45: 13 Oct expiry, 17 strikes, 34 stored, 0 empty, 0 failed.
+
+## Review fixes (2026-10-11, Sunday)
+
+From `docs/reviews/2026-10-11-octo-review.md`, in the order asked. Tests first for each; holdout not run, peek count
+unchanged.
+
+- **C1.** Conversion no longer asks the model for tests and never runs any. A draft is checked only by the AST gate,
+  compile, the look-ahead and determinism runs, and the worker smoke backtest.
+- **C2.** Four layers for user strategies. The AST gate refuses dangerous names anywhere (not only direct calls), quoted
+  type hints, typing names outside a list (no `get_type_hints`, `ForwardRef`, re-exported modules), and frame and
+  `format` attributes; `import math` is allowed. The worker runs the module with restricted builtins and an import
+  hook (contracts, pine_common, typing, `__future__`, math); after start-up no new `app.*` module can be imported and
+  `app.config` never (checked on start). The worker runs under macOS `sandbox-exec`: deny by default, no network, no
+  process, reads only its temp dir plus the read-only Python runtime and `backend/app`, writes only its temp dir;
+  the environment is an allow-list. Without `sandbox-exec` a user strategy does not run. The three bypasses from
+  the review are tests.
+- **H1.** FVG `show_last` limits only the boxes the chart draws; the series a strategy reads keeps every gap. The
+  look-ahead test 1d now covers `stoch` and `fvg`, and fails when a registry type is missing from it.
+- **H2.** The backend refuses a research run or a replay whose range touches the holdout (a blank End counts), when it
+  is requested and again before the engine. A holdout run is not replayed; only the holdout action runs those dates,
+  after recording the peek. The form says so and disables Run.
+- **End-of-day check.** Trade level: paper and the backtest (option overlay, slippage 0.2, premium walk on the stored
+  option bars) are matched on direction and fill minute and compared on status, contract, exit minute and exit
+  reason. The 15:45 job captures the day's option bars before the check. Rerun on 8 and 9 Oct: every slot matches
+  (8 Oct: slots 1 and 2 live, slots 3 and 4 the replay files; 9 Oct: all four live). 5, 6 and 7 Oct replays also
+  match at trade level.
+- **Paper.** A Start from the panel builds, warms and catches up in a worker thread while the feed goes on, then
+  replays the frames recorded meanwhile on the event loop and goes live (the slot shows "Starting…"). A restart still
+  resumes on the startup path, before the feed connects. A square-off with no quote and no live model price records
+  one row and closes at the model price with the last stored VIX close (noted on the trade); with no price at all it
+  retries quietly.
+- **Tests.** The history-sync date is injected (the test had started failing on 11 Oct). `tests/fixtures/paper_day`
+  (3 MB, 9 Oct, built by `scripts/make_paper_fixture.py`) lets the paper-vs-backtest and worker parity tests run on a
+  clean checkout. Backend 1410 passed, 1 skipped (7d, no contract note); a copy with no `data/` and no `.env`: 1360
+  passed, 51 skipped (the real-data layers). Frontend 355 passed, typecheck clean, build OK.
