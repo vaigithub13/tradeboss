@@ -149,7 +149,9 @@ def _option_fill(value: Any) -> str:
         raise RunRequestError(str(exc)) from exc
 
 
-def parse_config(body: dict[str, Any]) -> dict[str, Any]:
+def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[str, Any]:
+    """A research run's config. A range that overlaps the fixed holdout is refused; only the holdout action
+    (`parse_holdout`, which records a peek when it runs) passes `allow_holdout`."""
     extra = sorted(set(body) - _TOP)
     if extra:
         raise RunRequestError(f"unknown field(s) {extra}")
@@ -192,6 +194,11 @@ def parse_config(body: dict[str, Any]) -> dict[str, Any]:
         raise RunRequestError("start is required")
     if end is not None and end < start:
         raise RunRequestError("end is before start")
+    if not allow_holdout:
+        from app.backtest.holdout import holdout_refusal, overlaps_holdout
+
+        if overlaps_holdout(start, end):
+            raise RunRequestError(holdout_refusal(start, end))
     sessions = _sessions(body.get("sessions"))
     mode = body.get("mode")
     if mode not in ("index", "options"):

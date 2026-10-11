@@ -53,6 +53,28 @@ def resolve_period(last_session: date, include_forward: bool | None = None) -> P
     )
 
 
+def overlaps_holdout(start: date, end: date | None) -> bool:
+    """True when start..end touches the holdout. A missing end runs through the last stored bar."""
+    holdout_start, holdout_end = load_holdout()
+    return start <= holdout_end and (end is None or end >= holdout_start)
+
+
+def holdout_refusal(start: date, end: date | None) -> str:
+    holdout_start, holdout_end = load_holdout()
+    return (
+        f"{start.isoformat()}..{end.isoformat() if end else 'the last stored bar'} overlaps the fixed holdout "
+        f"{holdout_start.isoformat()}..{holdout_end.isoformat()}. A research run ends by "
+        f"{(holdout_start - timedelta(days=1)).isoformat()} or starts after {holdout_end.isoformat()}; the holdout "
+        "runs only through the holdout action, which counts as a peek"
+    )
+
+
+def refuse_holdout_overlap(start: date, end: date | None) -> None:
+    """Research runs and replays never read the holdout (H2, review 2026-10-11)."""
+    if overlaps_holdout(start, end):
+        raise HoldoutRead(holdout_refusal(start, end))
+
+
 def assert_research_range(start: date, end: date, *, include_forward: bool) -> None:
     """Walk-forward may read research dates, and the forward period only when asked.
 

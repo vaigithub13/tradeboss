@@ -171,8 +171,8 @@ def test_a_run_request_has_live_timing_on_unless_it_asks_for_the_old_timing() ->
     from app.backtest.execute import _engine_config
     from app.backtest.walkforward import child_backtest_config
 
-    body = {"strategy": "log_xz", "symbol": "NIFTY50", "timeframe": "5m", "start": "2025-01-01", "mode": "options",
-            "sessions": ["normal"]}
+    body = {"strategy": "log_xz", "symbol": "NIFTY50", "timeframe": "5m", "start": "2025-01-01", "end": "2025-06-30",
+            "mode": "options", "sessions": ["normal"]}
     on = parse_config(body)
     assert on["live_timing"] is True and _engine_config(on).live_timing is True
     off = parse_config({**body, "live_timing": False})

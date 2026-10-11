@@ -368,7 +368,7 @@ def parse_holdout(body: dict[str, Any]) -> dict[str, Any]:
     cleaned.setdefault("sessions", ["normal", "weekend_full"])
     cleaned.setdefault("strike_offset", 0)
     cleaned.setdefault("slippage_points", 1.0)
-    config = parse_config(cleaned)
+    config = parse_config(cleaned, allow_holdout=True)
     if config["symbol"] != NIFTY_SYMBOL:
         raise RunRequestError("the holdout runs on NIFTY50 only")
     config["kind"] = "holdout"

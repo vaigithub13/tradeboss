@@ -170,7 +170,7 @@ export function holdoutFormWarning(start: string, end: string | null): string | 
   if (!start || (end !== null && end < start)) return null;
   const rangeEnd = end ?? "9999-12-31";
   if (start <= HOLDOUT_END && rangeEnd >= HOLDOUT_START) {
-    return `This range overlaps the fixed holdout ${HOLDOUT_START} to ${HOLDOUT_END}. Research runs should end on ${RESEARCH_END}.`;
+    return `This range overlaps the fixed holdout ${HOLDOUT_START} to ${HOLDOUT_END}, so the backend refuses it. End a research run on ${RESEARCH_END}; the holdout runs only through the holdout action.`;
   }
   return null;
 }

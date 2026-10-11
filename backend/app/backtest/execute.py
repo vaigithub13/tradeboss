@@ -16,7 +16,7 @@ from app.backtest.costs import get_cost_model, load_default_cost_table
 from app.backtest.curve import equity_and_drawdown
 from app.backtest.engine import BacktestConfig, run_backtest
 from app.backtest.expiry import load_default_calendar
-from app.backtest.holdout import holdout_record, load_holdout, resolve_period
+from app.backtest.holdout import holdout_record, load_holdout, refuse_holdout_overlap, resolve_period
 from app.backtest.lots import load_default_lot_table
 from app.backtest.metrics import TradeRecord
 from app.backtest.result import BacktestResult, Trade, digest
@@ -36,10 +36,18 @@ Report = Callable[[dict[str, Any]], None]
 
 
 def execute_run(config: dict[str, Any], report: Report, *, hash_data: bool = True) -> dict[str, Any]:
+    """Every saved run, and every replay, comes through here. A single run that overlaps the fixed holdout is
+    refused before the engine starts; only `execute_holdout` runs those dates, after recording the peek."""
     if config.get("kind") == "walk_forward":
         return execute_walk_forward(config, report)
     if config.get("kind") == "holdout":
         return execute_holdout(config, report)
+    end = config.get("end")
+    refuse_holdout_overlap(date.fromisoformat(config["start"]), date.fromisoformat(end) if end else None)
+    return _execute_single(config, report, hash_data=hash_data)
+
+
+def _execute_single(config: dict[str, Any], report: Report, *, hash_data: bool = True) -> dict[str, Any]:
     strategy = build_strategy(config)
     source = StoreSource(CandleStore(settings.candles_dir), config["symbol"])
     engine_cfg = _engine_config(config)
@@ -128,7 +136,7 @@ def execute_holdout(config: dict[str, Any], report: Report) -> dict[str, Any]:
     child = {key: value for key, value in config.items() if key != "kind"}
     child["start"] = start.isoformat()
     child["end"] = end.isoformat()
-    payload = execute_run(child, report)
+    payload = _execute_single(child, report)
     payload["result"]["kind"] = "holdout"
     return payload
 

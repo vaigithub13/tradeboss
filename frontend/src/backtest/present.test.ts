@@ -118,7 +118,7 @@ describe("holdout form", () => {
 
   it("warns when the range overlaps the holdout, including an open end", () => {
     const warning =
-      "This range overlaps the fixed holdout 2026-07-01 to 2026-10-01. Research runs should end on 2026-06-30.";
+      "This range overlaps the fixed holdout 2026-07-01 to 2026-10-01, so the backend refuses it. End a research run on 2026-06-30; the holdout runs only through the holdout action.";
     expect(holdoutFormWarning("2026-06-30", "2026-07-01")).toBe(warning);
     expect(holdoutFormWarning("2026-07-01", "2026-10-01")).toBe(warning);
     expect(holdoutFormWarning("2026-10-01", "2026-10-01")).toBe(warning);

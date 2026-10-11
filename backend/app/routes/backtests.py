@@ -124,3 +124,5 @@ def replay_backtest(run_id: str, jobs: JobService = Depends(get_jobs)) -> dict[s
         return _public(jobs.replay(run_id), full=True)
     except RunNotFound as exc:
         raise HTTPException(status_code=404, detail="run not found") from exc
+    except RunRequestError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc

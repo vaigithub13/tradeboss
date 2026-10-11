@@ -34,7 +34,7 @@ def _config() -> dict:
         "symbol": "NIFTY50",
         "timeframe": "5m",
         "start": "2024-10-03",
-        "end": None,
+        "end": "2026-06-30",  # a research run ends before the fixed holdout (the backend refuses an overlap)
         "sessions": ["normal", "weekend_full"],
         "mode": "options",
         "strike_offset": 0,

@@ -44,6 +44,7 @@ class JobService:
 
     def replay(self, run_id: str) -> dict[str, Any]:
         original = self.store.get(run_id)
+        self._refuse_holdout_replay(original["config"])
         git = self.git_reader()
         payload = self.execute(original["config"], lambda _progress: None)
         same_git = git.commit == original["git_commit"] and not git.dirty and not original["git_dirty"]
@@ -53,6 +54,24 @@ class JobService:
         new_id = self.store.create(original["config"], git, parent_id=run_id)
         self.store.finish(new_id, payload, warnings=self._warnings(payload, git), reproduced=reproduced)
         return self.store.get(new_id)
+
+    @staticmethod
+    def _refuse_holdout_replay(config: dict[str, Any]) -> None:
+        """A replay is a research run: it never reads the holdout. A holdout run is repeated only through the
+        holdout action, which counts as another peek."""
+        from datetime import date
+
+        from app.backtest.catalog import RunRequestError
+        from app.backtest.holdout import holdout_refusal, overlaps_holdout
+
+        if config.get("kind") == "holdout":
+            raise RunRequestError("a holdout run is not replayed: run the holdout action again (it counts as a peek)")
+        if config.get("kind") == "walk_forward":
+            return  # its spans are checked against the holdout when it runs
+        start = date.fromisoformat(config["start"])
+        end = date.fromisoformat(config["end"]) if config.get("end") else None
+        if overlaps_holdout(start, end):
+            raise RunRequestError(holdout_refusal(start, end))
 
     def _run(self, run_id: str) -> None:
         try:

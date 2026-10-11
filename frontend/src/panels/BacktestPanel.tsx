@@ -256,7 +256,7 @@ export function BacktestPanel() {
       <button
         type="button"
         className="rounded bg-sky-700 px-3 py-1.5 text-white disabled:opacity-40"
-        disabled={busy || running}
+        disabled={busy || running || holdoutWarning !== null}
         onClick={() => void start()}
       >
         Run
