@@ -22,6 +22,7 @@ from app.upstox.client import UpstoxClient
 from app.upstox.deps import (
     get_candles_dir,
     get_instruments_dir,
+    get_ist_today,
     get_jobs,
     get_status_cache,
     make_client,
@@ -46,6 +47,7 @@ StatusCacheDep = Annotated[StatusCache, Depends(get_status_cache)]
 InstrumentsDirDep = Annotated[Path, Depends(get_instruments_dir)]
 CandlesDirDep = Annotated[Path, Depends(get_candles_dir)]
 JobsDep = Annotated[JobManager, Depends(get_jobs)]
+TodayDep = Annotated[date, Depends(get_ist_today)]
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -222,12 +224,11 @@ def _index_or_404(instruments_dir: Path) -> InstrumentIndex:
 
 
 @router.post("/history/sync", response_model=JobOut)
-def history_sync(body: SyncRequest, instruments_dir: InstrumentsDirDep, jobs: JobsDep) -> JobOut:
+def history_sync(body: SyncRequest, instruments_dir: InstrumentsDirDep, jobs: JobsDep, today: TodayDep) -> JobOut:
     """Fetch the missing 1m candles for an instrument (background job; poll /history/jobs/{id})."""
     instrument = _index_or_404(instruments_dir).get(body.instrument_key)
     if instrument is None:
         raise HTTPException(status_code=404, detail=f"Unknown instrument {body.instrument_key!r}")
-    today = datetime.now(IST).date()
     start = body.from_date or default_start(instrument, today)
     if start < MIN_HISTORY_DATE:
         start = MIN_HISTORY_DATE

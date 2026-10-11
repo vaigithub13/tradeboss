@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from datetime import date
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
 from functools import lru_cache
 from pathlib import Path
 
@@ -41,6 +42,11 @@ def get_client() -> UpstoxClient | None:
 
 
 @lru_cache
+def get_ist_today() -> date:
+    """Today's IST date. A dependency, so tests can fix the clock."""
+    return datetime.now(ZoneInfo("Asia/Kolkata")).date()
+
+
 def get_status_cache() -> StatusCache:
     return StatusCache()
 

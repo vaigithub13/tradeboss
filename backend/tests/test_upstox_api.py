@@ -144,6 +144,8 @@ def use_fake(env: dict[str, Any], client: Any, now: Any) -> None:
         return sync_symbol(client, candles_dir, instrument, from_date=from_date, to_date=to_date, now=now, on_progress=on_progress)
 
     env["runner"] = run
+    # the route's "today" is the same fake clock (it read the wall clock and broke once the real date moved on)
+    app.dependency_overrides[deps.get_ist_today] = lambda: now.date()
 
 
 def test_sync_runs_a_job_that_stores_1m_and_reports_progress(env: dict[str, Any]) -> None:
