@@ -685,7 +685,8 @@ def test_a_banned_import_is_sent_back_until_the_retries_are_exhausted() -> None:
     assert len(fake.prompts) == 3
     for repair in fake.prompts[1:]:
         assert "remove line 1: import os" in repair
-        assert "from typing import <any names, not *>" in repair
+        assert "from typing import <any of: Any," in repair
+        assert "import math" in repair
         assert "from app.backtest.contracts import Signal, Strategy" in repair
 
 

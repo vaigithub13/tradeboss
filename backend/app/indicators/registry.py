@@ -17,7 +17,6 @@ from app.indicators.basic import SOURCES, bollinger, ema, sma, source_series
 from app.indicators.fvg import compute_fvg, validate_fvg_params
 from app.indicators.momentum import macd, rsi, stochastic
 from app.indicators.volatility import supertrend
-from app.indicators.futures_vwap import session_vwap
 from app.indicators.volume import VolumeRequired, vwap
 
 INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg")
@@ -195,6 +194,9 @@ def compute(df: pd.DataFrame, itype: str, params: Mapping[str, Any]) -> dict[str
     elif itype == "vwap_fut":
         if "fut_volume" not in df.columns:
             raise VolumeRequired("VWAP (futures volume) needs futures volume on the bars")
+        # imported here so the indicator maths does not pull in the candle store (the strategy worker uses it)
+        from app.indicators.futures_vwap import session_vwap
+
         series = {"vwap": session_vwap(df, df["fut_volume"].to_numpy(dtype=float), params["source"])}
     elif itype == "fvg":
         return compute_fvg(df, dict(params))

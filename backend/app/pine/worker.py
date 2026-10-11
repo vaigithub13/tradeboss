@@ -1,22 +1,56 @@
-"""Isolated strategy process. Bars in, signals out. No API keys in the environment."""
+"""Isolated strategy process. Bars in, signals out.
+
+Layers, outermost first (C2, review 2026-10-11):
+* app/pine/isolated.py starts this process under a macOS sandbox-exec profile (no network, no new process,
+  no file reads or writes outside its temp dir and the read-only runtime) with an allow-listed environment;
+* `main` refuses every `app.*` import that was not loaded at start-up, so app.config (which reads .env) cannot
+  be imported here, and checks that on start;
+* the strategy module runs with restricted builtins and an import hook that allows only the strategy contract,
+  pine_common, typing, __future__ and math (`exec_strategy_module`);
+* the AST gate (app/pine/sandbox.py) runs on the source before any of it executes.
+"""
 
 from __future__ import annotations
 
-import importlib.util
+import builtins
+import importlib
+import importlib.abc
 import json
+import math
 import os
 import sys
 import traceback
+import types
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
+import app.strategies.pine_common  # noqa: F401  (loaded before the import guard is installed)
 from app.backtest.context import PositionView
 from app.backtest.contracts import LookAheadError, Signal, Strategy
 from app.indicators.frame import candles_to_frame
 from app.indicators.registry import compute, validate_params
-from app.pine.sandbox import SandboxError, check_source
+from app.pine.sandbox import ALLOWED, TYPING_NAMES, SandboxError, check_source
+
+#: Builtins a strategy module sees. No open, getattr, eval, exec, compile, __import__ (replaced by the hook),
+#: globals, vars, type, input or breakpoint.
+SAFE_BUILTIN_NAMES = (
+    "__build_class__", "abs", "all", "any", "bool", "callable", "classmethod", "dict", "divmod", "enumerate",
+    "filter", "float", "frozenset", "int", "isinstance", "issubclass", "iter", "len", "list", "map", "max", "min",
+    "next", "object", "pow", "print", "property", "range", "repr", "reversed", "round", "set", "slice", "sorted",
+    "staticmethod", "str", "sum", "super", "tuple", "zip",
+    "ArithmeticError", "AssertionError", "AttributeError", "Exception", "IndexError", "KeyError", "LookupError",
+    "NotImplementedError", "OverflowError", "RuntimeError", "StopIteration", "TypeError", "ValueError",
+    "ZeroDivisionError", "NotImplemented", "Ellipsis", "None", "True", "False",
+)
+#: What a strategy module may import: module -> the names it may take (None: the whole module).
+STRATEGY_IMPORTS: dict[str, tuple[str, ...] | None] = {
+    "__future__": ("annotations",),
+    "typing": TYPING_NAMES,
+    "math": None,
+    **ALLOWED,
+}
 
 # Settings the engine reads off the strategy object. A missing one uses the safe value.
 STRATEGY_SETTINGS = ("name", "pyramiding", "lots", "allow_overnight", "flatten_at_end", "bar_path")
@@ -36,11 +70,6 @@ SECRET_ENV = (
     "UPSTOX_API_KEY",
     "UPSTOX_API_SECRET",
 )
-
-
-def scrubbed_env(base: dict[str, str] | None = None) -> dict[str, str]:
-    source = os.environ if base is None else base
-    return {key: value for key, value in source.items() if key not in SECRET_ENV and not key.startswith("UPSTOX_")}
 
 
 class WorkerBars:
@@ -220,14 +249,98 @@ def strategy_settings(strategy: Any) -> tuple[dict[str, Any], list[str]]:
     return values, missing
 
 
+def _strategy_import(name: str, globals: Any = None, locals: Any = None, fromlist: Any = (), level: int = 0) -> Any:
+    """`__import__` for strategy code: only STRATEGY_IMPORTS, and only the listed names of each module.
+
+    C code that imports while a strategy frame is running (numpy's lazy imports, through PyImport_Import) finds
+    this hook in the strategy's builtins. That call always passes an empty list as `fromlist` and ignores the
+    return value, so it imports the module for its side effect and gets None: nothing is handed back. `app.*`
+    is refused there too.
+    """
+    if isinstance(fromlist, list) and not fromlist and not level:
+        if name == "app" or name.startswith("app."):
+            raise ImportError(f"{name} is not importable in a strategy")
+        importlib.import_module(name)
+        return None
+    if level:
+        raise ImportError("relative imports are not allowed in a strategy")
+    if name not in STRATEGY_IMPORTS:
+        raise ImportError(f"{name} is not importable in a strategy")
+    allowed = STRATEGY_IMPORTS[name]
+    real = math if name == "math" else importlib.import_module(name)
+    if allowed is None:
+        return real
+    wanted = tuple(fromlist or ())
+    if not wanted:
+        raise ImportError(f"use 'from {name} import <name>'")
+    refused = [item for item in wanted if item not in allowed]
+    if refused:
+        raise ImportError(f"{name}.{refused[0]} is not importable in a strategy")
+    view = types.ModuleType(name)
+    for item in wanted:
+        setattr(view, item, getattr(real, item))
+    return view
+
+
+def safe_builtins() -> dict[str, Any]:
+    out = {name: getattr(builtins, name) for name in SAFE_BUILTIN_NAMES}
+    out["__import__"] = _strategy_import
+    return out
+
+
+def exec_strategy_module(source: str, *, filename: str, module_name: str) -> types.ModuleType:
+    """Run strategy source as a module with restricted builtins and the import hook."""
+    code = compile(source, filename, "exec", dont_inherit=True)
+    module = types.ModuleType(module_name)
+    module.__dict__["__builtins__"] = safe_builtins()
+    module.__dict__["__file__"] = filename
+    exec(code, module.__dict__)  # noqa: S102 - the point of this function; see the module docstring
+    return module
+
+
+class _AppImportGuard(importlib.abc.MetaPathFinder):
+    """After start-up no new `app.*` module can be imported in the worker; app.config never."""
+
+    def __init__(self, loaded: set[str]) -> None:
+        self.loaded = loaded
+
+    def find_spec(self, fullname: str, path: Any, target: Any = None) -> Any:
+        if fullname == "app.config" or (fullname.startswith("app.") and fullname not in self.loaded):
+            raise ImportError(f"{fullname} cannot be imported in the strategy worker")
+        return None
+
+
+def install_import_guard() -> dict[str, bool]:
+    """Block new app imports, then check that app.config is neither loaded nor importable."""
+    sys.modules.pop("app.config", None)
+    loaded = {name for name in sys.modules if name == "app" or name.startswith("app.")}
+    if not any(isinstance(f, _AppImportGuard) for f in sys.meta_path):
+        sys.meta_path.insert(0, _AppImportGuard(loaded))
+    try:
+        importlib.import_module("app.config")
+        importable = True
+    except ImportError:
+        importable = False
+    return {"config_loaded": "app.config" in sys.modules, "config_importable": importable}
+
+
+def _reads_denied() -> bool:
+    """True when the sandbox is on: a harmless file outside the worker's temp dir cannot be opened."""
+    probe = Path(__file__).resolve().parents[2] / "pyproject.toml"
+    try:
+        with open(probe, "rb") as handle:
+            handle.read(1)
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return False
+
+
 def _load(path: Path, params: dict[str, Any]) -> Any:
     source = path.read_text()
     check_source(source)
-    spec = importlib.util.spec_from_file_location(f"user_{path.stem}", path)
-    if spec is None or spec.loader is None:
-        raise SandboxError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    module = exec_strategy_module(source, filename=str(path), module_name=f"user_{path.stem}")
     classes = [
         value for value in vars(module).values()
         if isinstance(value, type) and issubclass(value, Strategy) and value.__module__ == module.__name__
@@ -249,12 +362,13 @@ def main() -> None:
     reply_to = sys.stdout
     sys.stdout = sys.stderr
     secrets = [key for key in SECRET_ENV if key in os.environ]
+    guard = install_import_guard()
 
     def send(payload: dict[str, Any]) -> None:
         reply_to.write(json.dumps(payload) + "\n")
         reply_to.flush()
 
-    send({"op": "ready", "secrets": secrets})
+    send({"op": "ready", "secrets": secrets, **guard, "sandboxed": _reads_denied()})
     strategy = None
     bars = WorkerBars()
     for line in sys.stdin:
