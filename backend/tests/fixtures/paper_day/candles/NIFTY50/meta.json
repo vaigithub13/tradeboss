@@ -1,0 +1,20 @@
+{
+ "instrument": {
+  "instrument_key": "NSE_INDEX|Nifty 50",
+  "symbol": "NIFTY",
+  "name": "Nifty 50",
+  "kind": "index",
+  "segment": "NSE_INDEX",
+  "instrument_type": "INDEX",
+  "expiry": null,
+  "strike": null,
+  "lot_size": null,
+  "underlying_key": null
+ },
+ "covered_1m": [
+  [
+   "2026-09-23",
+   "2026-10-09"
+  ]
+ ]
+}

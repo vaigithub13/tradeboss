@@ -1,0 +1,93 @@
+{
+  "built_by": "uv run python -m scripts.make_paper_fixture --day 2026-10-09 --slot 1 --slot 4",
+  "day": "2026-10-09",
+  "frames": {
+    "kept": 138637,
+    "recorded": 164114
+  },
+  "keys": [
+    "NSE_FO|44598",
+    "NSE_FO|44602",
+    "NSE_FO|44608",
+    "NSE_FO|44611",
+    "NSE_FO|44612",
+    "NSE_FO|44613",
+    "NSE_INDEX|India VIX",
+    "NSE_INDEX|Nifty 50"
+  ],
+  "rows": {
+    "NIFTY50": 4500,
+    "NIFTY_2026-10-13": 2310,
+    "NSE_INDEX_India_VIX": 4500
+  },
+  "slots": [
+    {
+      "live_trades": [
+        {
+          "direction": "LONG",
+          "entry_at_ms": 1791518160242,
+          "exit_at_ms": 1791528060218,
+          "exit_reason": "signal",
+          "symbol": "NIFTY 22300 CE 13 OCT 26"
+        },
+        {
+          "direction": "SHORT",
+          "entry_at_ms": 1791528060218,
+          "exit_at_ms": 1791528360211,
+          "exit_reason": "signal",
+          "symbol": "NIFTY 22500 PE 13 OCT 26"
+        },
+        {
+          "direction": "LONG",
+          "entry_at_ms": 1791528360211,
+          "exit_at_ms": 1791539100057,
+          "exit_reason": "square_off",
+          "symbol": "NIFTY 22450 CE 13 OCT 26"
+        }
+      ],
+      "params": {},
+      "slot": "1",
+      "strategy": "log_xz",
+      "uses_stops": false
+    },
+    {
+      "live_trades": [
+        {
+          "direction": "LONG",
+          "entry_at_ms": 1791518406369,
+          "exit_at_ms": 1791519663386,
+          "exit_reason": "premium_target",
+          "symbol": "NIFTY 22400 CE 13 OCT 26"
+        },
+        {
+          "direction": "SHORT",
+          "entry_at_ms": 1791527324016,
+          "exit_at_ms": 1791530676818,
+          "exit_reason": "premium_stop",
+          "symbol": "NIFTY 22450 PE 13 OCT 26"
+        },
+        {
+          "direction": "LONG",
+          "entry_at_ms": 1791533550408,
+          "exit_at_ms": 1791539100057,
+          "exit_reason": "square_off",
+          "symbol": "NIFTY 22500 CE 13 OCT 26"
+        }
+      ],
+      "params": {
+        "exit_rule": "premium_1to2"
+      },
+      "slot": "4",
+      "strategy": "price_channel",
+      "uses_stops": true
+    }
+  ],
+  "symbols": {
+    "NIFTY 22300 CE 13 OCT 26": "NSE_FO|44598",
+    "NIFTY 22400 CE 13 OCT 26": "NSE_FO|44602",
+    "NIFTY 22450 CE 13 OCT 26": "NSE_FO|44608",
+    "NIFTY 22450 PE 13 OCT 26": "NSE_FO|44611",
+    "NIFTY 22500 CE 13 OCT 26": "NSE_FO|44612",
+    "NIFTY 22500 PE 13 OCT 26": "NSE_FO|44613"
+  }
+}

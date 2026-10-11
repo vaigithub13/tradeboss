@@ -211,7 +211,7 @@ def test_the_sandbox_denies_network_processes_and_files_outside_its_temp_dir(tmp
     outside.mkdir()
     (outside / ".env").write_text("NOT_A_REAL_SECRET=1\n")
     done = subprocess.run(
-        sandboxed_command(work, ["-c", PROBE, str(outside), str(ROOT_DIR / "PROJECT_PLAN.md")]),
+        sandboxed_command(work, ["-c", PROBE, str(outside), str(ROOT_DIR / "backend" / "pyproject.toml")]),
         cwd=work, env=isolated.worker_env(work), capture_output=True, text=True, timeout=60,
     )
     seen = dict(line.split(" ", 1) for line in done.stdout.split("\n") if line)

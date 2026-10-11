@@ -17,5 +17,7 @@ dist/
 /backend/data/
 *.duckdb
 *.parquet
+# the committed paper-day test fixture (market data only; built by backend/scripts/make_paper_fixture.py)
+!/backend/tests/fixtures/paper_day/**/*.parquet
 *.sqlite
 *.db

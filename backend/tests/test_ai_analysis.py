@@ -467,6 +467,7 @@ def test_replay_context_stops_at_the_cursor_and_skips_the_session_close(monkeypa
     monkeypatch.setattr("app.ai.run.get_client", lambda: _LiveChain())
     monkeypatch.setattr("app.ai.run.analyse", fake_analyse)
     monkeypatch.setattr("app.ai.run.analysis_dir", lambda: tmp_path)
+    monkeypatch.setattr("app.ai.run.require_key", lambda: "sk-test")  # the client is faked; no .env needed
     result = run_analysis("NIFTY50", ["normal"], None, cursor)
     assert calls and set(calls) == {cursor}
     context = seen["context"]
