@@ -83,7 +83,8 @@ async def start(body: StartBody, request: Request) -> dict[str, Any]:
     now = _now_ms(svc)
     day = ist_date(now)
     try:
-        runner.start(day, body.strategy, body.params, now_ms=now)  # after 15:30 it replays the day, apart
+        # after 15:30 it replays the day, apart; the catch-up runs off the event loop, so the feed goes on
+        await runner.start_async(day, body.strategy, body.params, now_ms=now, clock=lambda: _now_ms(svc))
     except AlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (KeyError, ValueError, TypeError, UnsupportedSettings) as exc:

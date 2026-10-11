@@ -76,6 +76,45 @@ def iter_records(path: Path) -> Iterator[Record]:
             yield Record(direction, kind, wall_ms, payload)
 
 
+class RecordingCursor:
+    """Reads a recording that may still be growing (the live recorder appends to it on the event loop).
+
+    `frames()` yields the received binary frames after the previous call and moves the offset only past complete
+    records, so a record caught half-written is read whole on a later call: nothing is lost or read twice.
+    `last_start` is where the last yielded record began (to give it back when a reader stops on it).
+    """
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.offset = 0
+        self.last_start = 0
+
+    def frames(self) -> Iterator[tuple[bytes, int]]:
+        with self.path.open("rb") as fh:
+            if self.offset == 0:
+                head = fh.read(len(MAGIC))
+                if len(head) < len(MAGIC):
+                    return
+                if head != MAGIC:
+                    raise RecordingError(f"{self.path.name}: not a TradeBoss feed recording")
+                self.offset = len(MAGIC)
+            fh.seek(self.offset)
+            while True:
+                raw = fh.read(_REC.size)
+                if len(raw) < _REC.size:
+                    return
+                direction, kind, wall_ms, n = _REC.unpack(raw)
+                if direction not in (RECV, SENT) or kind not in (BINARY, TEXT) or n > MAX_PAYLOAD:
+                    raise RecordingError(f"{self.path.name}: corrupt record header at byte {self.offset}")
+                payload = fh.read(n)
+                if len(payload) < n:
+                    return
+                self.last_start = self.offset
+                self.offset += _REC.size + n
+                if direction == RECV and kind == BINARY:
+                    yield payload, wall_ms
+
+
 def replay(
     path: Path,
     on_frame: Callable[[bytes, int, int], None],

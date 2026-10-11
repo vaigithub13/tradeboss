@@ -86,6 +86,7 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
     };
   }, [slot, day, closed]);
   const running = status?.state === "running";
+  const starting = status?.state === "starting"; // catching up from the day's recording, off the feed's loop
   const summary = status?.summary ?? null;
   const parsed = parseParams(paramsText);
   const shownParams = status?.params && Object.keys(status.params).length ? JSON.stringify(status.params) : "defaults";
@@ -123,10 +124,10 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
         <button
           type="button"
           className="rounded border border-white/15 px-3 py-1 disabled:opacity-40"
-          disabled={disabled || (!running && parsed.params === undefined)}
+          disabled={disabled || starting || (!running && parsed.params === undefined)}
           onClick={() => void (running ? stop(slot) : start(slot, strategy, startParams(parsed.params ?? {}, exit)))}
         >
-          {running ? "Stop" : "Start"}
+          {running ? "Stop" : starting ? "Starting…" : "Start"}
         </button>
       </div>
       {running ? (

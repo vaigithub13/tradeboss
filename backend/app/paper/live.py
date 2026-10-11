@@ -6,7 +6,9 @@ lock. The runner never places an order: it only records signals and paper fills.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
+from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
 from typing import Any
@@ -109,6 +111,17 @@ def _stale_model(store: CandleStore, day: date) -> Any:
     return None if vix is None else model_price_for(lambda _when: vix)
 
 
+@dataclass
+class _Prepared:
+    day: date
+    strategy: str
+    params: dict[str, Any]
+    session: PaperSession
+    source: str
+    replay: bool
+    continuation: Any
+
+
 class PaperRunner:
     def __init__(self, directory: Path, make_session: MakeSession,
                  on_wanted: Callable[[], None] | None = None,
@@ -117,7 +130,7 @@ class PaperRunner:
         self._make = make_session
         self._on_wanted = on_wanted
         self._catch_up = catch_up  # replays the day's recorded feed into a session: trades what it has not decided
-        self.state = "stopped"  # running | stopped
+        self.state = "stopped"  # running | starting | stopped
         self.ended_by: str | None = None
         self.day: date | None = None
         self.strategy: str | None = None
@@ -138,9 +151,38 @@ class PaperRunner:
         """Start (or resume) today's strategy. The session warms on the stored bars, catches up on the day's
         recorded feed, and resumes from today's file if there is one, so the signals do not depend on when
         this was called. What the catch-up decides is marked `replay`. With `now_ms` after the day's session
-        ended, the whole run is a replay: it goes to the replay folder and ends when the catch-up is done."""
-        if self.state == "running":
+        ended, the whole run is a replay: it goes to the replay folder and ends when the catch-up is done.
+
+        This runs on the caller's thread (a restart, before the feed connects). The API's Start uses
+        `start_async`, which does the same work without holding up the feed."""
+        if self.state in ("running", "starting"):
             raise AlreadyRunning("a strategy is already running")
+        self._activate(self._prepare(day, strategy, params, now_ms))
+
+    async def start_async(self, day: date, strategy: str, params: dict[str, Any], *, now_ms: int,
+                          clock: Callable[[], int]) -> None:
+        """`start` for the event loop (M2, review 2026-10-11): build, warm and catch up in a worker thread while
+        the feed goes on, then, on the loop, replay the frames recorded meanwhile and go live. While it starts,
+        the runner is `starting`: feed events are ignored and a second Start is refused. `clock` is the feed's
+        exchange time when it goes live (a Start that finishes after 15:30 ends the day)."""
+        if self.state in ("running", "starting"):
+            raise AlreadyRunning("a strategy is already running")
+        before = self.state
+        self.state = "starting"
+        try:
+            prepared = await asyncio.to_thread(self._prepare, day, strategy, params, now_ms)
+        except BaseException:
+            self.state = before
+            raise
+        try:
+            self._activate(prepared, clock())
+        except BaseException:
+            if self.state == "starting":
+                self.state = before
+            raise
+
+    def _prepare(self, day: date, strategy: str, params: dict[str, Any], now_ms: int | None) -> _Prepared:
+        """Everything that takes time, touching no state of the runner (it may run in a worker thread)."""
         replay = now_ms is not None and session_over(day, now_ms)
         source = "replay" if replay else "live"
         saved = load_day(self.directory if not replay else self.directory / "replay", day)
@@ -156,22 +198,39 @@ class PaperRunner:
                              "signals only); run it without them, or test them in a backtest")
         if saved is not None:
             session.restore(saved)
-        self.source = source
         if replay:
             session.counted_sources = ("live", "replay")
-        self.session = session
-        self.day, self.strategy, self.params = day, strategy, dict(params)
-        self.eod_check = None
+        continuation = None
         if self._catch_up is not None:
             session.source = "replay"
             try:
-                self._catch_up(session, day)
+                continuation = self._catch_up(session, day)
             finally:
                 session.source = source
+        return _Prepared(day=day, strategy=strategy, params=dict(params), session=session, source=source,
+                         replay=replay, continuation=continuation)
+
+    def _activate(self, prepared: _Prepared, now_ms: int | None = None) -> None:
+        """On the loop: replay what was recorded since the catch-up, then take the session live."""
+        session = prepared.session
+        resume = getattr(prepared.continuation, "resume", None)
+        if resume is not None:
+            session.source = "replay"
+            try:
+                resume(session)
+            finally:
+                session.source = prepared.source
+        self.source = prepared.source
+        self.session = session
+        self.day, self.strategy, self.params = prepared.day, prepared.strategy, dict(prepared.params)
+        self.eod_check = None
         self.state, self.ended_by = "running", None
-        if replay:
+        if prepared.replay:
             session.end_of_day()
             self.state, self.ended_by = "stopped", "replay finished"
+        elif now_ms is not None and session_over(prepared.day, now_ms):
+            session.end_of_day()  # the Start finished after the close: nothing more can trade today
+            self.state, self.ended_by = "stopped", "session ended"
         self._save()
         self._sync_wanted()
 

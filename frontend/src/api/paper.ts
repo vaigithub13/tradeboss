@@ -6,7 +6,7 @@ import type { PaperTradeRow } from "../paper/trades";
 /** One paper slot ("1".."4"): its own strategy, position and P&L. */
 export interface PaperStatus {
   slot: string;
-  state: "running" | "stopped" | "disabled";
+  state: "running" | "starting" | "stopped" | "disabled";
   ended_by: string | null;
   day: string | null;
   strategy: string | null;

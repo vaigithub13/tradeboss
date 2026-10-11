@@ -306,15 +306,17 @@ class LiveService:
         except PaperError as exc:
             log.warning("paper strategy not resumed: %s", exc)
 
-    def _paper_catch_up(self, session: Any, day: date) -> None:
+    def _paper_catch_up(self, session: Any, day: date) -> Any:
         """Bring a paper session up to now from today's recorded frames: the bars it has not decided yet trade,
-        with the quotes that were on the feed at each bar. Without a recording, the saved bars rebuild the state."""
+        with the quotes that were on the feed at each bar. Without a recording, the saved bars rebuild the state.
+        May run in a worker thread (a Start from the API); the returned catch-up's `resume`, called on the loop,
+        replays the frames recorded in the meantime."""
         path = recording_path(self.cfg.recordings_dir, day)
         if not path.exists():
             if session.resume_after is not None:
                 session.resume_state(session.shown)
-            return
-        replay_into(session, path, on_vix=self.vix.add, open_volume_baseline=self.cfg.open_volume_baseline)
+            return None
+        return replay_into(session, path, on_vix=self.vix.add, open_volume_baseline=self.cfg.open_volume_baseline)
 
     def _feed_paper(self, events: list[BarEvent]) -> None:
         """VIX feeds the model fallback; exchange-final index minutes feed the paper strategy."""

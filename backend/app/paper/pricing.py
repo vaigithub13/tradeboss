@@ -5,6 +5,7 @@ of that moment. VIX comes from the feed (or, in a replay, from the same recorded
 
 from __future__ import annotations
 
+import threading
 from bisect import bisect_right
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
@@ -22,25 +23,31 @@ ModelPrice = Callable[[OptionContract, float, int], float | None]
 
 
 class VixSeries:
-    """VIX closes seen so far, by the unix second the bar starts. A later copy of the same bar replaces it."""
+    """VIX closes seen so far, by the unix second the bar starts. A later copy of the same bar replaces it.
+
+    The live feed adds on the event loop while a paper Start catches up in a worker thread: both go through a lock.
+    """
 
     def __init__(self) -> None:
         self._times: list[int] = []
         self._closes: list[float] = []
+        self._lock = threading.Lock()
 
     def add(self, when: int, close: float) -> None:
-        if self._times and when < self._times[-1]:
-            return  # an older bar than the newest we hold: the feed has moved on
-        if self._times and when == self._times[-1]:
-            self._closes[-1] = float(close)
-            return
-        self._times.append(int(when))
-        self._closes.append(float(close))
+        with self._lock:
+            if self._times and when < self._times[-1]:
+                return  # an older bar than the newest we hold: the feed has moved on
+            if self._times and when == self._times[-1]:
+                self._closes[-1] = float(close)
+                return
+            self._times.append(int(when))
+            self._closes.append(float(close))
 
     def at(self, when: int) -> float | None:
         """The last VIX close that started at or before `when`; None before the first one."""
-        i = bisect_right(self._times, when) - 1
-        return None if i < 0 else self._closes[i]
+        with self._lock:
+            i = bisect_right(self._times, when) - 1
+            return None if i < 0 else self._closes[i]
 
 
 def model_price_for(vix_at: Callable[[int], float | None], cfg: OptionModelConfig | None = None) -> ModelPrice:

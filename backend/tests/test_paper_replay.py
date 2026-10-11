@@ -51,6 +51,17 @@ def _choose(direction: str, spot: float, on: date):
                            lots=load_default_lot_table(), steps=load_default_step_table())
 
 
+def run_session_for(day: date) -> tuple[PaperSession, VixSeries]:
+    """A Log XZ session for `day`, warmed on the stored bars before it, and the VIX series its model reads."""
+    key_of = {i.symbol: i.key for i in index_on(settings.instruments_dir, day).instruments}
+    vix = VixSeries()
+    session = PaperSession(day=day, strategy=build_strategy({"strategy": "log_xz", "params": PARAMS}),
+                           choose=_choose, key_for=key_of.get, quotes=QuoteBook(),
+                           cost_table=load_default_cost_table(), model_price=model_price_for(vix.at))
+    session.warm(stored_warmup(CandleStore(settings.candles_dir), SYMBOL, day))
+    return session, vix
+
+
 def run_replay(day: date) -> dict:
     """One day's recording through the live engine into a paper session, warmed on the stored bars before the day."""
     key_of = {i.symbol: i.key for i in index_on(settings.instruments_dir, day).instruments}  # that day's contracts
