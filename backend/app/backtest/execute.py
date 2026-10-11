@@ -196,14 +196,14 @@ def _premium_exit(config: dict[str, Any], which: str) -> float | None:
     return config.get(f"premium_{which}_pct")
 
 
-def _load_underlyings(config: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+def _load_underlyings(config: dict[str, Any], *, store: CandleStore | None = None) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     start = date.fromisoformat(config["start"])
     from_time = int(datetime(start.year, start.month, start.day, tzinfo=IST).timestamp()) - 2 * 86400
     to_time = None
     if config["end"]:
         end = date.fromisoformat(config["end"]) + timedelta(days=1)
         to_time = int(datetime(end.year, end.month, end.day, tzinfo=IST).timestamp())
-    store = CandleStore(settings.candles_dir)
+    store = store or CandleStore(settings.candles_dir)
     nifty, _ = store.load(NIFTY_SYMBOL, from_time=from_time, to_time=to_time, session_types=config["sessions"])
     vix, _ = store.load(VIX_SYMBOL, from_time=from_time, to_time=to_time, session_types=config["sessions"])
     return list(nifty), list(vix)

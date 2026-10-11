@@ -112,15 +112,10 @@ def test_5_oct_fills_are_modelled_because_the_recording_has_no_option_depth(oct5
 @pytest.mark.skipif(SKIP5 is not None, reason=SKIP5 or "")
 def test_5_oct_live_and_backtest_signals_match(oct5) -> None:
     s = oct5["session"]
-    entries = [{"time": r["time"], "side": r["side"]} for r in s.signals if r["side"] in ("BUY", "SELL")]
     report = end_of_day_check(
-        day=DAY5,
-        live_entries=entries,
-        live_bars=s.live_bars(),
-        incomplete=s.bars.incomplete,
-        store=CandleStore(settings.candles_dir),
-        symbol=SYMBOL,
-        make_strategy=lambda: build_strategy({"strategy": "log_xz", "params": PARAMS}),
+        day=DAY5, signals=s.signals, live_report=s.report_rows(), live_bars=s.live_bars(),
+        incomplete=s.bars.incomplete, store=CandleStore(settings.candles_dir), symbol=SYMBOL,
+        strategy="log_xz", params=PARAMS,
     )
     assert report["live_signals"] == report["backtest_signals"] == 4
     assert report["differences"] == []
@@ -160,11 +155,10 @@ def test_7_oct_warmed_replay_matches_the_backtest_with_real_fills() -> None:
     """Live 7 Oct started cold (warm_bars 0): 2 signals against the backtest's 6. Warmed, they agree."""
     s = run_replay(DAY7)["session"]
     assert s.warm_bars == 500
-    entries = [{"time": r["time"], "side": r["side"]} for r in s.signals if r["side"] in ("BUY", "SELL")]
     report = end_of_day_check(
-        day=DAY7, live_entries=entries, live_bars=s.live_bars(), incomplete=s.bars.incomplete,
-        store=CandleStore(settings.candles_dir), symbol=SYMBOL,
-        make_strategy=lambda: build_strategy({"strategy": "log_xz", "params": PARAMS}),
+        day=DAY7, signals=s.signals, live_report=s.report_rows(), live_bars=s.live_bars(),
+        incomplete=s.bars.incomplete, store=CandleStore(settings.candles_dir), symbol=SYMBOL,
+        strategy="log_xz", params=PARAMS,
     )
     assert report["live_signals"] == report["backtest_signals"] == 6 and report["differences"] == []
     assert all(r["fill_source"] == "quote" for r in s.signals if r["status"] == "filled")
@@ -193,9 +187,9 @@ def test_price_channel_paper_fills_match_the_backtest(day: date) -> None:
     filled = [r for r in s.signals if r["status"] == "filled"]
     assert filled and s.uses_stops
     report = end_of_day_check(
-        day=day, live_entries=[{"time": r["time"], "side": r["side"]} for r in filled], live_bars=s.live_bars(),
+        day=day, signals=s.signals, live_report=s.report_rows(), live_bars=s.live_bars(),
         incomplete=s.bars.incomplete, store=CandleStore(settings.candles_dir), symbol=SYMBOL,
-        make_strategy=lambda: build_strategy(PC), basis="fill",
+        strategy=PC["strategy"], params=PC["params"], basis="fill",
     )
     assert report["differences"] == [] and report["live_signals"] == report["backtest_signals"]
 

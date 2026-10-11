@@ -193,23 +193,22 @@ class PaperRunner:
         self.session.end_of_day()
         self._end("session ended")
 
-    def reconcile_check(self, store: CandleStore, symbol: str, day: date | None = None) -> dict[str, Any] | None:
-        """After the reconcile: rerun the normal backtest for the day on the official bars and keep the
-        differences with their reasons in the day's file. Only once the day has ended. With `day`, a runner
-        that lost the ended session to a restart rebuilds it from that day's file first."""
+    def reconcile_check(self, store: CandleStore, symbol: str, day: date | None = None,
+                        tape: Any = None) -> dict[str, Any] | None:
+        """After the reconcile and the option capture: rerun the normal backtest for the day on the official bars,
+        with the option overlay, and keep the trade-level differences with their reasons in the day's file. Only once
+        the day has ended. With `day`, a runner that lost the ended session to a restart rebuilds it from that day's
+        file first."""
         if day is not None and self.state != "running" and (self.session is None or self.day != day):
             self._load_ended(day)
         if self.session is None or self.day is None or self.state == "running":
             return None
         s = self.session
-        entries = [{"time": r["time"], "side": r["side"]} for r in s.signals
-                   if r["side"] in ("BUY", "SELL") and r["time"] is not None]
-        strategy, params = self.strategy, self.params
+        assert self.strategy is not None
         self.eod_check = end_of_day_check(
-            day=self.day, live_entries=entries, live_bars=s.live_bars(), incomplete=s.bars.incomplete,
-            store=store, symbol=symbol,
-            make_strategy=lambda: paper_strategy(strategy, params)[0],
-            basis="fill" if s.uses_stops else "decision",
+            day=self.day, signals=s.signals, live_report=s.report_rows(), live_bars=s.live_bars(),
+            incomplete=s.bars.incomplete, store=store, symbol=symbol, strategy=self.strategy, params=self.params,
+            basis="fill" if s.uses_stops else "decision", tape=tape,
         )
         self._save()
         return self.eod_check

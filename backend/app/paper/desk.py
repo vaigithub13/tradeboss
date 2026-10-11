@@ -90,8 +90,8 @@ class PaperDesk:
     def finish_day(self) -> None:
         self._each("finish_day", lambda r: r.finish_day())
 
-    def reconcile_check(self, store: CandleStore, symbol: str, day: date | None = None) -> None:
-        self._each("reconcile_check", lambda r: r.reconcile_check(store, symbol, day))
+    def reconcile_check(self, store: CandleStore, symbol: str, day: date | None = None, tape: Any = None) -> None:
+        self._each("reconcile_check", lambda r: r.reconcile_check(store, symbol, day, tape=tape))
 
     def flush(self) -> None:
         self._each("flush", lambda r: r.flush())

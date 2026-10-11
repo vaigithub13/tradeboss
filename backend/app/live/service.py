@@ -448,8 +448,10 @@ class LiveService:
         await self.hub.broadcast_reload({symbol_dir_name(r.key) for r in reports if r.ok})
         if reports and all(r.ok for r in reports):
             self._flags.reconciled_day = day
-            self.paper.reconcile_check(self.store, PAPER_SYMBOL, day)
+            # the day's option bars first, so the paper check prices the backtest (and its premium exits) from them
             await self.capture_options(day)
+            tape = None if self.cfg.option_history_dir is None else OptionHistoryStore(self.cfg.option_history_dir)
+            self.paper.reconcile_check(self.store, PAPER_SYMBOL, day, tape=tape)
         return reports
 
     async def capture_options(self, day: date) -> dict[str, Any] | None:
