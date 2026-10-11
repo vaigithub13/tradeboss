@@ -37,7 +37,7 @@ export function acceptReport(reportId: string, reportHash: string): Promise<{ ac
 export function convertPine(
   source: string,
   report: PineReport,
-): Promise<{ python: string; tests: string; ready: boolean; errors: string[]; id: string; hash: string }> {
+): Promise<{ python: string; ready: boolean; errors: string[]; id: string; hash: string }> {
   return postJson("/api/pine/convert", {
     source,
     report_id: report.id,

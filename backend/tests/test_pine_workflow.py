@@ -398,14 +398,14 @@ def test_a_draft_without_a_strategy_subclass_is_not_ready() -> None:
     assert any("Strategy subclass" in prompt for prompt in fake.prompts[1:])
 
 
-def test_unrunnable_tests_are_dropped_and_a_real_strategy_is_ready() -> None:
+def test_a_tests_field_is_ignored_and_a_real_strategy_is_ready() -> None:
     payload = json.dumps({
         "python": GOOD,
         "tests": "def test_bad():\n    assert missing_name\n",
     })
     result = convert_draft(SESSION_CLOSE, client=_Fake(payload), report={"scan": scan(SESSION_CLOSE)})
     assert result["ready"] is True
-    assert result["tests"] == ""
+    assert "tests" not in result
     assert result["attempts"] == 1
 
 

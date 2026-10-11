@@ -1,16 +1,18 @@
 """Turn an accepted semantics report into a Strategy draft, then check it.
 
 The Pine source in the prompt is data. A draft that fails the AST gate, compile,
-import, or the automatic checks is sent back to the model at most twice. Tests
-that do not run are dropped. The diff is what remains after that loop.
+import, or the automatic checks is sent back to the model at most twice. The diff
+is what remains after that loop.
+
+Model-written code runs only as the strategy, in the sandboxed worker, after the AST
+gate. The model is not asked for tests, and a `tests` field in its reply is ignored:
+that code would run outside every gate.
 """
 
 from __future__ import annotations
 
 import inspect
 import json
-import subprocess
-import sys
 import tempfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -64,11 +66,9 @@ def conversion_prompt(source: str, report: dict[str, Any]) -> str:
         "--- PINE DATA ---\n"
         f"{source}\n"
         "--- END DATA ---\n"
-        "Reply with one JSON object with keys python and tests. "
+        "Reply with one JSON object with one key, python. "
         "python uses only the allowed imports listed above "
-        "and defines one Strategy or PinePort subclass whose on_bar returns a list of Signal. "
-        "tests is a pytest module that imports that class and runs. "
-        "Use an empty string for tests when you cannot write a test that runs."
+        "and defines one Strategy or PinePort subclass whose on_bar returns a list of Signal."
     )
 
 
@@ -124,32 +124,6 @@ def _automatic(path: Path) -> list[str]:
     return problems
 
 
-def _tests_run(tests: str, strategy_path: Path) -> bool:
-    directory = strategy_path.parent
-    test_path = directory / "test_draft.py"
-    module = strategy_path.stem
-    header = (
-        "import importlib.util\n"
-        "from pathlib import Path\n"
-        f"_path = Path(r'{strategy_path}')\n"
-        "_spec = importlib.util.spec_from_file_location('draft_strategy', _path)\n"
-        "_mod = importlib.util.module_from_spec(_spec)\n"
-        "_spec.loader.exec_module(_mod)\n"
-        "for _name, _value in vars(_mod).items():\n"
-        "    if not _name.startswith('_'):\n"
-        "        globals()[_name] = _value\n"
-    )
-    test_path.write_text(header + "\n" + tests)
-    completed = subprocess.run(
-        [sys.executable, "-m", "pytest", str(test_path), "-q", "--tb=no"],
-        cwd=str(BACKEND),
-        capture_output=True,
-        text=True,
-        timeout=30,
-    )
-    return completed.returncode == 0
-
-
 def _problems(python: str, directory: Path) -> tuple[list[str], Path | None]:
     try:
         check_source(python)
@@ -173,7 +147,6 @@ def convert_draft(source: str, *, client: DraftClient, report: dict[str, Any]) -
     base = conversion_prompt(source, report)
     prompt = base
     last_python = ""
-    last_tests = ""
     errors: list[str] = []
     attempts = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -185,30 +158,21 @@ def convert_draft(source: str, *, client: DraftClient, report: dict[str, Any]) -
                 draft = json.loads(raw)
             except json.JSONDecodeError:
                 errors = ["model reply was not JSON"]
-                prompt = base + "\n\nThe previous reply was not a JSON object. Reply with python and tests only."
+                prompt = base + "\n\nThe previous reply was not a JSON object. Reply with python only."
                 continue
             if not isinstance(draft, dict):
                 errors = ["model reply was not a JSON object"]
                 prompt = base + "\n\nThe previous reply was not a JSON object."
                 continue
-            python = str(draft.get("python") or "")
-            tests = str(draft.get("tests") or "")
-            last_python, last_tests = python, tests
+            python = str(draft.get("python") or "")  # any other key, such as tests, is ignored
+            last_python = python
             if not python.strip():
                 errors = ["model reply had no python"]
                 prompt = base + "\n\nThe previous reply had no python."
                 continue
-            errors, path = _problems(python, directory)
-            if path is not None and tests.strip():
-                try:
-                    if not _tests_run(tests, path):
-                        last_tests = ""
-                except (OSError, subprocess.TimeoutExpired):
-                    last_tests = ""
-            else:
-                last_tests = "" if errors else tests
+            errors, _path = _problems(python, directory)
             if not errors:
-                return {"python": python, "tests": last_tests, "ready": True, "attempts": attempts, "errors": []}
+                return {"python": python, "ready": True, "attempts": attempts, "errors": []}
             prompt = (
                 base
                 + "\n\nThe previous draft failed these checks. Repair the python. "
@@ -219,7 +183,6 @@ def convert_draft(source: str, *, client: DraftClient, report: dict[str, Any]) -
             )
     return {
         "python": last_python,
-        "tests": "",
         "ready": False,
         "attempts": attempts,
         "errors": errors,
