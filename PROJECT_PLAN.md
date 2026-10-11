@@ -266,7 +266,7 @@ A higher-timeframe gap is drawn on a lower chart only after candle 3 of the high
 
 `session_gaps` is `include` (the default) or `exclude`. Exclude drops a gap whose candle 1 and candle 3 fall on different IST dates (an overnight gap). The indicator setting is labelled Overnight gaps.
 
-`compute` arrays `bull_top`, `bull_bottom`, `bear_top`, and `bear_bottom` are set on candle 3 only, and are NaN before that. `show_last` dropping an older box clears that bar too.
+`compute` arrays `bull_top`, `bull_bottom`, `bear_top`, and `bear_bottom` are set on candle 3 only, and are NaN before that. They are the series a strategy reads, so they keep every gap: `show_last` limits only the boxes the chart draws. A value never depends on how many gaps form later.
 
 ### Long position and short position
 

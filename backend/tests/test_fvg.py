@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import math
 
+import numpy as np
+
 import pandas as pd
 import pytest
 
@@ -155,6 +157,30 @@ def test_show_last_keeps_the_newest_gap() -> None:
     )
     boxes = fvg_boxes(two, {"show_last": 1, "mitigation": "touch"})
     assert [box["formed_index"] for box in boxes] == [5]
+
+
+def test_show_last_is_display_only_and_the_registry_series_is_causal() -> None:
+    """H1 (review 2026-10-11): `fvg_boxes` (the chart) keeps the newest `show_last` boxes, but the registry series
+    a strategy reads keeps every gap on its candle 3, so a value never depends on how many gaps form later."""
+    two = _frame(
+        [
+            (98, 100, 97, 99),
+            (101, 112, 100, 110),
+            (108, 112, 105, 111),
+            (110, 112, 109, 111),
+            (113, 120, 112, 118),
+            (116, 122, 116, 121),
+        ]
+    )
+    params = validate_params("fvg", {"show_last": 1, "mitigation": "touch"})
+    assert len(fvg_boxes(two, params)) == 1
+    series = compute(two, "fvg", params)
+    formed = [i for i, v in enumerate(series["bull_top"]) if not math.isnan(v)]
+    assert len(formed) > 1
+    for n in range(3, len(two) + 1):
+        prefix = compute(two.iloc[:n], "fvg", params)
+        for name, values in prefix.items():
+            assert np.array_equal(values, series[name][:n], equal_nan=True), (n, name)
 
 
 def test_a_higher_timeframe_gap_waits_until_candle_3_closes() -> None:

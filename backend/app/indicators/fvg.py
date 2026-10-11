@@ -125,7 +125,7 @@ def fvg_boxes(frame: pd.DataFrame, params: dict[str, Any] | None = None) -> list
     gap_mode = str(raw["min_gap_mode"])
     mitigation = str(raw["mitigation"])
     when = str(raw["when_mitigated"])
-    show_last = int(raw["show_last"])
+    show_last = None if raw["show_last"] is None else int(raw["show_last"])
     session_gaps = str(raw["session_gaps"])
     bar_seconds = int(raw.get("bar_seconds") or 0)
     as_of = raw.get("as_of")
@@ -172,13 +172,19 @@ def fvg_boxes(frame: pd.DataFrame, params: dict[str, Any] | None = None) -> list
                 "faded": fade,
             }
         )
-    if show_last >= 0:
+    if show_last is not None and show_last >= 0:
         boxes = boxes[-show_last:]
     return boxes
 
 
 def compute_fvg(df: pd.DataFrame, params: dict[str, Any]) -> dict[str, np.ndarray]:
-    """Formation prices on candle 3 only. Every other bar, including the mitigation bar, is NaN."""
+    """Formation prices on candle 3 only. Every other bar, including the mitigation bar, is NaN.
+
+    This is the series a strategy reads, so it is causal: every gap stays on its candle 3. `show_last` only
+    limits the boxes the chart draws (`fvg_boxes`); applied here it would make a bar's value depend on how many
+    gaps form later (H1, review 2026-10-11).
+    """
+    params = {**params, "show_last": None}
     n = len(df)
     bull_bottom = np.full(n, np.nan)
     bull_top = np.full(n, np.nan)

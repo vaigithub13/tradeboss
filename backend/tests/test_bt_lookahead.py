@@ -199,6 +199,8 @@ def test_1d_ctx_indicator_values_equal_the_chart_code_run_on_the_past_only() -> 
         ("rsi", {"length": 14}),
         ("macd", {"fast": 12, "slow": 26, "signal": 9}),
         ("vwap", {}),
+        ("stoch", {}),
+        ("fvg", {}),  # show_last is display-only: the series must not depend on how many gaps form later
     ]
     rec = Recorder(specs)
     run_backtest(rec, ListSource(candles, 1), cfg())
@@ -209,6 +211,25 @@ def test_1d_ctx_indicator_values_equal_the_chart_code_run_on_the_past_only() -> 
             expected = registry.compute(frame, itype, registry.validate_params(itype, params))
             for name, values in per_type[itype].items():
                 assert np.array_equal(values, expected[name], equal_nan=True), (n, itype, name)
+
+
+def test_1d_covers_every_registry_type() -> None:
+    """A new indicator type cannot skip the past-only check (H1, review 2026-10-11)."""
+    import inspect
+
+    source = inspect.getsource(test_1d_ctx_indicator_values_equal_the_chart_code_run_on_the_past_only)
+    exempt = {"vwap_fut"}  # needs futures volume on the bars; a strategy cannot request it in a backtest
+    missing = [t for t in registry.INDICATOR_TYPES if t not in exempt and f'("{t}",' not in source]
+    assert missing == []
+
+
+def test_1d_fvg_data_is_not_vacuous() -> None:
+    """The 1d data forms gaps early and more than show_last (10) of them later, so a leak would show."""
+    candles = random_days([MON, TUE], seed=3, start_price=22000.0, vol=6.0)
+    formed = registry.compute(candles_to_frame(candles), "fvg", registry.validate_params("fvg", {}))
+    at = np.flatnonzero(~np.isnan(formed["bull_top"]) | ~np.isnan(formed["bear_top"]))
+    assert (at < 60).any()
+    assert (at >= 200).sum() > 10
 
 
 def test_the_context_has_no_public_attribute_holding_the_future() -> None:
