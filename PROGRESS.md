@@ -865,3 +865,10 @@ one (below).
   first subscribed as the ATM moved, not gaps. Reconcile: 9 Oct `final` (0 differences on all three), 12 Oct
   `intraday_reconciled` (Nifty, VIX 0 differences; 48704 1 of 12 expected: the 09:15 futures bar, as on 9 Oct).
   Option capture 15:45: 13 Oct expiry, 18 strikes, 36 stored, 0 empty, 0 failed.
+- **End-of-day check, after the close (12 Oct).** An exit-minute difference caused by fill-dependent stop or target
+  levels is now a "fill-driven level difference": the same contract and exit reason, two different levels (each
+  side's own fill), and the bar at the earlier exit reached only the earlier side's level. It goes to the check's
+  `fill_driven` list with both levels and that bar (option bars for a premium level, index bars for an index level),
+  not to `differences`. Rechecked from the saved file, slot 3's 12 Oct case is now 0 differences and 1 fill-driven
+  (premium target 124.25 vs 123.76; 22500 PE 10:50 high 123.85). The saved day files were not rewritten. Backend
+  1417 passed, 1 skipped.

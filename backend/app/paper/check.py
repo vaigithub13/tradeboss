@@ -8,10 +8,15 @@ Trades are matched one to one on the direction and the fill minute, and compared
 the exit reason (M1, review 2026-10-11). A backtest trade with no paper trade is a status difference: the paper
 signal's own status and note when paper decided it but did not fill (unfilled, after the square-off), otherwise the
 bar reason (a live gap, a different bar, or the same bar with a different state).
+
+A stop or target set from each side's own entry fill is two levels, paper's and the backtest's. When only the exit
+minute differs and the bar at the earlier exit crossed only the earlier side's level, the difference is a
+"fill-driven level difference" (12 Oct, slot 3): kept apart from the real differences, with both levels and that bar.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Callable
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
@@ -73,6 +78,57 @@ def _bar_of(row: dict[str, Any], step: int, basis: str) -> int:
 
 _SIDE = {"LONG": "BUY", "SHORT": "SELL"}
 _COMPARED = ("contract", "exit_time", "exit_reason")
+FILL_DRIVEN = "fill-driven level difference"
+_LEVELS = frozenset({"premium_target", "premium_stop", "index_target", "index_stop"})
+
+#: (contract name, minute) -> the contract's 1m (open, high, low, close), or None
+OptionBar = Callable[[str, int], "tuple[float, float, float, float] | None"]
+#: minute -> the index's 1m (open, high, low, close), or None
+IndexBar = Callable[[int], "tuple[float, float, float, float] | None"]
+
+
+def _above(name: str, direction: str) -> bool:
+    """Is the level above the entry? A premium level is on a bought option; an index level on the position."""
+    return name.endswith("target") if (name.startswith("premium") or direction == "LONG") else name.endswith("stop")
+
+
+def _crossed(level: float, ohlc: tuple[float, ...], *, above: bool) -> bool:
+    """Did this 1m (open, high, low, close) reach the level?"""
+    return ohlc[1] >= level if above else ohlc[2] <= level
+
+
+def _fill_driven(live: dict[str, Any], bt: dict[str, Any], *, option_bar: OptionBar | None,
+                 index_bar: IndexBar | None) -> dict[str, Any] | None:
+    """The level and crossing bar when the exit minutes differ only because the two fills set two levels."""
+    name = str(live.get("exit_reason_raw"))
+    if name not in _LEVELS or bt.get("exit_reason_raw") != name:
+        return None
+    paper_level, bt_level = live.get(name), bt.get(name)
+    if paper_level is None or bt_level is None or abs(float(paper_level) - float(bt_level)) <= PRICE_TOLERANCE:
+        return None
+    paper_minute, bt_minute = _minute(live["exit_time"]), _minute(bt["exit_time"])
+    first = "paper" if paper_minute < bt_minute else "backtest"
+    minute = min(paper_minute, bt_minute)
+    if name.startswith("premium"):
+        of, ohlc = str(live["contract"]), None if option_bar is None else option_bar(str(live["contract"]), minute)
+    else:
+        of, ohlc = "index", None if index_bar is None else index_bar(minute)
+    if ohlc is None:
+        return None
+    first_level, other_level = (paper_level, bt_level) if first == "paper" else (bt_level, paper_level)
+    above = _above(name, str(live["direction"]))
+    if not _crossed(float(first_level), ohlc, above=above) or _crossed(float(other_level), ohlc, above=above):
+        return None
+    o, h, lo, c = (float(x) for x in ohlc)
+    extreme = ("high", h) if above else ("low", lo)
+    return {
+        "level": {"name": name, "paper": float(paper_level), "backtest": float(bt_level)},
+        "crossing_bar": {"time": _hhmm(minute), "of": of, "open": o, "high": h, "low": lo, "close": c,
+                         "crossed": first},
+        "reason": (f"{FILL_DRIVEN}: {name} paper {float(paper_level):g}, backtest {float(bt_level):g}; "
+                   f"{of} {_hhmm(minute)} {extreme[0]} {extreme[1]:g} reached only the {first}'s level "
+                   f"(exit paper {_hhmm(paper_minute)}, backtest {_hhmm(bt_minute)})"),
+    }
 
 
 def _shown(field: str, value: Any) -> str:
@@ -91,10 +147,14 @@ def compare_trades(
     incomplete: set[int],
     step: int,
     basis: str = "decision",
+    option_bar: OptionBar | None = None,
+    index_bar: IndexBar | None = None,
 ) -> list[dict[str, Any]]:
     """Trade-report rows (app/exits/report.py) of paper and of the backtest, matched one to one on the direction and
     the fill minute. Each difference: {time (fill, HH:MM IST), side, source (the side that has the trade, or both),
-    fields (status, contract, exit_time, exit_reason), reason, live, backtest}. Empty when they agree."""
+    kind ("difference", or FILL_DRIVEN with level and crossing_bar), fields (status, contract, exit_time,
+    exit_reason), reason, live, backtest}. Empty when they agree. `option_bar` and `index_bar` give the 1m bars a
+    fill-driven level difference is read on; without them every difference is a real one."""
     open_live = sorted(live, key=lambda r: int(r["fill_time"]))
     diffs: list[dict[str, Any]] = []
     for b in sorted(backtest, key=lambda r: int(r["fill_time"])):
@@ -114,8 +174,14 @@ def compare_trades(
             if fields:
                 reason = "; ".join(
                     f"{f}: paper {_shown(f, match.get(f))}, backtest {_shown(f, b.get(f))}" for f in fields)
-                diffs.append({"time": _hhmm(minute), "side": side, "source": "both", "fields": fields,
-                              "reason": reason, "live": match, "backtest": b})
+                driven = _fill_driven(match, b, option_bar=option_bar, index_bar=index_bar) if fields == [
+                    "exit_time"] else None
+                if driven is not None:
+                    diffs.append({"time": _hhmm(minute), "side": side, "source": "both", "kind": FILL_DRIVEN,
+                                  "fields": fields, **driven, "live": match, "backtest": b})
+                else:
+                    diffs.append({"time": _hhmm(minute), "side": side, "source": "both", "kind": "difference",
+                                  "fields": fields, "reason": reason, "live": match, "backtest": b})
             continue
         bar = _bar_of(b, step, basis)
         decided = next((s for s in signals if s.get("side") == side and s.get("status") != "filled" and (
@@ -125,12 +191,13 @@ def compare_trades(
             reason = f"paper {decided.get('status')}" + (f": {note}" if note else "")
         else:
             reason = _reason(bar, "backtest", live_bars=live_bars, bt_bars=bt_bars, incomplete=incomplete)
-        diffs.append({"time": _hhmm(minute), "side": side, "source": "backtest", "fields": ["status"],
+        diffs.append({"time": _hhmm(minute), "side": side, "source": "backtest", "kind": "difference",
+                      "fields": ["status"],
                       "reason": reason, "live": decided, "backtest": b})
     for r in open_live:
         bar = _bar_of(r, step, basis)
         diffs.append({"time": _hhmm(_minute(r["fill_time"])), "side": _SIDE[r["direction"]], "source": "live",
-                      "fields": ["status"],
+                      "kind": "difference", "fields": ["status"],
                       "reason": _reason(bar, "live", live_bars=live_bars, bt_bars=bt_bars, incomplete=incomplete),
                       "live": r, "backtest": None})
     return sorted(diffs, key=lambda d: (d["time"], d["side"]))
@@ -235,6 +302,44 @@ def backtest_report(
     return rows, warnings
 
 
+_CONTRACT = re.compile(r"^\S+ (\d+(?:\.\d+)?) (CE|PE) (\d{2}) ([A-Z]{3}) (\d{2})$")
+
+
+def _option_bars(tape: Any) -> OptionBar:
+    """1m bars of a contract by its name (`NIFTY 22500 PE 13 OCT 26`), from the tape the backtest priced with."""
+    from app.options.contract import MONTHS
+    from app.options.history import default_history_store
+
+    source = tape if tape is not None else default_history_store()
+    bar_at = getattr(source, "bar_at", None)
+
+    def get(contract: str, minute: int) -> tuple[float, float, float, float] | None:
+        m = _CONTRACT.match(contract)
+        if bar_at is None or m is None or m.group(4) not in MONTHS:
+            return None
+        expiry = date(2000 + int(m.group(5)), MONTHS.index(m.group(4)) + 1, int(m.group(3)))
+        return bar_at(expiry, float(m.group(1)), m.group(2), minute)
+
+    return get
+
+
+def _index_bars(store: CandleStore, symbol: str, day: date) -> IndexBar:
+    """The index's 1m bars of the day, loaded when first asked for."""
+    bars: dict[int, tuple[float, float, float, float]] | None = None
+
+    def get(minute: int) -> tuple[float, float, float, float] | None:
+        nonlocal bars
+        if bars is None:
+            start = int(datetime(day.year, day.month, day.day, tzinfo=IST).timestamp())
+            rows, _ = store.load(symbol, from_time=start, to_time=start + 86_400,
+                                 session_types=DEFAULT_INCLUDED_SESSION_TYPES)
+            bars = {int(r["time"]): (float(r["open"]), float(r["high"]), float(r["low"]), float(r["close"]))
+                    for r in rows}
+        return bars.get(minute)
+
+    return get
+
+
 def end_of_day_check(
     *,
     day: date,
@@ -250,24 +355,27 @@ def end_of_day_check(
     basis: str = "decision",
     tape: Any = None,
 ) -> dict[str, Any]:
-    """Paper's trades (`live_report`, its trade-report rows) and decisions (`signals`) against the backtest's."""
+    """Paper's trades (`live_report`, its trade-report rows) and decisions (`signals`) against the backtest's. A
+    fill-driven level difference goes to `fill_driven`, not `differences`."""
     decisions = [s for s in signals if s.get("side") in ("BUY", "SELL") and s.get("time") is not None]
     try:
         backtest, warnings = backtest_report(store=store, symbol=symbol, day=day, strategy=strategy, params=params,
                                              timeframe=timeframe, tape=tape)
     except Exception as exc:  # noqa: BLE001 - the check is a report; it never breaks the reconcile
         return {"day": day.isoformat(), "error": f"{type(exc).__name__}: {exc}", "live_signals": len(decisions),
-                "live_trades": len(live_report), "differences": []}
+                "live_trades": len(live_report), "differences": [], "fill_driven": []}
     diffs = compare_trades(live_report, decisions, backtest, live_bars=live_bars,
                            bt_bars=_day_bars(store, symbol, day, timeframe), incomplete=incomplete,
-                           step=60 * int(timeframe[:-1]), basis=basis)
+                           step=60 * int(timeframe[:-1]), basis=basis, option_bar=_option_bars(tape),
+                           index_bar=_index_bars(store, symbol, day))
     return {
         "day": day.isoformat(),
         "live_signals": len(decisions),
         "live_trades": len(live_report),
         "backtest_signals": len(backtest),
         "backtest_trades": len(backtest),
-        "differences": diffs,
+        "differences": [d for d in diffs if d["kind"] != FILL_DRIVEN],
+        "fill_driven": [d for d in diffs if d["kind"] == FILL_DRIVEN],
         "warnings": warnings,
         "compared": list(("status",) + _COMPARED + ("fill_minute",)),
     }
