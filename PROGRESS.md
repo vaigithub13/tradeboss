@@ -872,3 +872,8 @@ one (below).
   not to `differences`. Rechecked from the saved file, slot 3's 12 Oct case is now 0 differences and 1 fill-driven
   (premium target 124.25 vs 123.76; 22500 PE 10:50 high 123.85). The saved day files were not rewritten. Backend
   1417 passed, 1 skipped.
+- **Stored checks recomputed (12 Oct, `scripts/paper_recheck_eod.py`, commit da1450f).** Every live day file from 8 Oct,
+  all slots (10 files; the two 8 Oct replays have no check): only `eod_check` replaced, with `recomputed` {on, commit};
+  every other key checked identical against a backup. Slot 3 12 Oct: 1 difference became 0 differences and 1
+  fill-driven. 8 and 9 Oct (slots 1-4) held the old signal-level check (written before the 11 Oct trade-level
+  check); now trade-level, still 0 differences and 0 fill-driven. The other 12 Oct files: unchanged.
