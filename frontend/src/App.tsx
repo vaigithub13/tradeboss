@@ -18,6 +18,7 @@ import { PaperTrades } from "./panels/PaperTrades";
 import { usePaperTradesStore } from "./store/paperTradesStore";
 import { paperMarkers, type PaperSignal } from "./paper/present";
 import { usePaperStore } from "./store/paperStore";
+import { usePaperAlerts } from "./paper/useAlerts";
 import { SessionsMenu } from "./panels/SessionsMenu";
 import { SymbolSelector } from "./panels/SymbolSelector";
 import { ReplayBar, useReplayClock } from "./replay/ReplayBar";
@@ -132,6 +133,7 @@ export default function App() {
   const replayActive = useReplayStore((s) => s.active);
   const replayCursorTime = useReplayStore((s) => s.cursor);
   useReplayClock();
+  usePaperAlerts();
   const setPanelOpen = useBacktestStore((s) => s.setPanelOpen);
   const [pineOpen, setPineOpen] = useState(false);
   const [analysisOpen, setAnalysisOpen] = useState(false);

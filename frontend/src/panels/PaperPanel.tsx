@@ -4,9 +4,11 @@ import { PAPER_SLOTS, fetchPaperWeek, type PaperStatus, type PaperWeek } from ".
 import { EXIT_RULES, SLOT_DEFAULTS, exitLabel, formatRupees, markLine, paperRows, parseParams, startParams } from "../paper/present";
 import { exitCountsLine } from "../report/present";
 import { TradeReport } from "../report/TradeReport";
+import { useAlertStore } from "../store/alertStore";
 import { usePaperStore } from "../store/paperStore";
 import { usePaperTradesStore } from "../store/paperTradesStore";
 import { useDragResize } from "../ui/useDragResize";
+import { playAlertSound, unlockAudio } from "../paper/sounds";
 
 const maxWidth = () => Math.max(320, Math.floor(window.innerWidth * 0.7));
 
@@ -14,20 +16,13 @@ const STRATEGIES = [
   { name: "log_xz", label: "Log XZ (RMA 14, 5m)" },
   { name: "price_channel", label: "Price Channel (length 20, 5m)" },
 ];
-const POLL_MS = 3000;
 
 /** Live signals (paper): four strategies side by side on the live feed, each with its own position and P&L. No orders.
- * Slots 1 and 2 are the week's comparison (no exits); 3 and 4 default to the same strategies with 1:2 premium exits. */
+ * Slots 1 and 2 are the week's comparison (no exits); 3 and 4 default to the same strategies with 1:2 premium exits.
+ * The status poll and the trade alerts run in App (usePaperAlerts), so they go on while this panel is closed. */
 export function PaperPanel() {
   const status = usePaperStore((s) => s.status);
   const pollError = usePaperStore((s) => s.errors[""] ?? null);
-  const refresh = usePaperStore((s) => s.refresh);
-
-  useEffect(() => {
-    void refresh();
-    const id = window.setInterval(() => void refresh(), POLL_MS);
-    return () => window.clearInterval(id);
-  }, [refresh]);
 
   const disabled = status?.state === "disabled";
   const tradesOpen = usePaperTradesStore((s) => s.open);
@@ -58,6 +53,7 @@ export function PaperPanel() {
         </div>
         <p className="text-white/50">No orders are sent. Fills are paper: live quotes, or the model flagged as modelled.</p>
       </div>
+      <AlertControls />
       {pollError && <div className="text-red-400">{pollError}</div>}
       {disabled && <div className="text-yellow-300">The live feed is off, so paper trading cannot run.</div>}
       {PAPER_SLOTS.map((slot) => (
@@ -200,6 +196,76 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
         </tbody>
       </table>
       <TradeReport rows={status?.report ?? []} counts={summary?.exits} />
+    </section>
+  );
+}
+
+/** Sound and notification alerts for live paper entries and exits. */
+function AlertControls() {
+  const soundOn = useAlertStore((s) => s.soundOn);
+  const volume = useAlertStore((s) => s.volume);
+  const slots = useAlertStore((s) => s.slots);
+  const setSoundOn = useAlertStore((s) => s.setSoundOn);
+  const setVolume = useAlertStore((s) => s.setVolume);
+  const setSlot = useAlertStore((s) => s.setSlot);
+  const [permission, setPermission] = useState<string>(() =>
+    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  );
+
+  const enable = async () => {
+    setSoundOn(await unlockAudio());
+    if (typeof Notification !== "undefined" && Notification.permission === "default") {
+      setPermission(await Notification.requestPermission());
+    }
+  };
+
+  return (
+    <section className="flex flex-col gap-2 rounded border border-white/10 p-2" aria-label="Trade alerts">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="font-semibold text-white">Alerts</span>
+        {soundOn ? (
+          <span className="text-emerald-300">sounds on</span>
+        ) : (
+          <span className="rounded bg-amber-500/20 px-1.5 text-amber-300">sounds OFF</span>
+        )}
+        {!soundOn && (
+          <button type="button" className="rounded border border-amber-400/60 px-2 py-0.5 text-amber-200" onClick={() => void enable()}>
+            Enable sounds
+          </button>
+        )}
+        <span className="text-white/50">
+          notifications: {permission === "granted" ? "on" : permission === "denied" ? "blocked in the browser" : permission === "unsupported" ? "not supported" : "off"}
+        </span>
+      </div>
+      <label className="flex items-center gap-2">
+        Volume
+        <input
+          type="range"
+          min={0}
+          max={100}
+          aria-label="Alert volume"
+          value={Math.round(volume * 100)}
+          onChange={(e) => setVolume(Number(e.target.value) / 100)}
+        />
+        <span className="w-8 tabular-nums">{Math.round(volume * 100)}%</span>
+      </label>
+      <div className="flex flex-wrap items-center gap-3">
+        {PAPER_SLOTS.map((slot) => (
+          <label key={slot} className="flex items-center gap-1">
+            <input type="checkbox" checked={slots[slot] !== false} onChange={(e) => setSlot(slot, e.target.checked)} />
+            Slot {slot}
+          </label>
+        ))}
+      </div>
+      <div className="flex flex-wrap gap-2">
+        <button type="button" className="rounded border border-white/15 px-2 py-0.5 disabled:opacity-40" disabled={!soundOn} onClick={() => playAlertSound("entry", volume)}>
+          Test entry sound
+        </button>
+        <button type="button" className="rounded border border-white/15 px-2 py-0.5 disabled:opacity-40" disabled={!soundOn} onClick={() => playAlertSound("exit", volume)}>
+          Test exit sound
+        </button>
+      </div>
+      <div className="text-white/40">Live trades only: never a replay, or the catch-up of a late Start.</div>
     </section>
   );
 }

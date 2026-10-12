@@ -877,3 +877,11 @@ one (below).
   every other key checked identical against a backup. Slot 3 12 Oct: 1 difference became 0 differences and 1
   fill-driven. 8 and 9 Oct (slots 1-4) held the old signal-level check (written before the 11 Oct trade-level
   check); now trade-level, still 0 differences and 0 fill-driven. The other 12 Oct files: unchanged.
+- **Paper alerts (12 Oct, after the close).** A sound and a browser notification for each live paper entry (an option
+  bought: a rising chime of about 2 s, played twice) and exit (an option sold: a low triple bell), made with the Web
+  Audio API. Notification: slot, BUY/SELL, contract, price; exits also the reason and net. Panel: "Enable sounds" (one
+  click per page session; "sounds OFF" until then), volume, a switch per slot (all on by default), "Test entry sound"
+  and "Test exit sound"; volume and switches remembered in the browser. Never for a replay run or for what a late
+  Start's catch-up decided (marked `replay`), nor for what a slot already had on the first poll after a page load or
+  after it became running. The status poll moved from the panel to App, so alerts go on while the panel is closed.
+  Frontend 370 passed, typecheck clean, build OK.
