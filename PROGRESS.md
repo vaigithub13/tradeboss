@@ -834,3 +834,34 @@ unchanged.
   (3 MB, 9 Oct, built by `scripts/make_paper_fixture.py`) lets the paper-vs-backtest and worker parity tests run on a
   clean checkout. Backend 1410 passed, 1 skipped (7d, no contract note); a copy with no `data/` and no `.env`: 1360
   passed, 51 skipped (the real-data layers). Frontend 355 passed, typecheck clean, build OK.
+
+## 12 Oct 2026: forward-test day 3 (four slots)
+
+All four slots started at 08:40 (before the feed, so the new off-loop Start had no frames to catch up on), warm
+500 bars, 75 closed bars each, no incomplete, late-after-gap or given-up bars; every signal and trade `live`, every
+premium leg a real quote (0 modelled). Settings unchanged. End-of-day check: slots 1, 2 and 4 no differences; slot 3
+one (below).
+
+| slot | strategy | trades | target / stop / reversal / square-off | net ₹ | live days to date net ₹ |
+|---|---|---:|---|---:|---:|
+| 1 | Log XZ | 3 | 0 / 0 / 2 / 1 | +7,983.85 | +26,078.14 (7 trades: 8, 9, 12 Oct; 0 / 0 / 4 / 3) |
+| 2 | Price Channel 20 | 1 | 0 / 0 / 0 / 1 | +7,222.31 | +18,299.44 (5: 8, 9, 12 Oct; 0 / 0 / 2 / 3) |
+| 3 | Log XZ, 1:2 premium | 3 | 2 / 1 / 0 / 0 | +2,891.14 | +11,027.66 (6: 9, 12 Oct; 4 / 1 / 1 / 0) |
+| 4 | Price Channel 20, 1:2 premium | 1 | 0 / 1 / 0 / 0 | −1,084.95 | +911.43 (4: 9, 12 Oct; 1 / 2 / 0 / 1) |
+
+- Trades (13 Oct expiry, 1 lot of 65): Log XZ 22600 PE 09:21 @ 84.15 (slot 1 reversal 09:26 @ 126.75, +2,703.51;
+  slot 3 target 09:23:35 @ 117.30, +1.91R), 22550 CE 09:26 @ 101.80 (slot 1 reversal 09:51 @ 79.00; slot 3 stop
+  09:40:10 @ 81.60, −1.04R), 22500 PE 09:51 @ 88.75 (slot 1 square-off @ 194.85, +6,822.38; slot 3 target 10:51:33 @
+  123.20, +1.88R). Price Channel 22500 PE 09:24 @ 82.60 (slot 2 square-off @ 194.85, +7,222.31; slot 4 stop 09:28:38
+  @ 66.80, −1.01R). Nifty 22586 at the first fill, 22316.85 at the square-off.
+- Slot 3 difference: the 09:51 PE's exit minute, paper 10:51, backtest 10:50 (same contract, fill minute and reason).
+  Fill-price-driven levels again: paper's real entry 88.75 vs the model's 88.40 put the +40% target at 124.25 vs
+  123.76; the 10:50 bar of 22500 PE reached 123.85, between the two. Net +2,174.07 vs +2,220.19.
+- Spreads 12 Oct, ATM, DTE 1: CE median 0.20 / p90 0.25, PE 0.20 / 0.30; one-side 1-lot fill 0.10 (both), round
+  trip ₹13.00. Since 6 Oct (DTE 0, 4, 3, 2, 1): mean one-side 0.1225, round trip ₹15.93. Paper's own legs today:
+  0.075-0.16 points on average per slot.
+- Health: one backend 08:28-16:11, feed live 08:55-15:40 (and 15:50-16:00) with no reconnect; 0 warnings, 0 errors,
+  no sandbox or worker errors (no user strategy ran). Option backfills at 09:54, 11:00, 11:17, 14:29 were contracts
+  first subscribed as the ATM moved, not gaps. Reconcile: 9 Oct `final` (0 differences on all three), 12 Oct
+  `intraday_reconciled` (Nifty, VIX 0 differences; 48704 1 of 12 expected: the 09:15 futures bar, as on 9 Oct).
+  Option capture 15:45: 13 Oct expiry, 18 strikes, 36 stored, 0 empty, 0 failed.
