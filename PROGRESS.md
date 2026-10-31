@@ -885,3 +885,49 @@ one (below).
   Start's catch-up decided (marked `replay`), nor for what a slot already had on the first poll after a page load or
   after it became running. The status poll moved from the panel to App, so alerts go on while the panel is closed.
   Frontend 370 passed, typecheck clean, build OK.
+
+## 31 Oct 2026: catch-up after 13-30 Oct (TradeBoss off)
+
+No live sessions 13-30 Oct: 13 trading days (13-16, 19, 21-23, 26-30 Oct; 20 Oct Dussehra). Saturday, outside the freeze.
+
+- **Candles.** Nifty 50 and India VIX 1m 3-30 Oct fetched (7,125 bars each); the Nov (61471) and Dec (58875) futures
+  through 30 Oct; the October future (expired 27 Oct) through the expired-instrument API into
+  `NSE_FO_48704_27_10_2026` (27 Jul-27 Oct). Every vacation day: 375 bars, `normal`, on all five. No source_empty in
+  the period (the list's entries are 2024-25 contracts, 4 Oct (a Sunday) and the October future before its listing).
+- **Reconcile.** 12 Oct NSE_FO|48704 could not go `final`: after its expiry the historical endpoint answers "Invalid
+  Instrument key". `reconcile_missed` now fetches a stored contract whose expiry has passed from the expired-instrument
+  endpoint (`NSE_FO|48704|27-10-2026`). Run by hand: 385 official bars, 0 differences, 10 expected (15:30-15:39);
+  0 days not final. The vacation days are history-API bars (nothing live-built to reconcile). The running session
+  backend does not have the fix until its next start.
+- **Option history.** Every vacation day, ATM ±5 over the day's range, nearest weekly (13, 19, 27 Oct through the
+  expired API; 3 Nov listed): 450 contract-days, 0 empty, 0 not listed, 0 failed, 385 bars each, lot 65. Stored with
+  `capture_session`, so labelled `live-recorded` like the nightly capture.
+- **Instrument snapshots.** Missed trading days: 13, 14, 15, 16, 19, 21, 22, 23, 28, 29, 30 Oct (DNS failures from 14 Oct;
+  no run logged on 13 Oct). Kept: 17, 26, 27, 31 Oct. Lot 65 and strike step 50 in every snapshot and expiry, as in
+  the lot and step tables. The 17 Oct snapshot lists the 19 Oct weekly (Dussehra shift).
+- **Calendars.** Oct-Nov holidays present (20 Oct, 10 Nov, 24 Nov). Muhurat 2026 (Sun 8 Nov) is not in
+  `MUHURAT_DATES`; proposed, waiting for the user.
+- **Vacation backtest ("backtest (vacation)", not live paper).** The four slots' settings (5m, 1 lot, live timing,
+  real premiums, slippage 0.2), one run per day as the end-of-day check (`backtest_report`), forward period only
+  (13 Oct warms on about 50 bars of 1 Oct, indicators only). Every premium leg real. Saved as
+  `data/validation/backtest_vacation_2026-10-13_2026-10-30.json`. Check of the method on the live days: slot 1
+  backtest 9,428.94 / 8,558.16 / 8,035.80 vs paper 9,516.62 / 8,577.67 / 7,983.85.
+
+| slot | strategy | source | days | trades | win % | net ₹ | max DD ₹ | exits |
+|---|---|---|---:|---:|---:|---:|---:|---|
+| 1 | Log XZ | live paper | 3 | 7 | 85.7 | +26,078.14 | −1,542.04 | reversal 4 / square-off 3 |
+| 1 | Log XZ | backtest (vacation) | 13 | 47 | 21.3 | −24,807.12 | −39,537.23 | reversal 34 / square-off 13 |
+| 2 | Price Channel 20 | live paper | 3 | 5 | 80.0 | +18,299.44 | −1,965.20 | reversal 2 / square-off 3 |
+| 2 | Price Channel 20 | backtest (vacation) | 13 | 34 | 38.2 | −10,737.85 | −27,377.85 | reversal 21 / square-off 13 |
+| 3 | Log XZ, 1:2 premium | live paper | 2 | 6 | 83.3 | +11,027.66 | −1,373.37 | target 4 / stop 1 / reversal 1 |
+| 3 | Log XZ, 1:2 premium | backtest (vacation) | 13 | 47 | 23.4 | −22,210.14 | −29,050.72 | target 10 / stop 24 / reversal 8 / square-off 5 |
+| 4 | Price Channel 20, 1:2 premium | live paper | 2 | 4 | 50.0 | +911.43 | −2,401.03 | target 1 / stop 2 / square-off 1 |
+| 4 | Price Channel 20, 1:2 premium | backtest (vacation) | 13 | 34 | 41.2 | +6,224.62 | −8,202.21 | target 12 / stop 18 / square-off 4 |
+
+Mixed sources, in date order (not a paper result): slot 1 +1,271.02 (DD −39,537.23), slot 2 +7,561.59 (−27,377.85),
+slot 3 −11,182.48 (−29,050.72), slot 4 +7,136.05 (−8,575.96).
+
+- **Health.** Backend 1422 passed, 1 skipped (2 new reconcile tests); frontend 370 passed (paper slots, alerts and
+  sounds, Trades view); typecheck clean; build OK. Upstox data token valid (334 days). Paper slots 1-4 stopped, ready.
+  Snapshot 31 Oct present; launchd snapshot job loaded. Monday 2 Nov: weekly expiry 3 Nov listed (lot 65); start
+  a fresh `npm run session` (it loads the reconcile fix).

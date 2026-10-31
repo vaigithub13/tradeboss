@@ -3,7 +3,8 @@
 * 15:45 IST (`reconcile_today`): today's INTRADAY candles replace what we stored. The day is
   marked ``intraday_reconciled``. Retried until 16:30 while the fetch is empty or fails.
 * Next startup, or 09:00 (`reconcile_missed`): HISTORICAL candles replace the day again and
-  it is marked ``final``. Any day that is not final is retried daily.
+  it is marked ``final``. Any day that is not final is retried daily. A contract that has expired
+  since is fetched from the expired-instrument endpoint.
 
 Futures minutes 15:30-15:39, and open-interest-only changes on minutes whose prices match,
 are expected. They are logged apart from differences and are not counted as differences.
@@ -20,6 +21,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any, Protocol
 
+from app.data.history import read_meta, symbol_dir_name
 from app.live.backfill import raw_to_bars
 from app.live.engine import LiveEngine, segment_of
 from app.live.minutelog import append_jsonl, reconcile_path
@@ -54,6 +56,25 @@ class ReconcileReport:
 
 def fetch_official(client: _Historical, key: str, day: date) -> list[Bar]:
     rows = client.historical_candles(key, day, day, unit="minutes", interval=1)
+    return raw_to_bars(parse_candles(rows), day, "official")
+
+
+def expired_key(candles_dir: Path, key: str, today: date) -> str | None:
+    """The expired-instrument key (NSE_FO|48704|27-10-2026) of a stored contract that expired before `today`.
+
+    Upstox refuses the listed key of an expired contract on the historical endpoint."""
+    expiry = read_meta(candles_dir / symbol_dir_name(key)).instrument.get("expiry")
+    if not isinstance(expiry, str):
+        return None
+    try:
+        when = date.fromisoformat(expiry)
+    except ValueError:
+        return None
+    return f"{key}|{when:%d-%m-%Y}" if when < today else None
+
+
+def fetch_official_expired(client: Any, expired: str, day: date) -> list[Bar]:
+    rows = client.expired_historical_candles(expired, day, day)
     return raw_to_bars(parse_candles(rows), day, "official")
 
 
@@ -257,7 +278,8 @@ def reconcile_missed(
         by_day.setdefault(day, []).append(rep)
         reports.append(rep)
         try:
-            official = fetch_official(client, key, day)
+            expired = expired_key(candles_dir, key, today)
+            official = fetch_official_expired(client, expired, day) if expired else fetch_official(client, key, day)
         except Exception as exc:  # noqa: BLE001
             rep.ok, rep.error = False, f"{type(exc).__name__}: {exc}"
             log.warning("historical reconcile %s %s failed: %s", day, key, exc)

@@ -9,7 +9,7 @@ from typing import Any
 
 import pytest
 
-from app.data.history import read_parquet, symbol_dir_name
+from app.data.history import SymbolMeta, read_parquet, symbol_dir_name, write_meta
 from app.data.importer import build_frame, write_parquet
 from app.data.store import CandleStore, set_overlay
 from app.live.backfill import fetch_backfill
@@ -19,7 +19,7 @@ from app.live.model import IST, MS_MIN, Bar, minute_of
 from app.live.overlay import LiveOverlay
 from app.live.persist import ReconcileState, is_stored, parquet_path, stored_day, upsert_bars
 from app.live.reconcile import compare_sets, reconcile_intraday_day, reconcile_missed, reconcile_today
-from app.upstox.client import UpstoxAuthError
+from app.upstox.client import UpstoxApiError, UpstoxAuthError
 
 FRI = date(2026, 10, 2)
 MON = date(2026, 10, 5)
@@ -281,6 +281,54 @@ def test_case8_several_days_and_instruments_are_each_reconciled_once(cdir: Path,
     assert sorted(c[1] for c in hist.calls) == sorted([d1, d2, d2])
     assert len(stored_day(cdir, KEY, d1)) == 375
 
+
+
+class ExpiredHistory(FakeHistory):
+    """Upstox after the contract expired: the listed key is refused, the expired-instrument endpoint answers."""
+
+    def __init__(self, by_day: dict[date, list[list[Any]]]) -> None:
+        super().__init__(by_day)
+        self.expired_calls: list[tuple[str, date, date]] = []
+
+    def historical_candles(self, key: str, from_date: date, to_date: date, *, unit: str = "minutes", interval: int = 1) -> list[Any]:
+        self.calls.append((key, from_date, to_date))
+        raise UpstoxApiError("Invalid Instrument key", status=400, code="UDAPI100011")
+
+    def expired_historical_candles(self, key: str, from_date: date, to_date: date, interval: str = "1minute") -> list[Any]:
+        self.expired_calls.append((key, from_date, to_date))
+        return list(self.by_day.get(from_date, []))
+
+
+def test_a_future_that_expired_before_its_historical_pass_is_reconciled_from_the_expired_endpoint(
+    cdir: Path, tmp_path: Path,
+) -> None:
+    """12 Oct 2026: the October future's day was intraday_reconciled, then the backend was off until after its
+    27 Oct expiry. The listed key was refused every day ("Invalid Instrument key") and the day could never be final."""
+    fo = "NSE_FO|48704"
+    raw = [{"t": m * MS_MIN, "open": 100.0, "high": 101.0, "low": 99.0, "close": 100.5, "volume": 1.0}
+           for m in range(M(9, 15), M(15, 30))]
+    df, _ = build_frame(raw, 1)
+    sdir = cdir / symbol_dir_name(fo)
+    write_parquet(df, sdir / "1m.parquet")
+    write_meta(sdir, SymbolMeta(instrument={"instrument_key": fo, "kind": "future", "expiry": "2026-10-27"}))
+    state = ReconcileState(tmp_path / "s")
+    state.mark_intraday(MON, fo)
+    hist = ExpiredHistory({MON: official_rows()})
+    reports = reconcile_missed(hist, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=date(2026, 10, 31))
+    assert hist.calls == [] and hist.expired_calls == [("NSE_FO|48704|27-10-2026", MON, MON)]
+    assert reports[0].ok and reports[0].official_bars == 375
+    assert state.status(MON, fo) == "final"
+    assert all(b.volume == 7.0 for b in stored_day(cdir, fo, MON).values())
+
+
+def test_a_listed_future_still_uses_the_historical_endpoint(cdir: Path, tmp_path: Path) -> None:
+    fo = "NSE_FO|48704"
+    write_meta(cdir / symbol_dir_name(fo), SymbolMeta(instrument={"instrument_key": fo, "kind": "future", "expiry": "2026-10-27"}))
+    state = ReconcileState(tmp_path / "s")
+    state.mark_intraday(MON, fo)
+    hist = FakeHistory({MON: official_rows()})
+    reconcile_missed(hist, candles_dir=cdir, log_dir=tmp_path / "rec", state=state, today=date(2026, 10, 6))
+    assert hist.calls == [(fo, MON, MON)] and state.status(MON, fo) == "final"
 
 # ---------------------------------------------------------------- marker file
 def test_reconcile_state_survives_a_corrupt_file_and_dedupes(tmp_path: Path) -> None:
