@@ -33,6 +33,7 @@ MUHURAT_DATES: frozenset[date] = frozenset(
         date(2023, 11, 12),
         date(2024, 11, 1),
         date(2025, 10, 21),
+        date(2026, 11, 8),  # NSE circular 149/2026, 19 Oct 2026 (CMTR76941; F&O FAOP76940): 14:20-15:30
     }
 )
 

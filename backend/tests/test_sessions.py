@@ -99,3 +99,9 @@ def test_known_muhurat_dates_from_sample_data() -> None:
         date(2024, 11, 1),
         date(2025, 10, 21),
     } <= MUHURAT_DATES
+
+
+def test_muhurat_2026_is_sunday_8_november() -> None:
+    """NSE circular 149/2026 (19 Oct 2026, CMTR76941 / FAOP76940): normal market 14:20-15:30 on Sun 8 Nov 2026."""
+    minutes = list(range(14 * 60 + 20, 15 * 60 + 30))
+    assert classify_session(date(2026, 11, 8), minutes, 1) == "muhurat"

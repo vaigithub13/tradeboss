@@ -905,8 +905,9 @@ No live sessions 13-30 Oct: 13 trading days (13-16, 19, 21-23, 26-30 Oct; 20 Oct
 - **Instrument snapshots.** Missed trading days: 13, 14, 15, 16, 19, 21, 22, 23, 28, 29, 30 Oct (DNS failures from 14 Oct;
   no run logged on 13 Oct). Kept: 17, 26, 27, 31 Oct. Lot 65 and strike step 50 in every snapshot and expiry, as in
   the lot and step tables. The 17 Oct snapshot lists the 19 Oct weekly (Dussehra shift).
-- **Calendars.** Oct-Nov holidays present (20 Oct, 10 Nov, 24 Nov). Muhurat 2026 (Sun 8 Nov) is not in
-  `MUHURAT_DATES`; proposed, waiting for the user.
+- **Calendars.** Oct-Nov holidays present (20 Oct, 10 Nov, 24 Nov; NSE/FAOP/71777). Muhurat 2026 added to
+  `MUHURAT_DATES` after the user approved: Sun 8 Nov 2026, normal market 14:20-15:30, NSE circular 149/2026 of 19 Oct
+  2026 (CMTR76941; F&O FAOP76940), read through summaries of the circular (the NSE PDF could not be downloaded here).
 - **Vacation backtest ("backtest (vacation)", not live paper).** The four slots' settings (5m, 1 lot, live timing,
   real premiums, slippage 0.2), one run per day as the end-of-day check (`backtest_report`), forward period only
   (13 Oct warms on about 50 bars of 1 Oct, indicators only). Every premium leg real. Saved as
@@ -927,7 +928,7 @@ No live sessions 13-30 Oct: 13 trading days (13-16, 19, 21-23, 26-30 Oct; 20 Oct
 Mixed sources, in date order (not a paper result): slot 1 +1,271.02 (DD −39,537.23), slot 2 +7,561.59 (−27,377.85),
 slot 3 −11,182.48 (−29,050.72), slot 4 +7,136.05 (−8,575.96).
 
-- **Health.** Backend 1422 passed, 1 skipped (2 new reconcile tests); frontend 370 passed (paper slots, alerts and
+- **Health.** Backend 1423 passed, 1 skipped (2 new reconcile tests, 1 Muhurat); frontend 370 passed (paper slots, alerts and
   sounds, Trades view); typecheck clean; build OK. Upstox data token valid (334 days). Paper slots 1-4 stopped, ready.
   Snapshot 31 Oct present; launchd snapshot job loaded. Monday 2 Nov: weekly expiry 3 Nov listed (lot 65); start
   a fresh `npm run session` (it loads the reconcile fix).
