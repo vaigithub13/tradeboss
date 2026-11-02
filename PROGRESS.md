@@ -932,3 +932,67 @@ slot 3 −11,182.48 (−29,050.72), slot 4 +7,136.05 (−8,575.96).
   sounds, Trades view); typecheck clean; build OK. Upstox data token valid (334 days). Paper slots 1-4 stopped, ready.
   Snapshot 31 Oct present; launchd snapshot job loaded. Monday 2 Nov: weekly expiry 3 Nov listed (lot 65); start
   a fresh `npm run session` (it loads the reconcile fix).
+
+## 2 Nov 2026: forward-test day 4 (four slots)
+
+Fresh `npm run session` at 08:35 (the old backend, up since the 31 Oct catch-up, stopped at 08:34), so the reconcile
+fix is loaded. All four slots warm 500 bars, 75 closed bars each, no incomplete, late-after-gap or given-up bars;
+every signal and trade `live`, every premium leg a real quote (0 modelled). Settings unchanged. End-of-day check:
+every slot 3 live vs 3 backtest trades, 0 differences, 0 fill-driven, no warnings.
+
+Trades (3 Nov expiry, DTE 1, 1 lot of 65). Signal is the bar's start; Log XZ fills at the next minute's market, Price
+Channel at its stop trigger inside the bar. Nifty at entry/exit is the trade's recorded index level (Log XZ: the
+signal bar's close; Price Channel: at the fill). Entry premium: paper's real quote / the backtest's (real bars,
+delta-adjusted for the stop entries, slippage 0.2).
+
+| slot | signal | trigger | fill | Nifty in | contract | entry real / bt | stop / target | exit | Nifty out | exit prem | reason | net ₹ | R |
+|---|---|---:|---|---:|---|---:|---|---|---:|---:|---|---:|---:|
+| 1 | 09:20 | 23253.05 | 09:26:00 | 23253.05 | 23250 CE | 102.45 / 102.40 | – | 12:51:00 | 23298.95 | 112.50 | reversal | +588.99 | – |
+| 1 | 12:45 | 23298.95 | 12:51:00 | 23298.95 | 23300 PE | 88.75 / 88.25 | – | 14:26:00 | 23283.35 | 101.40 | reversal | +759.79 | – |
+| 1 | 14:20 | 23283.35 | 14:26:00 | 23283.35 | 23300 CE | 62.55 / 62.80 | – | 15:15:00 | 23330.35 | 83.00 | square-off | +1,269.86 | – |
+| 2 | 09:30 | 23292.60 | 09:38:40 | 23292.60 | 23300 CE | 90.50 / 90.45 | – | 11:51:18 | 23287.25 | 74.70 | reversal | −1,086.18 | – |
+| 2 | 11:45 | 23287.25 | 11:51:18 | 23287.25 | 23300 PE | 101.75 / 101.03 | – | 14:36:00 | 23297.75 | 86.50 | reversal | −1,052.23 | – |
+| 2 | 14:30 | 23296.65 | 14:36:00 | 23297.75 | 23300 CE | 70.55 / 71.55 | – | 15:15:00 | 23330.35 | 83.00 | square-off | +749.62 | – |
+| 3 | 09:20 | 23253.05 | 09:26:00 | 23253.05 | 23250 CE | 102.45 / 102.40 | 81.96 / 143.43 | 09:51:31 | 23328.15 | 143.20 | target | +2,580.66 | +1.94 |
+| 3 | 12:45 | 23298.95 | 12:51:00 | 23298.95 | 23300 PE | 88.75 / 88.25 | 71.00 / 124.25 | 13:05:05 | 23259.50 | 121.40 | target | +2,057.30 | +1.78 |
+| 3 | 14:20 | 23283.35 | 14:26:00 | 23283.35 | 23300 CE | 62.55 / 62.80 | 50.04 / 87.57 | 14:44:12 | 23319.85 | 86.75 | target | +1,513.15 | +1.86 |
+| 4 | 09:30 | 23292.60 | 09:38:40 | 23292.60 | 23300 CE | 90.50 / 90.45 | 72.40 / 126.70 | 11:51:18 | 23287.25 | 74.70 | reversal | −1,086.18 | −0.92 |
+| 4 | 11:45 | 23287.25 | 11:51:18 | 23287.25 | 23300 PE | 101.75 / 101.03 | 81.40 / 142.45 | 12:03:29 | 23318.10 | 83.90 | stop | −1,220.91 | −0.92 |
+| 4 | 14:30 | 23296.65 | 14:36:00 | 23297.75 | 23300 CE | 70.55 / 71.55 | 56.44 / 98.77 | 15:15:00 | 23330.35 | 83.00 | square-off | +749.62 | +0.82 |
+
+| slot | strategy | trades | target / stop / reversal / square-off | net ₹ | live days to date net ₹ (8, 9, 12 Oct, 2 Nov) |
+|---|---|---:|---|---:|---:|
+| 1 | Log XZ | 3 | 0 / 0 / 2 / 1 | +2,618.64 | +28,696.78 (10 trades, 9 wins; 0 / 0 / 6 / 4) |
+| 2 | Price Channel 20 | 3 | 0 / 0 / 2 / 1 | −1,388.79 | +16,910.65 (8, 5 wins; 0 / 0 / 4 / 4) |
+| 3 | Log XZ, 1:2 premium | 3 | 3 / 0 / 0 / 0 | +6,151.11 | +17,178.77 (9, 8 wins; 7 / 1 / 1 / 0; from 9 Oct) |
+| 4 | Price Channel 20, 1:2 premium | 3 | 0 / 1 / 1 / 1 | −1,557.47 | −646.04 (7, 3 wins; 1 / 3 / 1 / 2; from 9 Oct) |
+
+The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
+
+- Paper vs backtest net: slot 1 +2,618.64 vs +2,667.35, slot 2 −1,388.79 vs −1,495.88, slot 3 +6,151.11 vs +6,357.45,
+  slot 4 −1,557.47 vs −1,799.49. Same contract, fill minute, exit minute and reason on every trade.
+- Fill-driven levels (no exit changed, so none is in `fill_driven`): slot 3's levels sit 0.05-0.35 points from the
+  backtest's (PE target 124.25 vs 123.55 from 88.75 vs 88.25); slot 4's 0.04-1.40 (PE stop 81.40 vs 80.82 from
+  101.75 vs 101.03; CE target 98.77 vs 100.17 from 70.55 vs 71.55, the stop entry filled 1 point under the model).
+- Premium exits in fast minutes: a traded price triggers, the sell is at the bid. Slot 3 13:05:05 PE target 124.25
+  sold 121.40 (mid 121.55; 23300 PE 13:05 bar 116.3-126.0; backtest 123.35), so +1.78R vs +1.93R. Slot 4 12:03:29 PE
+  stop 81.40 sold 83.90 (mid 83.975; 12:03 bar 92.85 / 94.0 / 78.3 / 93.0, a one-minute wick; backtest 80.62).
+- Spreads 2 Nov, ATM, DTE 1: CE median 0.20 / p90 0.25, PE 0.25 / 0.30; one-side 1-lot fill 0.10 (CE) / 0.125 (PE),
+  round trip ₹13.00 / ₹16.25. Since 6 Oct (6 days: DTE 0, 4, 3, 2, 1, 1): mean one-side 0.1208, round trip ₹15.71.
+  Paper's own legs today: 0.108-0.125 points on average per slot.
+- Reconcile: 2 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 volume 168,155 vs
+  179,530, and 13 expected: 3 OI and 15:30-15:39). 5-12 Oct all `final`; no "Invalid Instrument key" today (the fix
+  is loaded; no expired contract needed it). Option capture 15:45: 3 Nov expiry, 16 strikes, 32 stored, 0 empty, 0
+  failed.
+- Health: feed live 08:55-15:40 (and 15:50-16:00) with no reconnect; 0 warnings, 0 errors; the one traceback is the
+  16:14 Ctrl+C (`app.crash` logs the KeyboardInterrupt). Option backfills at 15:29 (54052, 54055, 54056, 54061) were
+  contracts first subscribed as the ATM moved. The page polled paper status every minute 09:00-15:30 (no gap), so
+  the alerts were running; whether the sounds played is browser-side and not logged. Snapshot: 2 Nov unchanged from
+  1 Nov (the launchd run on 1 Nov timed out; the backend saved 1 Nov at 21:13); launchd job loaded.
+  Backend 1423 passed, 1 skipped; frontend 370 passed.
+- **Open: weekend sessions.** The backend left running from 31 Oct treated Sat 31 Oct and Sun 1 Nov as sessions
+  (`market_info` reported open; recording 31 Oct started 12:39). 0 bars were persisted and no paper trade was made,
+  but the logs hold 58,569 (31 Oct) and 12,929 (1 Nov) "backfill still missing" warnings, and `reconcile.json` keeps
+  31 Oct `pending` for Nifty, VIX and 61471, retried at every start ("3 instrument-days, 0 ok" at 08:35 and 09:00).
+  A slot 1 1 Nov file (0 bars, `replay`) was written to `paper/replay/` at the 08:34 stop. Not changed; waiting on
+  the user.
