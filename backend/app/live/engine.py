@@ -21,6 +21,8 @@ know about:
   day or a listed special session). On an unlisted day only an accepted trade (dated that day, inside the session
   hours) opens the session, with an "unlisted session detected" warning. Without a calendar (replays, catch-up)
   market_info counts on any day.
+* SESSION WINDOW: with `EngineConfig.window`, each day's builders, cold-start gap, reconnect gap and session end use
+  that day's window (Muhurat 8 Nov 2026: 14:20-15:30), so no gap is created before a late open.
 
 `on_frame` is the ONLY entry point for data, so a recording replayed at any speed produces
 identical bars.
@@ -55,6 +57,8 @@ class EngineConfig:
     close_ms_of_day: int = CLOSE_MS
     #: our calendar: is this day a listed session? None = every day is (market_info decides)
     listed: Callable[[date], bool] | None = None
+    #: the day's session window, (open, close) IST minute of day, close exclusive; None = the fixed open/close above
+    window: Callable[[date], tuple[int, int]] | None = None
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,8 @@ class LiveEngine:
     def __init__(self, cfg: EngineConfig | None = None) -> None:
         self.cfg = cfg or EngineConfig()
         self.day: date | None = None
+        self.open_ms = self.cfg.open_ms_of_day  # the current day's window
+        self.close_ms = self.cfg.close_ms_of_day
         self.current_ts = 0
         self.builders: dict[str, CandleBuilder] = {}
         self.segments: dict[str, str] = {}
@@ -147,7 +153,7 @@ class LiveEngine:
             return
         if self._reconnected:
             self._reconnected = False
-            if ist_ms_of_day(frame.current_ts) >= self.cfg.open_ms_of_day and ist_date(frame.current_ts) == self.day:
+            if ist_ms_of_day(frame.current_ts) >= self.open_ms and ist_date(frame.current_ts) == self.day:
                 for b in self.builders.values():
                     if not b.ended:
                         b.begin_resume()
@@ -164,6 +170,7 @@ class LiveEngine:
         d = ist_date(current_ts)
         if self.day is None:
             self.day = d
+            self._set_window(d)
             return
         if d > self.day:
             self._roll_day(d)
@@ -182,6 +189,13 @@ class LiveEngine:
         self._ended = set()
         self._trading = False
         self.day = new_day
+        self._set_window(new_day)
+
+    def _set_window(self, day: date) -> None:
+        if self.cfg.window is None:
+            return
+        open_min, close_min = self.cfg.window(day)
+        self.open_ms, self.close_ms = open_min * 60_000, close_min * 60_000
 
     # ------------------------------------------------------------------ frames
     def _on_market_info(self, frame: Frame) -> None:
@@ -203,14 +217,14 @@ class LiveEngine:
                 key,
                 self.day,
                 BuilderConfig(
-                    open_ms_of_day=self.cfg.open_ms_of_day,
-                    close_ms_of_day=self.cfg.close_ms_of_day,
+                    open_ms_of_day=self.open_ms,
+                    close_ms_of_day=self.close_ms,
                     has_volume=seg not in INDEX_SEGMENTS,
                     has_oi="_FO" in seg,
                     open_volume_baseline=self.cfg.open_volume_baseline,
                 ),
             )
-            if ist_ms_of_day(frame.current_ts) >= self.cfg.open_ms_of_day:
+            if ist_ms_of_day(frame.current_ts) >= self.open_ms:
                 b.begin_resume()  # cold start mid-session: everything since the open is a gap
             self.builders[key] = b
         return b
@@ -266,7 +280,7 @@ class LiveEngine:
         end_by_ts = (
             trading
             and ist_date(frame.current_ts) == self.day
-            and ist_ms_of_day(frame.current_ts) >= self.cfg.close_ms_of_day + SESSION_END_GRACE_MS
+            and ist_ms_of_day(frame.current_ts) >= self.close_ms + SESSION_END_GRACE_MS
         )
         for key, b in self.builders.items():
             if b.ended:

@@ -22,10 +22,11 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from app.data.history import read_meta, symbol_dir_name
+from app.data.sessions import session_window
 from app.live.backfill import raw_to_bars
 from app.live.engine import LiveEngine, segment_of
 from app.live.minutelog import append_jsonl, reconcile_path
-from app.live.model import Bar, Diff, diff_fields, fmt_minute, ist_minute_of_day
+from app.live.model import Bar, Diff, diff_fields, fmt_minute, ist_date, ist_minute_of_day
 from app.live.persist import ReconcileState, is_stored, replace_day, stored_day
 from app.upstox.client import parse_candles
 
@@ -38,8 +39,8 @@ class _Historical(Protocol):
     def intraday_candles(self, instrument_key: str, *, unit: str = ..., interval: int = ...) -> list[Any]: ...
 
 
-# Futures keep printing through the closing auction. Those minutes are not session bars.
-_POST_CLOSE = range(15 * 60 + 30, 15 * 60 + 40)
+# Futures keep printing through the closing auction (10 minutes from the day's close). Not session bars.
+_POST_CLOSE_MINUTES = 10
 
 
 @dataclass
@@ -84,28 +85,39 @@ def fetch_intraday(client: _Historical, key: str, day: date) -> list[Bar]:
     return raw_to_bars(parse_candles(rows), day, "official")
 
 
+def _window_of(minute: int) -> tuple[int, int]:
+    """The session window of the minute's own day (Muhurat has its own)."""
+    return session_window(ist_date(minute * 60_000))
+
+
 def futures_post_close(key: str, minute: int) -> bool:
-    return "_FO" in segment_of(key) and ist_minute_of_day(minute) in _POST_CLOSE
+    close = _window_of(minute)[1]
+    return "_FO" in segment_of(key) and close <= ist_minute_of_day(minute) < close + _POST_CLOSE_MINUTES
+
+
+def before_open(minute: int) -> bool:
+    return ist_minute_of_day(minute) < _window_of(minute)[0]
 
 
 def split_expected(key: str, diffs: list[Diff]) -> tuple[list[Diff], list[Diff]]:
     """Real differences, then the ones 5 Oct showed are normal.
 
-    Expected: a futures bar that exists only in official data at 15:30-15:39, and an
-    open-interest change on a minute whose prices (and volume) already match.
+    Expected: a futures bar that exists only in official data in the 10 minutes after the day's close (15:30-15:39),
+    a bar that exists only in official data before the day's open (a pre-open minute), and an open-interest change
+    on a minute whose prices (and volume) already match.
     """
     real: list[Diff] = []
     expected: list[Diff] = []
     for d in diffs:
         oi_only = d.kind == "changed" and bool(d.fields) and set(d.fields) <= {"oi"}
-        post_close = d.kind == "added" and futures_post_close(key, d.minute)
-        (expected if oi_only or post_close else real).append(d)
+        outside = d.kind == "added" and (futures_post_close(key, d.minute) or before_open(d.minute))
+        (expected if oi_only or outside else real).append(d)
     return real, expected
 
 
 def session_bars(key: str, bars: list[Bar]) -> list[Bar]:
-    """Official bars we keep. Futures 15:30-15:39 stay out of the store."""
-    return [b for b in bars if not futures_post_close(key, b.minute)]
+    """Official bars we keep. Futures after the close (15:30-15:39) and minutes before the day's open stay out."""
+    return [b for b in bars if not futures_post_close(key, b.minute) and not before_open(b.minute)]
 
 
 def compare_sets(key: str, ours: dict[int, Bar], official: dict[int, Bar]) -> list[Diff]:

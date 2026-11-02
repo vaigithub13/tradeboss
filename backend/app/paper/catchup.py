@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from app.data.sessions import session_window
 from app.live.engine import EngineConfig, LiveEngine
 from app.live.model import BarEvent
 from app.live.recorder import RecordingCursor
@@ -40,7 +41,9 @@ class CatchUp:
     def __init__(self, path: Path, *, on_vix: Callable[[int, float], None] | None,
                  open_volume_baseline: str, until_ms: int | None) -> None:
         self.cursor = RecordingCursor(path)
-        self.engine = LiveEngine(EngineConfig(open_volume_baseline=open_volume_baseline))  # type: ignore[arg-type]
+        # the live engine's window, so a late Start on a Muhurat day rebuilds the same bars (no calendar: replays
+        # keep the market_info rule)
+        self.engine = LiveEngine(EngineConfig(open_volume_baseline=open_volume_baseline, window=session_window))  # type: ignore[arg-type]
         self.on_vix = on_vix
         self.until_ms = until_ms
         self.frames = 0

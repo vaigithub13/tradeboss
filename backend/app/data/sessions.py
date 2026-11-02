@@ -37,6 +37,18 @@ MUHURAT_DATES: frozenset[date] = frozenset(
     }
 )
 
+#: listed special sessions whose normal-market hours are not 09:15-15:30: (open, close) IST minute of day, close
+#: exclusive. The live feed builds, backfills and reconciles these days in this window. Earlier Muhurat days are not
+#: here (no live session ran on them).
+SESSION_WINDOWS: dict[date, tuple[int, int]] = {
+    date(2026, 11, 8): (14 * 60 + 20, 15 * 60 + 30),  # NSE circular 149/2026
+}
+
+
+def session_window(d: date) -> tuple[int, int]:
+    """(open, close) IST minute of day of `d`'s normal market, close exclusive."""
+    return SESSION_WINDOWS.get(d, (SESSION_OPEN_MIN, SESSION_CLOSE_MIN))
+
 
 def is_full_length(minutes: Sequence[int], bar_minutes: int) -> bool:
     """`minutes` = minute-of-day (IST) of every bar START in the session."""

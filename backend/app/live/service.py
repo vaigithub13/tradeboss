@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Any
 
 from app.data.history import symbol_dir_name
+from app.data.sessions import session_window
 from app.data.store import CandleStore, SymbolNotFound, set_overlay
 from app.live.backfill import fetch_backfill
 from app.live.connection import (
@@ -111,6 +112,8 @@ class LiveConfig:
     option_history_dir: Path | None = None
     #: our calendar: a session opens on a listed day, or on real in-session trades (with a warning)
     listed: Callable[[date], bool] | None = listed_session
+    #: the day's session window (Muhurat has its own): builders, gaps, backfill and the session end use it
+    window: Callable[[date], tuple[int, int]] | None = session_window
 
 
 def _hhmm(s: str) -> dtime:
@@ -149,7 +152,7 @@ class LiveService:
         self.sleep = sleep
         self.enabled = enabled
         self.overlay = LiveOverlay()
-        self.engine = LiveEngine(EngineConfig(open_volume_baseline=cfg.open_volume_baseline, listed=cfg.listed))  # type: ignore[arg-type]
+        self.engine = LiveEngine(EngineConfig(open_volume_baseline=cfg.open_volume_baseline, listed=cfg.listed, window=cfg.window))  # type: ignore[arg-type]
         self.recorder = Recorder(cfg.recordings_dir, window_start=cfg.record_start, window_end=cfg.record_end,
                                  listed=cfg.listed)
         self.state = ReconcileState(cfg.state_dir)

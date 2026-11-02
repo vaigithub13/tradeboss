@@ -1003,3 +1003,10 @@ The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
   old rule (no calendar passed). "backfill still missing" is logged at most once a minute per instrument. The 31 Oct
   `pending` entry was removed from `data/live-state/reconcile.json` (backed up first); not final now: only 2 Nov
   (`intraday_reconciled`). Backend 1436 passed, 1 skipped; frontend 370 passed. No backend started.
+- **Muhurat window (2 Nov, evening).** Tests first (`tests/test_live_muhurat_window.py`, 9). `SESSION_WINDOWS` in
+  `app/data/sessions.py` holds a listed special session's own hours (8 Nov 2026: 14:20-15:30, NSE circular 149/2026);
+  every other day is 09:15-15:30. The live engine (and paper catch-up, so a late Start rebuilds the same bars) builds
+  each day's builders in that day's window: a cold start or reconnect on 8 Nov backfills from 14:20, a 14:10 pre-open
+  trade is not a bar, the session ends 30 s after 15:30 and flat-fills to 15:29 (70 bars); no 09:15-14:19 gap. The
+  reconcile takes the futures post-close (10 minutes) from the day's close and treats official minutes before the
+  day's open as expected and not stored. Normal days unchanged. Backend 1445 passed, 1 skipped; frontend 370 passed.
