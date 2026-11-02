@@ -9,7 +9,8 @@ File: `data/feed-recordings/YYYY-MM-DD.bin` (IST date of the receive time)
 Recording gate (K7): only between `window_start` and `window_end` IST (default 09:00-16:05) AND
 only when the feed's own market_info says a segment is open-ish (holidays are therefore not
 recorded, special sessions are). A non-snapshot in-session trade is accepted as evidence too (in
-case a market_info frame was missed). Once active, the recorder keeps going to the end of the
+case a market_info frame was missed). With a calendar (`listed`), market_info counts only on a listed day; on an
+unlisted day only that trade evidence starts the recording, with an "unlisted session detected" warning. Once active, the recorder keeps going to the end of the
 window. When it activates it first writes the last market_info frame it buffered, and any
 subscription frames that were sent before.
 
@@ -150,8 +151,12 @@ def _parse_hhmm(s: str) -> dtime:
 
 
 class Recorder:
-    def __init__(self, directory: Path, *, window_start: str = "09:00", window_end: str = "16:05") -> None:
+    def __init__(
+        self, directory: Path, *, window_start: str = "09:00", window_end: str = "16:05",
+        listed: Callable[[date], bool] | None = None,
+    ) -> None:
         self.dir = directory
+        self.listed = listed  # our calendar; None = market_info decides on any day
         self.start = _parse_hhmm(window_start)
         self.end = _parse_hhmm(window_end)
         self._fh: BinaryIO | None = None
@@ -189,9 +194,14 @@ class Recorder:
                 self.skipped += 1
                 return False
             self._watch(rec, when)
-            if not (self._status_open or self._is_evidence(rec, when)):
+            unlisted = self.listed is not None and not self.listed(day)
+            evidence = self._is_evidence(rec, when)
+            if not ((self._status_open and not unlisted) or evidence):
                 self.skipped += 1
                 return False
+            if unlisted:
+                log.warning("unlisted session detected on %s: in-session trades dated that day arrived; recording "
+                            "the feed, add the day to the calendar (app/data/sessions.py)", day.isoformat())
             self._activate(day, rec)
         self._append(rec)
         if direction == RECV and kind == BINARY:

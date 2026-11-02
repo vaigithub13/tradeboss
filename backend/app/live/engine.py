@@ -17,6 +17,10 @@ know about:
 * SESSION END evidence (any of): a tick with ltt >= close for that instrument; a closed
   market_info status for its segment after that segment was seen open today; a frame whose
   currentTs >= close + 30 s. Only on a day we know was a trading day.
+* SESSION GATE: with a calendar (`EngineConfig.listed`), market_info "open" counts only on a listed day (a trading
+  day or a listed special session). On an unlisted day only an accepted trade (dated that day, inside the session
+  hours) opens the session, with an "unlisted session detected" warning. Without a calendar (replays, catch-up)
+  market_info counts on any day.
 
 `on_frame` is the ONLY entry point for data, so a recording replayed at any speed produces
 identical bars.
@@ -26,6 +30,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date
 
@@ -48,6 +53,8 @@ class EngineConfig:
     hold_max_ms: int = HOLD_MAX_MS
     open_ms_of_day: int = OPEN_MS
     close_ms_of_day: int = CLOSE_MS
+    #: our calendar: is this day a listed session? None = every day is (market_info decides)
+    listed: Callable[[date], bool] | None = None
 
 
 @dataclass(frozen=True)
@@ -272,10 +279,19 @@ class LiveEngine:
 
     def trading_today(self) -> bool:
         """Is there evidence that today is a trading day (real trades, or an open segment)?"""
-        if not self._trading:
-            self._trading = bool(self.seen_open) or any(
-                b.saw_post_close_tick or b.last_ltt is not None for b in self.builders.values()
-            )
+        if self._trading:
+            return True
+        if self.day is not None and self.cfg.listed is not None and not self.cfg.listed(self.day):
+            # unlisted day: market_info is not enough, only a trade dated today inside the session hours
+            if any(b.last_ltt is not None for b in self.builders.values()):
+                self._trading = True
+                self.counters["unlisted_session"] += 1
+                log.warning("unlisted session detected on %s: in-session trades dated that day arrived; the session "
+                            "is open, add the day to the calendar (app/data/sessions.py)", self.day.isoformat())
+            return self._trading
+        self._trading = bool(self.seen_open) or any(
+            b.saw_post_close_tick or b.last_ltt is not None for b in self.builders.values()
+        )
         return self._trading
 
     def _end_builder(self, key: str, b: CandleBuilder, why: str) -> None:

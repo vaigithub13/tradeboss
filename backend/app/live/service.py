@@ -41,6 +41,7 @@ from app.live.overlay import LiveOverlay
 from app.live.persist import ReconcileState, is_stored, upsert_bars
 from app.live.reconcile import reconcile_missed, reconcile_today
 from app.live.recorder import BINARY, RECV, SENT, Recorder, recording_path
+from app.live.session_days import listed_session
 from app.options.history import OptionHistoryStore, capture_session
 from app.paper.catchup import PAPER_BAR_SOURCES, replay_into
 from app.paper.desk import SLOTS, PaperDesk
@@ -62,6 +63,7 @@ PAPER_SYMBOL = "NIFTY50"  # the chart symbol whose stored candles the end-of-day
 MAX_SUBSCRIPTIONS = 12
 BACKFILL_RETRY_S = 15.0
 BACKFILL_WITHHOLD_MAX_S = 60.0
+BACKFILL_WARN_EVERY_S = 60.0
 RECONCILE_RETRY_S = 300.0
 REST_STATUS_EVERY_S = 60.0
 MAINTENANCE_EVERY_S = 5.0
@@ -107,6 +109,8 @@ class LiveConfig:
     paper_dir: Path | None = None
     #: after the reconcile, the nearest weekly's options (ATM +/- 5 over the day's range) go here; None = off
     option_history_dir: Path | None = None
+    #: our calendar: a session opens on a listed day, or on real in-session trades (with a warning)
+    listed: Callable[[date], bool] | None = listed_session
 
 
 def _hhmm(s: str) -> dtime:
@@ -145,8 +149,9 @@ class LiveService:
         self.sleep = sleep
         self.enabled = enabled
         self.overlay = LiveOverlay()
-        self.engine = LiveEngine(EngineConfig(open_volume_baseline=cfg.open_volume_baseline))  # type: ignore[arg-type]
-        self.recorder = Recorder(cfg.recordings_dir, window_start=cfg.record_start, window_end=cfg.record_end)
+        self.engine = LiveEngine(EngineConfig(open_volume_baseline=cfg.open_volume_baseline, listed=cfg.listed))  # type: ignore[arg-type]
+        self.recorder = Recorder(cfg.recordings_dir, window_start=cfg.record_start, window_end=cfg.record_end,
+                                 listed=cfg.listed)
         self.state = ReconcileState(cfg.state_dir)
         self._elock = threading.RLock()
         self._flags = _Flags()
@@ -154,6 +159,7 @@ class LiveService:
         self._inflight: set[str] = set()
         self._last_attempt: dict[str, float] = {}
         self._first_requested: dict[str, float] = {}
+        self._missing_warned_at: dict[str, float] = {}
         self._key_cache: dict[str, str | None] = {}
         self._close_records: list[dict] | None = None
         self.hub = LiveHub(
@@ -526,7 +532,7 @@ class LiveService:
                 self._drain()
                 self._resend_index_to_paper(req.key)
                 self._sync_key(req.key)
-                log.warning("backfill for %s still missing after %.0fs: showing live bars, gap stays marked", req.key, waited)
+                self._warn_backfill_missing(req.key, waited, now)
             if now - self._last_attempt.get(req.key, -1e9) >= BACKFILL_RETRY_S:
                 self._spawn_backfill(req)
         # 2. the 15:45 reconcile (retry until 16:30)
@@ -537,6 +543,7 @@ class LiveService:
             and self.engine.day == local.date()
             and self._flags.reconciled_day != local.date()
             and now >= self._flags.next_reconcile_try
+            and self._session_today()
         ):
             self._flags.next_reconcile_try = now + RECONCILE_RETRY_S
             await self.reconcile_now()
@@ -555,6 +562,21 @@ class LiveService:
         if self._spreads is not None:
             self._spreads.flush()
         self.refresh_subscriptions()
+
+    def _warn_backfill_missing(self, key: str, waited: float, now: float) -> None:
+        """At most once a minute per instrument (an unanswered gap is released and withheld again every pass)."""
+        if now - self._missing_warned_at.get(key, -1e9) < BACKFILL_WARN_EVERY_S:
+            return
+        self._missing_warned_at[key] = now
+        log.warning("backfill for %s still missing after %.0fs: showing live bars, gap stays marked", key, waited)
+
+    def _session_today(self) -> bool:
+        """A listed day, or an unlisted one whose real trades opened a session. Otherwise no 15:45 reconcile."""
+        with self._elock:
+            day = self.engine.day
+            if day is not None and (self.cfg.listed is None or self.cfg.listed(day)):
+                return True
+            return self.engine.trading_today()
 
     # ------------------------------------------------------------------ subscriptions
     def key_for_symbol(self, symbol: str) -> str | None:

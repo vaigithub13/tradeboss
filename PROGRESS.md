@@ -994,5 +994,12 @@ The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
   (`market_info` reported open; recording 31 Oct started 12:39). 0 bars were persisted and no paper trade was made,
   but the logs hold 58,569 (31 Oct) and 12,929 (1 Nov) "backfill still missing" warnings, and `reconcile.json` keeps
   31 Oct `pending` for Nifty, VIX and 61471, retried at every start ("3 instrument-days, 0 ok" at 08:35 and 09:00).
-  A slot 1 1 Nov file (0 bars, `replay`) was written to `paper/replay/` at the 08:34 stop. Not changed; waiting on
-  the user.
+  A slot 1 1 Nov file (0 bars, `replay`) was written to `paper/replay/` at the 08:34 stop.
+- **Session gate (2 Nov, after the close, approved).** Tests first (`tests/test_live_session_gate.py`, 13). A session
+  opens only on a day our calendar lists: a trading day of the NSE calendar or a listed special session (Muhurat;
+  `app/live/session_days.py`). On any other day market_info "open" opens nothing (no session end, no backfill, no
+  persist, no 15:45 reconcile, no recording); real trades dated that day inside 09:15-15:30 open it, and the engine
+  and the recorder log "unlisted session detected on <day>" so the day can be added. Replays and catch-up keep the
+  old rule (no calendar passed). "backfill still missing" is logged at most once a minute per instrument. The 31 Oct
+  `pending` entry was removed from `data/live-state/reconcile.json` (backed up first); not final now: only 2 Nov
+  (`intraday_reconciled`). Backend 1436 passed, 1 skipped; frontend 370 passed. No backend started.
