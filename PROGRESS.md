@@ -1010,3 +1010,64 @@ The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
   trade is not a bar, the session ends 30 s after 15:30 and flat-fills to 15:29 (70 bars); no 09:15-14:19 gap. The
   reconcile takes the futures post-close (10 minutes) from the day's close and treats official minutes before the
   day's open as expected and not stored. Normal days unchanged. Backend 1445 passed, 1 skipped; frontend 370 passed.
+
+## 3 Nov 2026: forward-test day 5 (four slots, weekly expiry)
+
+Fresh `npm run session` at 08:38 (startup reconcile: 2 Nov `final`, 3 instrument-days ok). All four slots warm 500
+bars, 75 closed bars each, no incomplete, late-after-gap or given-up bars; every signal and trade `live`, every
+premium leg a real quote (0 modelled). Settings unchanged. End-of-day check: slots 1 and 3 2 live vs 2 backtest
+trades, slots 2 and 4 1 vs 1; 0 differences, 0 fill-driven, no warnings on every slot. Nifty opened 23582.25, was
+23731.75 at the 15:15 square-off and closed 23810.85 (15:29).
+
+Trades (3 Nov expiry, DTE 0, 1 lot of 65). Columns as on 2 Nov. Trigger and Nifty in: paper records the index at
+the market fill (Log XZ: the 14:30 minute's close, 23683.35; the backtest records the fill minute's open, 23685.50).
+The check does not compare this field. Entry and exit premium: paper real / backtest.
+
+| slot | signal | trigger | fill | Nifty in | contract | entry real / bt | stop / target | exit | Nifty out | exit prem | reason | net ₹ | R |
+|---|---|---:|---|---:|---|---:|---|---|---:|---:|---|---:|---:|
+| 1 | 14:25 | 23683.35 | 14:31:00 | 23683.35 | 23700 PE | 43.65 / 43.70 | – | 14:46:00 | 23698.20 | 28.70 / 28.55 | reversal | −1,023.81 | – |
+| 1 | 14:40 | 23698.20 | 14:46:00 | 23698.20 | 23700 CE | 31.15 / 31.35 | – | 15:15:00 | 23731.75 | 46.35 / 46.75 | square-off | +934.11 | – |
+| 2 | 09:20 | 23610.75 | 09:26:03 | 23610.75 | 23600 CE | 67.00 / 67.04 | – | 15:15:00 | 23731.75 | 137.40 / 137.80 | square-off | +4,509.69 | – |
+| 3 | 14:25 | 23683.35 | 14:31:00 | 23683.35 | 23700 PE | 43.65 / 43.70 | 34.92 / 61.11 | 14:34:36 | 23691.30 | 34.55 / 34.76 | stop | −644.29 | −1.14 |
+| 3 | 14:40 | 23698.20 | 14:46:00 | 23698.20 | 23700 CE | 31.15 / 31.35 | 24.92 / 43.61 | 15:05:15 | 23691.40 | 25.10 / 24.88 | stop | −444.49 | −1.10 |
+| 4 | 09:20 | 23610.75 | 09:26:03 | 23610.75 | 23600 CE | 67.00 / 67.04 | 53.60 / 93.80 | 10:34:52 | 23665.85 | 94.25 / 93.66 | target | +1,710.32 | +1.96 |
+
+| slot | strategy | trades | target / stop / reversal / square-off | net ₹ | live days to date net ₹ (8, 9, 12 Oct, 2, 3 Nov) |
+|---|---|---:|---|---:|---:|
+| 1 | Log XZ | 2 | 0 / 0 / 1 / 1 | −89.70 | +28,607.08 (12 trades, 10 wins; 0 / 0 / 7 / 5) |
+| 2 | Price Channel 20 | 1 | 0 / 0 / 0 / 1 | +4,509.69 | +21,420.34 (9, 6 wins; 0 / 0 / 4 / 5) |
+| 3 | Log XZ, 1:2 premium | 2 | 0 / 2 / 0 / 0 | −1,088.78 | +16,089.99 (11, 8 wins; 7 / 3 / 1 / 0; from 9 Oct) |
+| 4 | Price Channel 20, 1:2 premium | 1 | 1 / 0 / 0 / 0 | +1,710.32 | +1,064.28 (8, 4 wins; 2 / 3 / 1 / 2; from 9 Oct) |
+
+The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
+
+- Paper vs backtest net: slot 1 −89.70 vs −89.73, slot 2 +4,509.69 vs +4,532.76, slot 3 −1,088.78 vs −1,105.67,
+  slot 4 +1,710.32 vs +1,669.17. Same contract, fill minute, exit minute and reason on every trade.
+- Fill-driven levels (no exit changed, so none is in `fill_driven`): slot 3's premium levels sit 0.04-0.28 points from
+  the backtest's (CE target 43.61 vs 43.89 from 31.15 vs 31.35); slot 4's 0.04-0.06.
+- **Expiry afternoon** (from the stored 1m bars; time value = premium − intrinsic, Nifty at the fill minute). Five
+  trades were held after 13:00: slot 2's CE, and slots 1 and 3, which both entered from 14:31.
+  - Slot 2 23600 CE, 09:26-15:15: +70.40 = intrinsic +121.00 (10.75 → 131.75), time −50.60 (56.25 → 5.65). After
+    13:00 (13:00 close 96.15, Nifty 23681.45, time 14.70): +41.25 = intrinsic +50.30, time −9.05.
+  - Slot 1 23700 PE 14:31-14:46: −14.95 = intrinsic −14.45 (Nifty 23685.50 → 23699.95), time −0.50 (29.15 → 28.65).
+  - Slot 1 23700 CE 14:46-15:15: +15.20 = intrinsic +31.75 (Nifty 23699.95 → 23731.75), time −16.55 (31.15 → 14.60).
+    Time value took about half of the index move.
+  - Slot 3 23700 PE 14:31-14:34:36 stop: −9.10 = intrinsic −5.80, time −3.30 (sold at the bid in a stop minute).
+    Slot 3 23700 CE 14:46-15:05:15 stop: −6.05, out of the money throughout; at entry delta 0.485, the −8.55 index
+    move accounts for about −4.15, and decay plus the bid for about −1.9.
+  - The ATM time value was still 24-35 points from 14:00 to 15:00 (23700 CE and PE). Most of the late-afternoon fall
+    came as a strike moved in the money, not from the clock alone. After the square-off Nifty rose another 79
+    points by 15:29 (23600 CE 210.80, 23700 CE 110.85).
+- Spreads 3 Nov, ATM, DTE 0: CE median 0.15 / p90 0.20, PE 0.15 / 0.20; one-side 1-lot fill 0.075 (both), round trip
+  ₹9.75. All strikes: the median spread fell from 0.15 to 0.10 from 13:00. Since 6 Oct (7 days: DTE 0, 4, 3, 2, 1, 1,
+  0): mean one-side 0.1143, round trip ₹14.86. Paper's own legs today: 0.056-0.15 points on average per slot.
+- Reconcile: 3 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 bar again: open
+  23570.00 vs 23524.70, low 23533.00 vs 23522.00, volume 233,415 vs 233,480; 13 expected: 3 OI and 15:30-15:39).
+  2 Nov `final` at the 08:38 start (61471 0 differences, 10 expected). Option capture 15:45: 3 Nov expiry, 17
+  strikes, 34 stored, 0 empty, 0 failed.
+- Health: one backend 08:38-17:57, feed live 08:55-15:40 (and 15:50-16:00) with no reconnect; 0 warnings, 0 errors,
+  no backfills (no gaps); the one traceback is the 17:57 Ctrl+C (KeyboardInterrupt). Session gate: 3 Nov is a
+  listed trading day; recording started at 09:00; no "unlisted session" line. Snapshot 3 Nov saved at 08:32 (13
+  kept); launchd job loaded. Backend 1445 passed, 1 skipped; frontend 370 passed.
+- Next: the nearest weekly in the 3 Nov snapshot is Mon 9 Nov (Tue 10 Nov is a holiday), lot 65. Sun 8 Nov is the
+  Muhurat session, 14:20-15:30.
