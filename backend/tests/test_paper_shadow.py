@@ -3,7 +3,7 @@ crossed a premium stop or target that none of paper's ticks reached.
 
 Paper triggers on the traded prices the feed sends; the exchange's minute bar also holds trades between those
 snapshots. Paper's own exit is kept; the shadow is recorded beside it (the minute, the level, the price: a stop at the
-level, or the bar's low when the bar opened through it; a target at the level) with its own net. The case is slot 4 on
+level, or the bar's open when the bar opened through it, as the backtest's gap fill; a target at the level) with its own net. The case is slot 4 on
 4 Nov 2026 (Price Channel 20, 1:2 premium): 23900 CE bought at 176.55, stop 141.24; the 10:23 I1 bar's low 140.25,
 paper's lowest 10:23 tick 141.80; the first tick at or below the stop at 10:25:23, sold at the bid 143.05. The
 fixture contract here has a lot of 75 (the 4 Nov contract had 65); the prices are that day's.
@@ -156,10 +156,11 @@ def test_a_stop_crossed_inside_the_bar_fills_at_the_level() -> None:
     assert (sh["level"], sh["reason"], sh["price"]) == ("premium_stop", "stop", 141.24)
 
 
-def test_a_bar_that_opened_through_the_stop_fills_at_its_low() -> None:
+def test_a_bar_that_opened_through_the_stop_fills_at_its_open() -> None:
+    """As the backtest engine's gap fill (app/exits/rules.py first_hit): the open, not the bar's low."""
     sh = shadow_exit(LEVELS, {"open": 139.0, "high": 142.0, "low": 136.5, "close": 141.0}, tick_low=None,
                      tick_high=None)
-    assert (sh["reason"], sh["price"]) == ("stop", 136.5)
+    assert (sh["reason"], sh["price"]) == ("stop", 139.0)
 
 
 def test_a_target_fills_at_the_level() -> None:

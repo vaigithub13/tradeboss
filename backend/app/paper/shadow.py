@@ -3,7 +3,8 @@
 Paper's premium stop and target trigger on the traded prices the feed sends (LTP snapshots). The exchange's I1 minute
 also holds the trades between those snapshots, so its low or high can cross a level no tick reached (slot 4, 4 Nov
 2026: the 10:23 bar's low 140.25, paper's lowest tick 141.80, stop 141.24). A resting order would have exited in that
-minute: a stop at the level, or at the bar's low when the bar opened through it; a target at the level. Paper's own
+minute: a stop at the level, or at the bar's open when the bar opened through it (the backtest engine's gap fill,
+app/exits/rules.py first_hit); a target at the level. Paper's own
 exit is kept; the shadow is recorded beside it.
 """
 
@@ -30,7 +31,7 @@ def shadow_exit(levels: dict[str, float | None] | None, bar: dict[str, float], *
         assert stop is not None
         if tick_low is not None and tick_low <= stop:
             return None
-        price = lo if o <= stop else float(stop)
+        price = float(hit[1])  # the level, or the open of a bar that opened through it
     else:
         assert target is not None
         if tick_high is not None and tick_high >= target:

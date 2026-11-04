@@ -91,3 +91,15 @@ def test_a_file_without_a_premium_rule_gets_the_summary_fields_only(tmp_path) ->
     assert fill_shadows(s, bars, load_default_cost_table(), date(2026, 11, 4)) == 0
     assert s["trades"][0].get("shadow") is None
     assert s["summary"]["shadow_net"] == -2247.71 and s["summary"]["shadow_diff"] == 0.0
+
+
+def test_recompute_reprices_a_shadow_already_written(tmp_path) -> None:
+    """A rule change (4 Nov: a gapped stop at the bar's open, no longer its low) reprices the saved shadows."""
+    bars = write_log(tmp_path)
+    s = saved()
+    s["trades"][0]["shadow"] = {"time": at(10, 23), "level": "premium_stop", "reason": "stop", "price": 1.0,
+                                "net": -99999.0}
+    assert fill_shadows(s, bars, load_default_cost_table(), date(2026, 11, 4)) == 0  # kept without recompute
+    assert s["trades"][0]["shadow"]["price"] == 1.0
+    assert fill_shadows(s, bars, load_default_cost_table(), date(2026, 11, 4), recompute=True) == 1
+    assert s["trades"][0]["shadow"]["price"] == 141.24 and s["summary"]["shadow_net"] == s["trades"][0]["shadow"]["net"]

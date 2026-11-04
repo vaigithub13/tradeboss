@@ -3,7 +3,8 @@
 A trade under a premium rule gets the resting order's exit (app/paper/shadow.py) for the first minute it held from
 start to end whose I1 bar crossed its stop or target while the minute's traded prices did not. The minutes are read
 from `data/feed-recordings/<day>.minutes.jsonl` (the "close" phase: the tick-built bar and the I1 bar as paper's
-feed had them). A trade that already has a shadow is left as it is. Each file's report rows and summary get the
+feed had them). A trade that already has a shadow is left as it is, unless `--recompute` (after a change to the
+rule: every shadow is worked out again). Each file's report rows and summary get the
 shadow fields. Stop the backend first (one Ctrl+C): a running backend rewrites its slots' day files.
 
     uv run python -m scripts.paper_shadow_backfill --from 2026-10-08
@@ -62,12 +63,16 @@ def _shadow_of(t: dict[str, Any], bars: MinuteBars, cost_table: Any, day: date) 
     return None
 
 
-def fill_shadows(saved: dict[str, Any], bars: MinuteBars, cost_table: Any, day: date) -> int:
-    """Give the file's trades their shadows (in place), then its report rows and summary. Returns how many added."""
+def fill_shadows(saved: dict[str, Any], bars: MinuteBars, cost_table: Any, day: date, *,
+                 recompute: bool = False) -> int:
+    """Give the file's trades their shadows (in place), then its report rows and summary. With `recompute`, a
+    shadow already written is worked out again. Returns how many were written."""
     rule = _rule_of(saved)
     added = 0
     trades = saved.get("trades", [])
     for t in trades:
+        if recompute:
+            t.pop("shadow", None)
         if rule is None or rule.kind != "premium" or t.get("shadow") or not t.get("levels"):
             continue
         sh = _shadow_of(t, bars, cost_table, day)
@@ -93,6 +98,7 @@ def main() -> None:
     p.add_argument("--from", dest="since", required=True, help="first day, YYYY-MM-DD")
     p.add_argument("--slot", action="append", help="slot number; repeat for more (default: 1-4)")
     p.add_argument("--paper-dir", type=Path, default=ROOT / "data" / "paper")
+    p.add_argument("--recompute", action="store_true", help="work out every shadow again (a rule change)")
     p.add_argument("--recordings-dir", type=Path, default=ROOT / "data" / "feed-recordings")
     args = p.parse_args()
     since = date.fromisoformat(args.since)
@@ -106,7 +112,7 @@ def main() -> None:
             if saved.get("source", "live") != "live":
                 continue
             log = args.recordings_dir / f"{day.isoformat()}.minutes.jsonl"
-            added = fill_shadows(saved, minute_bars(log), cost_table, day)
+            added = fill_shadows(saved, minute_bars(log), cost_table, day, recompute=args.recompute)
             tmp = path.with_suffix(".json.tmp")
             tmp.write_text(json.dumps(saved, indent=2, sort_keys=True), encoding="utf-8")  # as app.paper.store
             os.replace(tmp, path)
