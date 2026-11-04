@@ -70,7 +70,8 @@ def outcome(check: dict[str, Any] | None) -> dict[str, Any]:
                 for d in check.get(key) or []]
     return {k: check.get(k) for k in ("live_signals", "live_trades", "backtest_signals", "backtest_trades", "error",
                                       "warnings")} | {"differences": rows("differences"),
-                                                      "fill_driven": rows("fill_driven")}
+                                                      "fill_driven": rows("fill_driven"),
+                                                      "exchange_only": rows("exchange_only")}
 
 
 def live_day_files(paper_dir: Path, slots: list[str], since: date) -> list[tuple[str, Path]]:
@@ -109,7 +110,7 @@ def main() -> None:
         before, after = outcome(old), outcome(new)
         status = "unchanged" if before == after else "CHANGED"
         print(f"slot {slot} {path.stem}: {status}; differences {len(after['differences'])}, "
-              f"fill-driven {len(after['fill_driven'])}")
+              f"fill-driven {len(after['fill_driven'])}, exchange-only {len(after['exchange_only'])}")
         if status == "CHANGED":
             print(f"  before: {json.dumps(before, default=str)}\n  after:  {json.dumps(after, default=str)}")
 

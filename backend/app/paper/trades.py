@@ -16,6 +16,7 @@ from typing import Any
 
 from app.exits.report import report_row
 from app.exits.rules import ExitRule, parse_exit_rule
+from app.paper.shadow import report_shadow, shadow_net
 
 IST = timezone(timedelta(hours=5, minutes=30))
 DAY_FILE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.json$")
@@ -33,7 +34,7 @@ def trade_report_row(t: dict[str, Any], rule: ExitRule | None) -> dict[str, Any]
         index_stop=levels.get("index_stop"), index_target=levels.get("index_target"),
         exit_time=int(t["exit_at_ms"]) // 1000, exit_premium=float(t["exit_price"]),
         exit_reason=t["exit_reason"], net=float(t["net"]),
-    ), "source": t.get("source", "live")}
+    ), "source": t.get("source", "live"), "shadow": report_shadow(t), "shadow_net": shadow_net(t)}
 
 
 def _rule_of(saved: dict[str, Any]) -> ExitRule | None:

@@ -125,6 +125,12 @@ export function PaperTrades() {
                 <span className={sum.net < 0 ? "text-red-400" : "text-emerald-400"}>{sum.net.toFixed(2)}</span> · average R{" "}
                 {sum.avgR == null ? "—" : sum.avgR.toFixed(2)} · target {sum.exits.target} · stop {sum.exits.stop} · reversal{" "}
                 {sum.exits.reversal} · square-off {sum.exits["square-off"]} · other {sum.exits.other}
+                <br />
+                Shadow net (resting orders) {sum.shadowNet.toFixed(2)} · difference{" "}
+                <span className={sum.shadowDiff < 0 ? "text-red-400" : "text-emerald-400"}>
+                  {sum.shadowDiff >= 0 ? "+" : ""}{sum.shadowDiff.toFixed(2)}
+                </span>{" "}
+                · shadow exits {sum.shadows}
               </td>
             </tr>
           </tfoot>

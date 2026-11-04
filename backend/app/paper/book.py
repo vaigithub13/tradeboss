@@ -16,6 +16,7 @@ from typing import Any
 
 from app.backtest.costs import CostTable
 from app.paper.quotes import QuoteBook
+from app.paper.shadow import shadow_net
 
 TICK = 0.05  # the smallest premium we will quote
 
@@ -104,6 +105,8 @@ class Position:
     index_entry: float | None = None  # the index price the contract was chosen from
     delta: float | None = None  # the model's delta at entry (report estimates)
     source: str = "live"  # live, or replay (decided while catching up from the recording)
+    #: the resting order's exit in an I1 minute that crossed a level no tick reached (app/paper/shadow.py)
+    shadow: dict[str, Any] | None = None
 
 
 class PaperBook:
@@ -163,6 +166,7 @@ class PaperBook:
             "delta": p.delta,
             "index_exit": index_exit,
             "source": p.source,
+            "shadow": p.shadow,
         }
         if note:
             trade["note"] = note  # how an unusual exit was priced (e.g. a square-off without a quote)
@@ -189,12 +193,16 @@ class PaperBook:
 
 def summarise(trades: list[dict[str, Any]], *, signals: int, unfilled: int) -> dict[str, Any]:
     legs = [s for t in trades for s in (t["entry_slippage"], t["exit_slippage"]) if s is not None]
+    net = round(sum(t["net"] for t in trades), 2)
+    shadow = round(sum(shadow_net(t) for t in trades), 2)
     return {
         "trades": len(trades),
         "wins": sum(1 for t in trades if t["net"] > 0),
         "gross": round(sum(t["gross"] for t in trades), 2),
         "charges": round(sum(t["charges"] for t in trades), 2),
-        "net": round(sum(t["net"] for t in trades), 2),
+        "net": net,
+        "shadow_net": shadow,
+        "shadow_diff": round(shadow - net, 2),
         "modelled_legs": sum(1 for t in trades for src in (t["entry_source"], t["exit_source"]) if src == "modelled"),
         "avg_slippage_points": round(sum(legs) / len(legs), 4) if legs else None,
         "signals": signals,

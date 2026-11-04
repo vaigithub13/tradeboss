@@ -14,7 +14,12 @@ export interface PaperStatus {
   wanted_keys: string[];
   signals: PaperSignal[];
   trades: { symbol: string; net: number; exit_reason: string }[];
-  summary: { trades: number; wins: number; net: number; modelled_legs: number; exits?: ExitCounts } | null;
+  summary: {
+    trades: number; wins: number; net: number; modelled_legs: number; exits?: ExitCounts;
+    /** the net had resting orders taken the exits paper's ticks missed (backend app/paper/shadow.py) */
+    shadow_net?: number;
+    shadow_diff?: number;
+  } | null;
   position: { symbol: string } | null;
   mark: PaperMark | null;
   /** one row per closed trade (backend app/exits/report.py) */
@@ -26,7 +31,7 @@ export interface PaperStatus {
 
 export interface PaperWeek {
   week: string;
-  totals: { trades: number; net: number };
+  totals: { trades: number; net: number; shadow_net?: number; shadow_diff?: number };
   exits: ExitCounts;
   excluded: string[];
 }

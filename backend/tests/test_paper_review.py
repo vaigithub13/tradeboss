@@ -105,3 +105,14 @@ def test_a_stop_strategy_is_compared_on_the_bar_its_fill_is_in() -> None:
     assert entry_bar(fill_minute, 300, basis="fill") == NINE_TWENTY
     assert entry_bar(NINE_TWENTY, 300, basis="decision", lag=0) == NINE_FIFTEEN  # old timing: the next bar's open
     assert entry_bar(NINE_TWENTY + 60, 300, basis="decision") == NINE_FIFTEEN  # live timing: one minute later
+
+
+def test_the_week_totals_the_shadow_net_and_an_older_day_counts_its_own_net(tmp_path) -> None:
+    """A day written before shadow exits has no shadow fields: its shadow net is its net, its difference 0."""
+    mon = date(2026, 11, 2)
+    save_day(tmp_path, mon, {"summary": {"trades": 1, "net": 100.0}})
+    save_day(tmp_path, mon + timedelta(days=2), {"summary": {"trades": 3, "net": -1949.43, "shadow_net": -2126.72,
+                                                             "shadow_diff": -177.29}})
+    week = weekly_summary(tmp_path, mon)
+    assert week["days"][0]["shadow_net"] == 100.0 and week["days"][0]["shadow_diff"] == 0.0
+    assert week["totals"]["shadow_net"] == round(100.0 - 2126.72, 2) and week["totals"]["shadow_diff"] == -177.29

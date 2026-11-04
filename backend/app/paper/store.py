@@ -8,6 +8,8 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
+#: the net had resting orders taken the exits paper's ticks missed, and that minus paper's net (app/paper/shadow.py)
+SHADOW_KEYS = ("shadow_net", "shadow_diff")
 TOTAL_KEYS = ("trades", "wins", "gross", "charges", "net", "modelled_legs", "signals", "unfilled")
 EXIT_KEYS = ("target", "stop", "reversal", "square-off", "other")
 
@@ -67,10 +69,11 @@ def weekly_summary(directory: Path, any_day: date) -> dict[str, Any]:
             continue  # replays never count (they are written to replay/, which is not read here)
         s = saved.get("summary", {})
         exits = s.get("exits") or {}
-        days.append({"date": d.isoformat(), **{k: s.get(k, 0) for k in TOTAL_KEYS},
+        shadow = {"shadow_net": s.get("shadow_net", s.get("net", 0)), "shadow_diff": s.get("shadow_diff", 0.0)}
+        days.append({"date": d.isoformat(), **{k: s.get(k, 0) for k in TOTAL_KEYS}, **shadow,
                      "exits": {k: int(exits.get(k, 0)) for k in EXIT_KEYS}, "dry_run": marks.get(d.isoformat())})
     counted = [d for d in days if d["dry_run"] is None]
-    totals = {k: round(sum(d[k] for d in counted), 2) for k in TOTAL_KEYS}
+    totals = {k: round(sum(d[k] for d in counted), 2) for k in (*TOTAL_KEYS, *SHADOW_KEYS)}
     exit_totals = {k: sum(d["exits"][k] for d in counted) for k in EXIT_KEYS}
     year, week, _ = any_day.isocalendar()
     return {"week": f"{year}-W{week:02d}", "days": days, "totals": totals, "exits": exit_totals,

@@ -84,6 +84,9 @@ class PaperDesk:
     def on_option_tick(self, key: str, price: float, *, now_ms: int) -> None:
         self._each("on_option_tick", lambda r: r.on_option_tick(key, price, now_ms=now_ms))
 
+    def on_option_minute(self, key: str, bar: dict[str, Any], *, now_ms: int) -> None:
+        self._each("on_option_minute", lambda r: r.on_option_minute(key, bar, now_ms=now_ms))
+
     def on_index_bar(self, bar: dict[str, Any], *, now_ms: int) -> None:
         self._each("on_index_bar", lambda r: r.on_index_bar(bar, now_ms=now_ms))
 

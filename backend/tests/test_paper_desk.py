@@ -94,3 +94,13 @@ def test_index_ticks_reach_each_running_slot(tmp_path) -> None:
         d.runner(slot).session.on_index_tick = lambda price, now_ms, s=slot: seen.append((s, price)) or []
     d.on_index_tick(22610.0, now_ms=ms(9, 22))
     assert seen == [(s, 22610.0) for s in SLOTS]
+
+
+def test_option_minutes_reach_each_running_slot(tmp_path) -> None:
+    d = desk(tmp_path, {"1": {}, "2": {}})
+    seen = []
+    for slot in SLOTS:
+        d.runner(slot).start(DAY, "log_xz", {})
+        d.runner(slot).session.on_option_minute = lambda key, bar, now_ms, s=slot: seen.append((s, key)) or False
+    d.on_option_minute("NSE_FO|1", {"time": 0, "open": 1, "high": 1, "low": 1, "close": 1}, now_ms=ms(9, 22))
+    assert seen == [(s, "NSE_FO|1") for s in SLOTS]

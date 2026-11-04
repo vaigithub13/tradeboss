@@ -65,6 +65,8 @@ class CatchUp:
                     self.on_vix(ev.bar.time_s, ev.bar.close)
                 elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in PAPER_BAR_SOURCES:
                     session.on_index_minute(bar_minute(ev), now_ms=engine.current_ts)
+                elif ev.key.startswith("NSE_FO|") and ev.bar.source in PAPER_BAR_SOURCES:
+                    session.on_option_minute(ev.key, bar_minute(ev), now_ms=engine.current_ts)
             if engine.current_ts > 0:
                 if NIFTY_INDEX_KEY in engine.ticked:
                     session.on_index_tick(engine.ticked[NIFTY_INDEX_KEY], now_ms=engine.current_ts)

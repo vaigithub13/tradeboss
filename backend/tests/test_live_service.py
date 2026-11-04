@@ -474,3 +474,26 @@ def test_after_the_reconcile_the_days_options_are_captured_once(monkeypatch, tmp
     stub.cfg.option_history_dir = None
     stub._flags = svc._Flags()
     assert asyncio.run(svc.LiveService.capture_options(stub, day)) is None and len(calls) == 1  # off
+
+
+def test_exchange_final_option_minutes_go_to_paper_and_tick_built_ones_do_not() -> None:
+    """Paper reads an option's I1 minute against its own ticks (the shadow exit, app/paper/shadow.py)."""
+    import threading
+    from types import SimpleNamespace
+
+    from app.live.model import Bar, BarEvent
+    from app.live.service import LiveService
+
+    got: list[tuple] = []
+    stub = SimpleNamespace(
+        _elock=threading.Lock(),
+        engine=SimpleNamespace(current_ts=456),
+        vix=SimpleNamespace(add=lambda t, c: None),
+        paper=SimpleNamespace(on_index_bar=lambda bar, now_ms: None,
+                              on_option_minute=lambda key, bar, now_ms: got.append((key, bar["low"], bar["source"],
+                                                                                    now_ms))),
+    )
+    events = [BarEvent("NSE_FO|39956", Bar(29896133, 161.0, 161.0, 140.25, 144.7, 1443390, None, "i1")),
+              BarEvent("NSE_FO|39956", Bar(29896134, 144.85, 150.85, 143.65, 146.8, 0, None, "tick"))]
+    LiveService._feed_paper(stub, events)
+    assert got == [("NSE_FO|39956", 140.25, "i1", 456)]

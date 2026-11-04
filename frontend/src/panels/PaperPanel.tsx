@@ -153,10 +153,18 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
         Day: net {formatRupees(summary?.net ?? null)} · trades {summary?.trades ?? 0} · wins {summary?.wins ?? 0} ·
         modelled legs {summary?.modelled_legs ?? 0}
       </div>
+      {summary?.shadow_net != null && (
+        <div className="text-white/60">
+          Day shadow net (resting orders): {formatRupees(summary.shadow_net)} · difference{" "}
+          {formatRupees(summary.shadow_diff ?? 0)}
+        </div>
+      )}
       <div className="text-white/60">Day exits: {exitCountsLine(summary?.exits)}</div>
       {week && (
         <div className="text-white/60">
           Week {week.week}: net {formatRupees(week.totals.net)} · trades {week.totals.trades} · exits {exitCountsLine(week.exits)}
+          {week.totals.shadow_net != null &&
+            ` · shadow net ${formatRupees(week.totals.shadow_net)} (difference ${formatRupees(week.totals.shadow_diff ?? 0)})`}
         </div>
       )}
       {error && <div className="text-red-400">{error}</div>}

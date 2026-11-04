@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from collections import deque
 from collections.abc import Callable, Iterable
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
@@ -40,6 +40,7 @@ from app.paper.bars import ClosedBars
 from app.paper.book import Fill, PaperBook, Position, fill, summarise
 from app.paper.pricing import MODEL_SLIPPAGE_POINTS
 from app.paper.quotes import QuoteBook
+from app.paper.shadow import priced, shadow_exit
 from app.strategies.pine_common import minute_of
 
 log = logging.getLogger("tradeboss.paper")
@@ -145,6 +146,8 @@ class PaperSession:
         #: the sources the day's totals count: live only, unless the whole run is a replay
         self.counted_sources: tuple[str, ...] = ("live",)
         self._last_index: float | None = None  # the newest index price (the Nifty level recorded at an exit)
+        #: (option key, minute) -> [low, high] of the traded prices paper saw: an I1 minute is read against them
+        self._tick_range: dict[tuple[str, int], list[float]] = {}
 
     # ---------------------------------------------------------------- input
     def warm(self, bars: Iterable[dict[str, Any]]) -> None:
@@ -185,6 +188,7 @@ class PaperSession:
                 entry=entry, index_entry_time=o["index_entry_time"], reason=o["reason"],
                 levels=o.get("levels"), signal_time=o.get("signal_time"), trigger_index=o.get("trigger_index"),
                 index_entry=o.get("index_entry"), delta=o.get("delta"), source=o.get("source", "live"),
+                shadow=o.get("shadow"),
             )
             self.book.position = pos
             # The contract is only needed to price an exit by the model: its kind, strike and expiry are kept.
@@ -464,6 +468,8 @@ class PaperSession:
         """A traded price of an option (exchange time). Under a premium rule it is checked against the open
         contract's stop and target; a hit sells at the bid. True when this closed the position."""
         p = self.book.position
+        if p is not None and p.key == key:
+            self._note_tick(key, price, now_ms)
         if (self.exit_rule is None or self.exit_rule.kind != "premium" or p is None or p.key != key
                 or p.levels is None or not self._tradable(now_ms)):
             return False
@@ -471,6 +477,54 @@ class PaperSession:
         if hit is None:
             return False
         return self._exit_on_rule(f"premium_{hit[0]}", now_ms)
+
+    def _note_tick(self, key: str, price: float, now_ms: int) -> None:
+        minute = now_ms // 1000 // 60 * 60
+        seen = self._tick_range.get((key, minute))
+        if seen is None:
+            self._tick_range = {k: v for k, v in self._tick_range.items() if k[1] >= minute - _TICK_MINUTES_KEPT * 60}
+            self._tick_range[(key, minute)] = [price, price]
+        else:
+            seen[0], seen[1] = min(seen[0], price), max(seen[1], price)
+
+    def on_option_minute(self, key: str, bar: dict[str, Any], *, now_ms: int) -> bool:
+        """An exchange-final (I1) 1-minute bar of an option. Under a premium rule, when it crossed the held
+        contract's stop or target and none of paper's ticks in that minute reached it, the trade records the
+        resting order's exit (its first such minute; app/paper/shadow.py). Paper's own exit is unchanged. Only a
+        minute held from its start to its end counts. The bar can arrive after paper's own exit: the closed trade
+        takes it then. True when a shadow was recorded."""
+        if self.exit_rule is None or self.exit_rule.kind != "premium":
+            return False
+        minute = int(bar["time"]) // 60 * 60
+        start_ms, end_ms = minute * 1000, (minute + 60) * 1000
+        p = self.book.position
+        last = self.book.trades[-1] if self.book.trades else None
+        held = p is not None and p.key == key and p.shadow is None and p.entry.at_ms <= start_ms + ENTRY_GRACE_MS
+        if held:
+            assert p is not None
+            levels, entry, units, charges_entry = p.levels, p.entry.price, p.units, p.entry.charges_total
+        elif (last is not None and last["key"] == key and not last.get("shadow")
+              and int(last["entry_at_ms"]) <= start_ms + ENTRY_GRACE_MS and int(last["exit_at_ms"]) >= end_ms):
+            levels, entry, units, charges_entry = (last.get("levels"), float(last["entry_price"]), int(last["units"]),
+                                                   float(last["charges_entry"]))
+        else:
+            return False
+        lo, hi = self._tick_range.get((key, minute), (None, None))
+        sh = shadow_exit(levels, bar, tick_low=lo, tick_high=hi)
+        if sh is None:
+            return False
+        sh = priced(sh, minute=minute, entry=entry, units=units, charges_entry=charges_entry,
+                    cost_table=self.cost_table, day=self.day)
+        if held:
+            assert p is not None
+            self.book.position = replace(p, shadow=sh)
+        else:
+            assert last is not None
+            last["shadow"] = sh
+        log.info("paper: %s %s I1 %s crossed %s %g (ticks %s-%s): shadow exit at %g", key, _hhmm(minute),
+                 "low" if sh["reason"] == "stop" else "high", sh["level"],
+                 float((levels or {})[sh["level"]] or 0), lo, hi, sh["price"])
+        return True
 
     def _check_index_exit(self, price: float, now_ms: int) -> bool:
         p = self.book.position
@@ -607,6 +661,11 @@ class PaperSession:
             "given_up_bars": list(self.bars.given_up),
             "pre_open_ignored": self.bars.pre_open_ignored,
         }
+
+
+#: an entry this close after a minute's start still holds that minute (a market entry fills at the first quote)
+ENTRY_GRACE_MS = 1_000
+_TICK_MINUTES_KEPT = 5
 
 
 def _hhmm(t: int) -> str:

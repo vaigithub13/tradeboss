@@ -44,7 +44,7 @@ from app.live.reconcile import reconcile_missed, reconcile_today
 from app.live.recorder import BINARY, RECV, SENT, Recorder, recording_path
 from app.live.session_days import listed_session
 from app.options.history import OptionHistoryStore, capture_session
-from app.paper.catchup import PAPER_BAR_SOURCES, replay_into
+from app.paper.catchup import PAPER_BAR_SOURCES, bar_minute, replay_into
 from app.paper.desk import SLOTS, PaperDesk
 from app.paper.live import PaperError, PaperRunner, session_factory
 from app.paper.pricing import VixSeries
@@ -328,10 +328,13 @@ class LiveService:
         return replay_into(session, path, on_vix=self.vix.add, open_volume_baseline=self.cfg.open_volume_baseline)
 
     def _feed_paper(self, events: list[BarEvent]) -> None:
-        """VIX feeds the model fallback; exchange-final index minutes feed the paper strategy."""
+        """VIX feeds the model fallback; exchange-final index minutes feed the paper strategy; exchange-final option
+        minutes are read against paper's ticks (shadow exits)."""
         for ev in events:
             if ev.key == VIX_KEY:
                 self.vix.add(ev.bar.time_s, ev.bar.close)
+            elif ev.key.startswith("NSE_FO|") and ev.bar.source in PAPER_BAR_SOURCES:
+                self.paper.on_option_minute(ev.key, bar_minute(ev), now_ms=self.engine.current_ts)
             elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in PAPER_BAR_SOURCES:
                 b = ev.bar
                 self.paper.on_index_bar(

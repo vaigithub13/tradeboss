@@ -23,12 +23,24 @@ export interface PaperTradeRow extends ReportRow {
   source: string;
   /** "entry" / "exit": the Nifty level came from the stored 1m candles (older trades) */
   index_from_candles: string[];
+  /** a resting exchange order's exit in a minute whose I1 bar crossed a level no feed tick reached (backend
+   * app/paper/shadow.py); paper's own exit is the row's */
+  shadow: ShadowExit | null;
+  /** the shadow's net, else the row's net */
+  shadow_net: number;
+}
+
+export interface ShadowExit {
+  exit_time: number;
+  exit_premium: number;
+  exit_reason: string;
+  net: number;
 }
 
 export type ColumnKey =
   | "date" | "slot" | "direction" | "signal" | "trigger" | "entryTime" | "niftyEntry" | "contract" | "lots"
   | "entryPremium" | "stop" | "target" | "exitTime" | "niftyExit" | "exitPremium" | "niftyPoints"
-  | "premiumPoints" | "gross" | "charges" | "net" | "r" | "reason";
+  | "premiumPoints" | "gross" | "charges" | "net" | "shadowNet" | "r" | "reason";
 
 export const COLUMNS: { key: ColumnKey; label: string; numeric?: boolean }[] = [
   { key: "date", label: "Date" },
@@ -51,6 +63,7 @@ export const COLUMNS: { key: ColumnKey; label: string; numeric?: boolean }[] = [
   { key: "gross", label: "Gross", numeric: true },
   { key: "charges", label: "Charges", numeric: true },
   { key: "net", label: "Net", numeric: true },
+  { key: "shadowNet", label: "Shadow net", numeric: true },
   { key: "r", label: "R", numeric: true },
   { key: "reason", label: "Exit reason" },
 ];
@@ -102,6 +115,9 @@ export function cellText(row: PaperTradeRow, key: ColumnKey): string {
     case "gross": return n2(row.gross);
     case "charges": return n2(row.charges);
     case "net": return n2(row.net);
+    case "shadowNet": return row.shadow == null
+      ? n2(row.shadow_net ?? row.net)
+      : `${n2(row.shadow.net)} (${hhmmss(row.shadow.exit_time)} ${row.shadow.exit_reason} ${n2(row.shadow.exit_premium)})`;
     case "r": return row.r_multiple == null ? "—" : `${row.r_multiple >= 0 ? "+" : ""}${row.r_multiple.toFixed(2)}`;
     case "reason": return row.exit_reason ?? "—";
   }
@@ -129,6 +145,7 @@ function sortValue(row: PaperTradeRow, key: ColumnKey): number | string | null {
     case "gross": return row.gross;
     case "charges": return row.charges;
     case "net": return row.net;
+    case "shadowNet": return row.shadow_net ?? row.net;
     case "r": return row.r_multiple;
     case "reason": return row.exit_reason;
   }
@@ -163,26 +180,39 @@ export interface Totals {
   wins: number;
   net: number;
   avgR: number | null;
+  /** the net had resting orders taken the exits paper's ticks missed; the difference is that minus `net` */
+  shadowNet: number;
+  shadowDiff: number;
+  /** rows with a shadow exit */
+  shadows: number;
   exits: Record<"target" | "stop" | "reversal" | "square-off" | "other", number>;
 }
 
 export function totals(rows: readonly PaperTradeRow[]): Totals {
   const exits = { target: 0, stop: 0, reversal: 0, "square-off": 0, other: 0 };
   let net = 0;
+  let shadowNet = 0;
+  let shadows = 0;
   let wins = 0;
   const rs: number[] = [];
   for (const r of rows) {
     net += r.net ?? 0;
+    shadowNet += r.shadow_net ?? r.net ?? 0;
+    if (r.shadow != null) shadows += 1;
     if ((r.net ?? 0) > 0) wins += 1;
     if (r.r_multiple != null) rs.push(r.r_multiple);
     const reason = r.exit_reason ?? "";
     if (reason === "target" || reason === "stop" || reason === "reversal" || reason === "square-off") exits[reason] += 1;
     else exits.other += 1;
   }
+  const cents = (v: number) => Math.round(v * 100) / 100;
   return {
     trades: rows.length,
     wins,
-    net: Math.round(net * 100) / 100,
+    net: cents(net),
+    shadowNet: cents(shadowNet),
+    shadowDiff: cents(shadowNet - net),
+    shadows,
     avgR: rs.length ? Math.round((rs.reduce((a, b) => a + b, 0) / rs.length) * 1000) / 1000 : null,
     exits,
   };

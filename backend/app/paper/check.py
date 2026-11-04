@@ -12,6 +12,11 @@ bar reason (a live gap, a different bar, or the same bar with a different state)
 A stop or target set from each side's own entry fill is two levels, paper's and the backtest's. When only the exit
 minute differs and the bar at the earlier exit crossed only the earlier side's level, the difference is a
 "fill-driven level difference" (12 Oct, slot 3): kept apart from the real differences, with both levels and that bar.
+
+Paper's premium levels trigger on the traded prices the feed sends; the official 1m bar also holds the trades between
+them. When only the exit minute differs, the backtest exited in a minute whose bar crossed paper's level and paper
+recorded a shadow exit there (no tick of that minute reached the level; app/paper/shadow.py), the difference is an
+"exchange-only crossing" (4 Nov, slot 4): kept apart too, with paper's shadow and that bar.
 """
 
 from __future__ import annotations
@@ -79,6 +84,7 @@ def _bar_of(row: dict[str, Any], step: int, basis: str) -> int:
 _SIDE = {"LONG": "BUY", "SHORT": "SELL"}
 _COMPARED = ("contract", "exit_time", "exit_reason")
 FILL_DRIVEN = "fill-driven level difference"
+EXCHANGE_ONLY = "exchange-only crossing"
 _LEVELS = frozenset({"premium_target", "premium_stop", "index_target", "index_stop"})
 
 #: (contract name, minute) -> the contract's 1m (open, high, low, close), or None
@@ -131,6 +137,42 @@ def _fill_driven(live: dict[str, Any], bt: dict[str, Any], *, option_bar: Option
     }
 
 
+def _exchange_only(live: dict[str, Any], bt: dict[str, Any], *,
+                   option_bar: OptionBar | None) -> dict[str, Any] | None:
+    """Paper's shadow and the bar, when the backtest's exit is the resting order paper's ticks missed."""
+    sh = live.get("shadow")
+    if not sh or bt.get("exit_time") is None or bt.get("exit_reason") != sh.get("exit_reason"):
+        return None
+    minute = _minute(bt["exit_time"])
+    if _minute(sh["exit_time"]) != minute:
+        return None
+    name = f"premium_{sh['exit_reason']}"
+    contract = str(live["contract"])
+    ohlc = None if option_bar is None else option_bar(contract, minute)
+    bar = None
+    if ohlc is not None:
+        o, h, lo, c = (float(x) for x in ohlc)
+        bar = {"time": _hhmm(minute), "of": contract, "open": o, "high": h, "low": lo, "close": c}
+    extreme = ""
+    if bar is not None:
+        side = "low" if name.endswith("stop") else "high"
+        extreme = f" {side} {bar[side]:g}"
+    return {
+        "shadow": sh,
+        "crossing_bar": bar,
+        "reason": (f"{EXCHANGE_ONLY}: {contract} {_hhmm(minute)}{extreme} crossed paper's {name} "
+                   f"{float(live.get(name) or 0):g}, no feed tick reached it (exit paper {_hhmm(_minute(live['exit_time']))}, "
+                   f"backtest {_hhmm(minute)}); a resting order: {float(sh['exit_premium']):g}, net {float(sh['net']):g}"),
+    }
+
+
+def split_kinds(diffs: list[dict[str, Any]]) -> dict[str, list[dict[str, Any]]]:
+    """The check's three lists: real differences, fill-driven level differences, exchange-only crossings."""
+    return {"differences": [d for d in diffs if d["kind"] not in (FILL_DRIVEN, EXCHANGE_ONLY)],
+            "fill_driven": [d for d in diffs if d["kind"] == FILL_DRIVEN],
+            "exchange_only": [d for d in diffs if d["kind"] == EXCHANGE_ONLY]}
+
+
 def _shown(field: str, value: Any) -> str:
     if field == "exit_time" and value is not None:
         return _hhmm(int(value))
@@ -152,7 +194,8 @@ def compare_trades(
 ) -> list[dict[str, Any]]:
     """Trade-report rows (app/exits/report.py) of paper and of the backtest, matched one to one on the direction and
     the fill minute. Each difference: {time (fill, HH:MM IST), side, source (the side that has the trade, or both),
-    kind ("difference", or FILL_DRIVEN with level and crossing_bar), fields (status, contract, exit_time,
+    kind ("difference", FILL_DRIVEN with level and crossing_bar, or EXCHANGE_ONLY with paper's shadow and
+    crossing_bar), fields (status, contract, exit_time,
     exit_reason), reason, live, backtest}. Empty when they agree. `option_bar` and `index_bar` give the 1m bars a
     fill-driven level difference is read on; without them every difference is a real one."""
     open_live = sorted(live, key=lambda r: int(r["fill_time"]))
@@ -174,11 +217,15 @@ def compare_trades(
             if fields:
                 reason = "; ".join(
                     f"{f}: paper {_shown(f, match.get(f))}, backtest {_shown(f, b.get(f))}" for f in fields)
-                driven = _fill_driven(match, b, option_bar=option_bar, index_bar=index_bar) if fields == [
-                    "exit_time"] else None
+                only_exit = fields == ["exit_time"]
+                driven = _fill_driven(match, b, option_bar=option_bar, index_bar=index_bar) if only_exit else None
+                missed = _exchange_only(match, b, option_bar=option_bar) if only_exit and driven is None else None
                 if driven is not None:
                     diffs.append({"time": _hhmm(minute), "side": side, "source": "both", "kind": FILL_DRIVEN,
                                   "fields": fields, **driven, "live": match, "backtest": b})
+                elif missed is not None:
+                    diffs.append({"time": _hhmm(minute), "side": side, "source": "both", "kind": EXCHANGE_ONLY,
+                                  "fields": fields, **missed, "live": match, "backtest": b})
                 else:
                     diffs.append({"time": _hhmm(minute), "side": side, "source": "both", "kind": "difference",
                                   "fields": fields, "reason": reason, "live": match, "backtest": b})
@@ -356,7 +403,8 @@ def end_of_day_check(
     tape: Any = None,
 ) -> dict[str, Any]:
     """Paper's trades (`live_report`, its trade-report rows) and decisions (`signals`) against the backtest's. A
-    fill-driven level difference goes to `fill_driven`, not `differences`."""
+    fill-driven level difference goes to `fill_driven`, an exchange-only crossing to `exchange_only`, not
+    `differences`."""
     decisions = [s for s in signals if s.get("side") in ("BUY", "SELL") and s.get("time") is not None]
     try:
         backtest, warnings = backtest_report(store=store, symbol=symbol, day=day, strategy=strategy, params=params,
@@ -374,8 +422,7 @@ def end_of_day_check(
         "live_trades": len(live_report),
         "backtest_signals": len(backtest),
         "backtest_trades": len(backtest),
-        "differences": [d for d in diffs if d["kind"] != FILL_DRIVEN],
-        "fill_driven": [d for d in diffs if d["kind"] == FILL_DRIVEN],
+        **split_kinds(diffs),
         "warnings": warnings,
         "compared": list(("status",) + _COMPARED + ("fill_minute",)),
     }

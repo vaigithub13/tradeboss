@@ -12,7 +12,7 @@ function row(over: Partial<PaperTradeRow> = {}): PaperTradeRow {
     index_stop: 22571.55, index_target: 22420.05, premium_stop: 101, premium_target: 176.75, estimated: ["index"],
     exit_time: T(8, 10, 40, 49), index_exit: 22420.1, exit_premium: 175.5, nifty_points: -100.95, premium_points: 49.25,
     gross: 3201.25, charges: 72.81, net: 3128.44, risk: 1641.25, r_multiple: 1.906, exit_reason: "target",
-    exit_reason_raw: "premium_target", source: "live", index_from_candles: [],
+    exit_reason_raw: "premium_target", source: "live", index_from_candles: [], shadow: null, shadow_net: 3128.44,
     ...over,
   } as PaperTradeRow;
 }
@@ -22,7 +22,7 @@ describe("paper trades view", () => {
     expect(COLUMNS.map((c) => c.label)).toEqual([
       "Date", "Slot", "Direction", "Signal bar", "Trigger Nifty", "Entry time", "Nifty at entry", "Contract",
       "Lots x qty", "Entry premium", "Stop: Nifty / premium", "Target: Nifty / premium", "Exit time", "Nifty at exit",
-      "Exit premium", "Nifty points", "Premium points", "Gross", "Charges", "Net", "R", "Exit reason",
+      "Exit premium", "Nifty points", "Premium points", "Gross", "Charges", "Net", "Shadow net", "R", "Exit reason",
     ]);
   });
 
@@ -31,8 +31,12 @@ describe("paper trades view", () => {
     expect(COLUMNS.map((c) => cellText(r, c.key))).toEqual([
       "2026-10-08", "4", "PE", "09:15:00", "22521.05", "09:24:37", "22521.05", "22500 PE 13 OCT 26", "1 x 65",
       "126.25 real", "~22571.55 / 101.00", "~22420.05 / 176.75", "10:40:49", "22420.10", "175.50", "-100.95",
-      "+49.25", "3201.25", "72.81", "3128.44", "+1.91", "target",
+      "+49.25", "3201.25", "72.81", "3128.44", "3128.44", "+1.91", "target",
     ]);
+    // a resting order's exit in a minute paper's ticks missed (slot 4, 4 Nov: the 10:23 bar's low 140.25)
+    const missed = row({ net: -2247.71, shadow_net: -2425.04,
+      shadow: { exit_time: T(8, 10, 23), exit_premium: 141.24, exit_reason: "stop", net: -2425.04 } });
+    expect(cellText(missed, "shadowNet")).toBe("-2425.04 (10:23:00 stop 141.24)");
     const old = row({ index_from_candles: ["exit"], index_stop: null, index_target: null, premium_stop: null,
       premium_target: null, estimated: [], r_multiple: null, entry_source: "modelled" });
     expect(cellText(old, "niftyExit")).toBe("≈22420.10");
@@ -48,8 +52,11 @@ describe("paper trades view", () => {
     expect(sortRows(rows, "r", "asc").map((r) => r.slot)).toEqual(["3", "4", "1"]); // empty last
     expect(filterRows(rows, { slot: "4", from: "", to: "" }).map((r) => r.slot)).toEqual(["4"]);
     expect(filterRows(rows, { slot: "", from: "2026-10-08", to: "2026-10-08" }).map((r) => r.slot)).toEqual(["4"]);
+    rows[2] = { ...rows[2]!, shadow_net: -2100.0,
+      shadow: { exit_time: T(9, 10, 0), exit_premium: 100, exit_reason: "stop", net: -2100.0 } };
+    rows[0] = { ...rows[0]!, shadow_net: -500 };
     expect(totals(rows)).toEqual({
-      trades: 3, wins: 1, net: 647.6, avgR: 0.443,
+      trades: 3, wins: 1, net: 647.6, avgR: 0.443, shadowNet: 528.44, shadowDiff: -119.16, shadows: 1,
       exits: { target: 1, stop: 1, reversal: 0, "square-off": 1, other: 0 },
     });
   });

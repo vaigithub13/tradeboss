@@ -331,6 +331,13 @@ class PaperRunner:
             self._save()
             self._sync_wanted()
 
+    def on_option_minute(self, key: str, bar: dict[str, Any], *, now_ms: int) -> None:
+        """An exchange-final option minute: a premium level it crossed that no tick reached is a shadow exit."""
+        if self.state != "running" or self.session is None or self.day is None or ist_date(now_ms) != self.day:
+            return
+        if self.session.on_option_minute(key, bar, now_ms=now_ms):
+            self._save()
+
     def on_index_bar(self, bar: dict[str, Any], *, now_ms: int) -> None:
         if self.state != "running" or self.session is None or self.day is None:
             return
