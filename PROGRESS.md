@@ -1071,3 +1071,69 @@ The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
   kept); launchd job loaded. Backend 1445 passed, 1 skipped; frontend 370 passed.
 - Next: the nearest weekly in the 3 Nov snapshot is Mon 9 Nov (Tue 10 Nov is a holiday), lot 65. Sun 8 Nov is the
   Muhurat session, 14:20-15:30.
+
+## 4 Nov 2026: forward-test day 6 (four slots)
+
+Fresh `npm run session` at 08:34 (startup reconcile: 3 Nov `final`, 3 instrument-days ok). All four slots warm 500
+bars, 75 closed bars each, no incomplete, late-after-gap or given-up bars; every signal and trade `live`, every
+premium leg a real quote (0 modelled). Settings unchanged. End-of-day check: slots 1 and 3 4 live vs 4 backtest
+trades, slots 2 and 4 3 vs 3; slots 1-3 0 differences, slot 4 1 difference (exit time, below); 0 fill-driven, no
+warnings on every slot. Nifty opened 23742.25 (day range 23696.15-23960.60), was 23912.70 at the 15:15 square-off
+and closed 23960.60 (15:29).
+
+Trades (9 Nov expiry, DTE 3, 1 lot of 65). Columns as on 2 Nov. Trigger: Log XZ paper records the signal bar's
+close, the backtest the fill minute's open (23836.25 vs 23837.15 etc.); slots 2/4 09:21 the open gapped through the
+channel stop, so paper records the stop (23882.40) and the backtest the open (23886.55). The check does not compare
+this field. Entry and exit premium: paper real / backtest.
+
+| slot | signal | trigger | fill | Nifty in | contract | entry real / bt | stop / target | exit | Nifty out | exit prem | reason | net ₹ | R |
+|---|---|---:|---|---:|---|---:|---|---|---:|---:|---|---:|---:|
+| 1 | 10:35 | 23836.25 | 10:41:00 | 23836.25 | 23850 PE | 205.00 / 204.40 | – | 10:46:00 | 23834.55 | 201.85 / 201.75 | reversal | −283.13 | – |
+| 1 | 10:40 | 23834.55 | 10:46:00 | 23834.55 | 23850 CE | 167.30 / 166.95 | – | 11:11:00 | 23810.05 | 156.40 / 156.65 | reversal | −780.11 | – |
+| 1 | 11:05 | 23810.05 | 11:11:00 | 23810.05 | 23800 PE | 183.55 / 182.10 | – | 12:46:00 | 23825.15 | 165.40 / 165.20 | reversal | −1,252.97 | – |
+| 1 | 12:40 | 23825.15 | 12:46:00 | 23825.15 | 23850 CE | 160.20 / 159.90 | – | 15:15:00 | 23912.70 | 203.95 / 204.25 | square-off | +2,766.40 | – |
+| 2 | 09:15 | 23882.40 | 09:21:00 | 23886.85 | 23900 CE | 176.55 / 175.65 | – | 11:01:00 | 23807.95 | 132.90 / 131.50 | reversal | −2,906.20 | – |
+| 2 | 10:55 | 23808.95 | 11:01:00 | 23807.95 | 23800 PE | 194.35 / 195.25 | – | 13:06:00 | 23838.10 | 159.55 / 159.10 | reversal | −2,334.80 | – |
+| 2 | 13:00 | 23837.15 | 13:06:00 | 23838.10 | 23850 CE | 162.25 / 162.50 | – | 15:15:00 | 23912.70 | 203.95 / 204.25 | square-off | +2,633.08 | – |
+| 3 | 10:35 | 23836.25 | 10:41:00 | 23836.25 | 23850 PE | 205.00 / 204.40 | 164.00 / 287.00 | 10:46:00 | 23834.55 | 201.85 / 201.75 | reversal | −283.13 | −0.11 |
+| 3 | 10:40 | 23834.55 | 10:46:00 | 23834.55 | 23850 CE | 167.30 / 166.95 | 133.84 / 234.22 | 11:11:00 | 23810.05 | 156.40 / 156.65 | reversal | −780.11 | −0.36 |
+| 3 | 11:05 | 23810.05 | 11:11:00 | 23810.05 | 23800 PE | 183.55 / 182.10 | 146.84 / 256.97 | 12:46:00 | 23825.15 | 165.40 / 165.20 | reversal | −1,252.97 | −0.53 |
+| 3 | 12:40 | 23825.15 | 12:46:00 | 23825.15 | 23850 CE | 160.20 / 159.90 | 128.16 / 224.28 | 15:15:00 | 23912.70 | 203.95 / 204.25 | square-off | +2,766.40 | +1.33 |
+| 4 | 09:15 | 23882.40 | 09:21:00 | 23886.85 | 23900 CE | 176.55 / 175.65 | 141.24 / 247.17 | 10:25:23 | 23835.45 | 143.05 / 140.32 | stop | −2,247.71 | −0.98 |
+| 4 | 10:55 | 23808.95 | 11:01:00 | 23807.95 | 23800 PE | 194.35 / 195.25 | 155.48 / 272.09 | 13:06:00 | 23838.10 | 159.55 / 159.10 | reversal | −2,334.80 | −0.92 |
+| 4 | 13:00 | 23837.15 | 13:06:00 | 23838.10 | 23850 CE | 162.25 / 162.50 | 129.80 / 227.15 | 15:15:00 | 23912.70 | 203.95 / 204.25 | square-off | +2,633.08 | +1.25 |
+
+| slot | strategy | trades | target / stop / reversal / square-off | net ₹ | live days to date net ₹ (8, 9, 12 Oct, 2, 3, 4 Nov) |
+|---|---|---:|---|---:|---:|
+| 1 | Log XZ | 4 | 0 / 0 / 3 / 1 | +450.19 | +29,057.27 (16 trades, 11 wins; 0 / 0 / 10 / 6) |
+| 2 | Price Channel 20 | 3 | 0 / 0 / 2 / 1 | −2,607.92 | +18,812.42 (12, 7 wins; 0 / 0 / 6 / 6) |
+| 3 | Log XZ, 1:2 premium | 4 | 0 / 0 / 3 / 1 | +450.19 | +16,540.18 (15, 9 wins; 7 / 3 / 4 / 1; from 9 Oct) |
+| 4 | Price Channel 20, 1:2 premium | 3 | 0 / 1 / 1 / 1 | −1,949.43 | −885.15 (11, 5 wins; 2 / 4 / 2 / 3; from 9 Oct) |
+
+The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
+
+- Paper vs backtest net: slot 1 +450.19 vs +641.97, slot 2 −2,607.92 vs −2,724.72, slot 3 +450.19 vs +641.97,
+  slot 4 −1,949.43 vs −2,152.51. Slot 3 equals slot 1: no premium level was reached before a reversal or the
+  square-off. Same contract, fill minute and reason on every trade; exit minute the same except slot 4's first trade.
+- **Slot 4 difference (exit time, 23900 CE stop): paper 10:25:23, backtest 10:23.** Not fill-driven: the 10:23 bar
+  (I1, the stored bar) has low 140.25, under both stops (paper 141.24 from 176.55, backtest 140.52 from 175.65), so
+  the backtest exits at 10:23 and paper should have too. Paper triggers on traded prices it receives: the lowest LTP
+  in its 10:23 ticks was 141.80 (88 ticks; `minutes.jsonl` tick low 141.80 vs I1 low 140.25), and 10:24's 143.65. The
+  first tick at or under 141.24 came at 10:25:23 (10:25 tick low 138.30); sold at the bid 143.05 (mid 143.175). The
+  feed's LTP snapshots missed the 10:23 low trade. First difference of this kind; paper's exit was 2.73 points
+  better than the backtest's 140.32, net +118.59. No code change; the check flags it as a difference, correctly.
+- Fill-driven levels (no other exit changed, so none is in `fill_driven`): slot 3's premium levels sit 0.28-1.16
+  points from the backtest's (PE 23800 stop 146.84 vs 145.68 from 183.55 vs 182.10); slot 4's 0.72-1.26 (CE 23900
+  target 247.17 vs 245.91 from 176.55 vs 175.65, the gapped stop entry 0.90 over the model).
+- Spreads 4 Nov, ATM, DTE 3: CE median 0.40 / p90 0.45, PE 0.40 / 0.50; one-side 1-lot fill 0.20 (both), round trip
+  ₹26.00. The widest ATM day since 6 Oct (previous high 0.30, 8 Oct, also DTE 3-4); the all-strike median eased from
+  0.40 to 0.35 from 12:45 and 0.30 at 15:00. Since 6 Oct (8 days: DTE 0, 4, 3, 2, 1, 1, 0, 3): mean one-side 0.125,
+  round trip ₹16.25. Paper's own legs today: 0.18-0.22 points on average per slot.
+- Reconcile: 4 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 volume 95,225 vs
+  114,400; 14 expected: 4 OI and 15:30-15:39). 3 Nov `final` at the 08:34 start (61471 0 differences, 10 expected).
+  Option capture 15:45: 9 Nov expiry, 16 strikes, 32 stored, 0 empty, 0 failed.
+- Health: one backend 08:34-16:34, feed live 08:55-15:40 (and 15:50-16:00) with no reconnect; 0 warnings, 0 errors,
+  no backfills (no gaps); the one traceback is the 16:34 Ctrl+C (CancelledError → KeyboardInterrupt). Session gate:
+  4 Nov is a listed trading day; recording started at 09:00; no "unlisted session" line. Snapshot 4 Nov saved at
+  08:30 (14 kept); launchd job loaded. Backend 1445 passed, 1 skipped; frontend 370 passed.
+- Next: Thu 5 and Fri 6 Nov, then Sun 8 Nov Muhurat (14:20-15:30) and Mon 9 Nov expiry, lot 65.
