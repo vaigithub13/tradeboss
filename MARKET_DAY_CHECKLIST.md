@@ -36,8 +36,10 @@ For every trading day (first used for Monday sessions). Times are IST.
 - After a successful reconcile the backend stores the day's option bars (nearest weekly, ATM ±5 over the day's range)
   in `data/option_history/`; the log says `option capture <day>: expiry …`. By hand:
   `cd backend && uv run python -m scripts.capture_option_day [--day YYYY-MM-DD]`.
-- The spread report is in `data/spreads/reports/<day>.md`; the paper day file `data/paper/<day>.json` has `eod_check`,
-  and `late_bars` / `given_up_bars` for bars a feed gap left short (rebuilt from the backfill, or given up).
+- The spread report is in `data/spreads/reports/<day>.md`; the paper day file `data/paper/<day>.json` has `eod_check`
+  (`differences`, `fill_driven`, `exchange_only`), and `late_bars` / `given_up_bars` for bars a feed gap left short
+  (rebuilt from the backfill, or given up). A trade's `shadow` is a resting order's exit in a minute whose I1 bar
+  crossed a premium level no tick reached; `summary.shadow_net` / `shadow_diff` are the day's totals.
 - After 16:10: stop `npm run session` with ONE Ctrl+C and wait for "Application shutdown complete" (at most a few
   seconds). The shutdown writes the spread report and the paper day file. Stopping before 15:45 logs a warning:
   the reconcile, the paper end-of-day check and the full-day spread report then do not run.

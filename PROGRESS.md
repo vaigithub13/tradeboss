@@ -1137,3 +1137,32 @@ The vacation backtest (13-30 Oct, 31 Oct entry) is not in these totals.
   4 Nov is a listed trading day; recording started at 09:00; no "unlisted session" line. Snapshot 4 Nov saved at
   08:30 (14 kept); launchd job loaded. Backend 1445 passed, 1 skipped; frontend 370 passed.
 - Next: Thu 5 and Fri 6 Nov, then Sun 8 Nov Muhurat (14:20-15:30) and Mon 9 Nov expiry, lot 65.
+
+## 4 Nov 2026 (after the close): shadow exits and exchange-only crossings
+
+From the slot 4 difference above. Code on `35601aa`; written test-first, the case is that trade (tests
+`test_paper_shadow.py`, `test_paper_exchange_only.py`, `test_paper_shadow_backfill.py`).
+
+- **Shadow exit** (`app/paper/shadow.py`). Paper still exits on the traded prices it receives. Each exchange-final
+  (I1) option minute now also reaches paper (live service, desk, catch-up); for the held contract under a premium
+  rule, a minute held from start to end whose bar crossed the stop or target while paper's ticks of that minute did
+  not reach it records, beside the trade, what a resting order would have done: exit in that minute, a stop at the
+  level (at the bar's low when the bar opened through it), a target at the level, with that exit leg's charges and
+  its own net. First such minute only; a bar that arrives after paper's exit goes to the closed trade. Index (ATR)
+  levels are not shadowed.
+- Trade rows carry `shadow` and `shadow_net` (paper's net when there is no shadow); the day summary and the week
+  carry `shadow_net` and `shadow_diff`. Panel: a "Shadow net" column in Trades with the filtered totals' shadow net,
+  difference and shadow count; the slot's Day and Week lines show both.
+- **End-of-day check:** an exit-time-only difference where the backtest exits in paper's shadow minute for the same
+  reason is an "exchange-only crossing", listed in `exchange_only` with the shadow and the bar, apart from
+  `differences` and `fill_driven`.
+- Verified offline on today's recording (fresh sessions, no backend, no feed): slots 3 and 4 trade exactly as saved;
+  slot 4's 23900 CE gets the 10:23 shadow (tick low 141.80, I1 low 140.25, stop 141.24, net −2,365.14 vs paper
+  −2,247.71; the backtest −2,366.30). Backend 1468 passed, 1 skipped; frontend 370 passed; typecheck and build clean.
+- Saved day files from 8 Oct: `scripts.paper_shadow_backfill` (minute logs, "close" phase) then
+  `scripts.paper_recheck_eod`. Two shadows over all live days:
+  - slot 4, 4 Nov, 23900 CE 10:23 stop 141.24: −117.43; the check moved it from `differences` to `exchange_only`.
+  - slot 3, 2 Nov, 23300 CE 14:38 target 87.57 (I1 high 87.70, ticks to 87.40; paper sold 86.75 at 14:44:12):
+    +53.20. No check entry: the backtest's target (87.92, from 62.80) was not crossed at 14:38, so both exited 14:44.
+- Running difference, shadow net minus paper net, live days (8, 9, 12 Oct, 2, 3, 4 Nov): slot 1 0.00, slot 2 0.00,
+  slot 3 +53.20 (1 shadow), slot 4 −117.43 (1); all slots −64.23. Slots 1 and 2 have no premium rule.
