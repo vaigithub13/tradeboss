@@ -1166,3 +1166,12 @@ From the slot 4 difference above. Code on `35601aa`; written test-first, the cas
     +53.20. No check entry: the backtest's target (87.92, from 62.80) was not crossed at 14:38, so both exited 14:44.
 - Running difference, shadow net minus paper net, live days (8, 9, 12 Oct, 2, 3, 4 Nov): slot 1 0.00, slot 2 0.00,
   slot 3 +53.20 (1 shadow), slot 4 −117.43 (1); all slots −64.23. Slots 1 and 2 have no premium rule.
+- **Revised (4 Nov, `961b77b`):** a gapped stop's shadow exits at the bar's open, as the backtest engine's gap fill
+  (`first_hit`), no longer at the bar's low; a target stays at the level. `scripts.paper_shadow_backfill
+  --recompute` works every saved shadow out again. Rerun from 8 Oct: the same two shadows, neither a gapped stop
+  (slot 4's 10:23 bar opened at 161.00 over the 141.24 stop; slot 3's is a target), so the running differences are
+  unchanged: slot 1 0.00, slot 2 0.00, slot 3 +53.20, slot 4 −117.43, all −64.23. Checks unchanged (slot 4 4 Nov
+  `exchange_only` 1). Backend 1469 passed, 1 skipped; frontend 370 passed.
+- ATR (index-level) shadows: not needed now (no slot runs an ATR rule); the shadow reads premium levels only. If an
+  ATR slot is added, an index I1 minute crossing a level no index tick reached would need its own shadow, priced
+  from the option's minute bar.
