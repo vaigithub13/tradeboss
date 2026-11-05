@@ -1175,3 +1175,34 @@ From the slot 4 difference above. Code on `35601aa`; written test-first, the cas
 - ATR (index-level) shadows: not needed now (no slot runs an ATR rule); the shadow reads premium levels only. If an
   ATR slot is added, an index I1 minute crossing a level no index tick reached would need its own shadow, priced
   from the option's minute bar.
+
+## 5 Nov 2026: forward-test day 7 (four slots)
+
+Fresh `npm run session` at 08:32 (startup reconcile: 4 Nov `final`, 3 instrument-days ok). All four slots warm 500
+bars, 75 closed bars each, no incomplete, late-after-gap or given-up bars; every signal and trade `live`, every
+premium leg a real quote (0 modelled). Settings unchanged. First day with shadow exits recorded live: none today.
+End-of-day check: slots 1 and 3 0 live vs 0 backtest trades (Log XZ gave no signal), slots 2 and 4 1 vs 1; every
+slot 0 differences, 0 fill-driven, 0 exchange-only, no warnings. Nifty opened 24378.05 (day range
+24296.30-24579.90), was 24542.45 at the 15:15 square-off and closed 24536.60 (15:29).
+
+Trades (9 Nov expiry, DTE 2, 1 lot of 65; paper / backtest):
+- Slot 2 (Price Channel 20): 09:35 bar, buy stop 24392.00, filled 09:45:07 at Nifty 24392.00, 24400 CE 140.80 /
+  140.98; square-off 15:15 at Nifty 24542.45, 236.90 / 237.90; net +6,165.61 / +6,218.60.
+- Slot 4 (Price Channel 20, 1:2 premium): the same entry; stop 112.64 / 112.79, target 197.12 / 197.38; target
+  13:33:13 at Nifty 24501.25 (first tick at or over 197.12, sold at the bid 196.70) / 13:33:00 at 197.18; net
+  +3,557.63 / +3,576.89, R +1.94 / +1.95. No shadow (the exit minute was not held to its end). The levels sit
+  0.15-0.26 from the backtest's (entry 0.18 under the model); same exit minute, so nothing in `fill_driven`.
+- Running (live days 8, 9, 12 Oct, 2-5 Nov; target/stop/reversal/square-off): slot 1 +29,057.27 (16 trades, 11
+  wins; 0/0/10/6), slot 2 +24,978.03 (13, 8; 0/0/6/7), slot 3 +16,540.18 (15, 9; 7/3/4/1), slot 4 +2,672.48 (12,
+  6; 3/4/2/3). Shadow difference unchanged: slot 3 +53.20, slot 4 −117.43, all −64.23 (2 shadows).
+- Spreads 5 Nov, ATM, DTE 2: CE median 0.35 / p90 0.40, PE 0.30 / 0.40; one-side 1-lot fill 0.175 (CE) / 0.15 (PE),
+  round trip ₹22.75 / ₹19.50. All-strike median 0.30-0.35 all day. Since 6 Oct (9 days: DTE 0, 4, 3, 2, 1, 1, 0,
+  3, 2): mean one-side 0.129, round trip ₹16.79. Paper's own legs today: 0.20 (slot 4) and 0.225 (slot 2) points
+  on average.
+- Reconcile: 5 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 volume 313,170 vs
+  366,210; 17 expected: 7 OI and 15:30-15:39). 4 Nov `final` at the 08:32 start (61471 0 differences, 10 expected).
+  Option capture 15:45: 9 Nov expiry, 17 strikes, 34 stored, 0 empty, 0 failed.
+- Health: one backend 08:32-17:01, feed live 08:55-15:40 (and 15:50-16:00) with no reconnect; 0 warnings, 0 errors,
+  no traceback. The strike window grew with the rally (new pairs at 09:51, 13:17, 13:37, 13:48); the 13:48 pair
+  (24700 CE/PE) took its 09:15-13:47 minutes from the intraday history (272/273 bars). No index or future gap.
+  Session gate: listed trading day, recording from 09:00. Snapshot 08:32 (15 kept), launchd job loaded.
