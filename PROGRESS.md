@@ -1439,3 +1439,16 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   (was 1506 passed, 1 skipped; frontend 370 passed). Two tests were corrected: the route test
   expected 10 Nov 2026, an NSE holiday, so that Tuesday weekly expires Monday 9 Nov and rolls at
   15:30 that day; the read-only client allowlist now includes `option_chain` (a GET).
+
+## 7 Nov 2026: India VIX indicator
+
+- New indicator type `vix` (Indicators menu, "India VIX", own pane). For every chart candle it shows the close of
+  the India VIX bar at the same time and timeframe (`app/indicators/vix.py`; both series share the store and the
+  09:15-anchored resampler), plus `change` versus the previous candle. Days without VIX bars stay empty. A replay
+  cursor clips the VIX bars like the chart, so no later value is shown.
+- Params: `low` 13, `high` 15 (dashed guide lines; the line is coloured below / between / above), `shade` on: a
+  light tint behind price candles whose VIX is above `high`. Legend: value and change for the hovered candle.
+- Live: a VIX tick now marks the Nifty chart dirty (`symbols_dirtied_by(..., vix_dir=...)`), so the value moves
+  with the forming candle.
+- Not available to strategies in a backtest (exempt in `test_1d_covers_every_registry_type`, like `vwap_fut`).
+- Tests: `tests/test_vix_indicator.py`, `src/indicators/vix.test.ts`; registry and catalog type lists updated.

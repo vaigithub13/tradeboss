@@ -18,6 +18,7 @@ from app.data.store import CandleStore
 from app.indicators.frame import candles_to_frame
 from app.indicators.futures_vwap import NIFTY_SYMBOL, values_for_chart
 from app.indicators.registry import IndicatorSpec, compute, warmup_bars
+from app.indicators.vix import vix_for_chart
 
 _TIMEFRAME_MINUTES = {"1m": 1, "3m": 3, "5m": 5, "15m": 15, "30m": 30, "1h": 60, "1D": 1440, "1W": 10080}
 _LOOKBACK_FACTOR = 6  # a trading day is ~6.4h of 24h, plus weekends/holidays: start generous, then grow
@@ -91,6 +92,10 @@ def compute_indicators(
                 store, candles, s.params, types, bar_minutes * 60, to_time=to_time, cursor=cursor,
             )
             values = {"vwap": projected, "fallback": fallback}
+        elif s.type == "vix":
+            vix_frame = frame.copy()
+            vix_frame["vix_close"] = vix_for_chart(store, candles, timeframe, types, cursor=cursor)
+            values = compute(vix_frame, "vix", s.params)
         else:
             values = compute(frame, s.type, s.params)  # may raise VolumeRequired
         outputs.append(

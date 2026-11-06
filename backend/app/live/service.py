@@ -53,11 +53,17 @@ from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, current_index
 log = logging.getLogger("tradeboss.live.service")
 
 
-def symbols_dirtied_by(updated: set[str], *, future_dir: str | None, index_dir: str = "NIFTY50") -> set[str]:
-    """A tick on the front future also refreshes the Nifty chart, so its futures-volume VWAP moves."""
+def symbols_dirtied_by(
+    updated: set[str], *, future_dir: str | None, index_dir: str = "NIFTY50", vix_dir: str | None = None
+) -> set[str]:
+    """A tick on the front future also refreshes the Nifty chart, so its futures-volume VWAP moves.
+    A VIX tick refreshes the Nifty chart too, so its India VIX indicator moves."""
+    out = set(updated)
     if future_dir and future_dir in updated:
-        return set(updated) | {index_dir}
-    return set(updated)
+        out.add(index_dir)
+    if vix_dir and vix_dir in updated:
+        out.add(index_dir)
+    return out
 
 STALE_AFTER_S = 15.0
 PAPER_SYMBOL = "NIFTY50"  # the chart symbol whose stored candles the end-of-day check reads
@@ -300,7 +306,9 @@ class LiveService:
             idx = current_index(self.cfg.instruments_dir)
             fut = idx.front_future() if idx is not None else None
             future_dir = symbol_dir_name(fut.key) if fut is not None else None
-            self.hub.mark_dirty(symbols_dirtied_by(set(by_dir), future_dir=future_dir))
+            self.hub.mark_dirty(
+                symbols_dirtied_by(set(by_dir), future_dir=future_dir, vix_dir=symbol_dir_name(VIX_KEY))
+            )
         if diffs and day is not None:
             append_jsonl(self.cfg.recordings_dir / f"{day.isoformat()}.overwrites.jsonl", [x.as_dict() for x in diffs])
         for req in requests:

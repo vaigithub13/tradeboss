@@ -2,6 +2,7 @@ import type { Candle, Timeframe } from "../api/client";
 import { hasVolume } from "../chart/volume";
 import { indicatorName, unavailableReason, type IndicatorInstance } from "./catalog";
 import { valueAt, type IndicatorEntry } from "./cache";
+import { formatVixChange, vixColor } from "./vix";
 
 export interface LegendEntry {
   label: string;
@@ -93,6 +94,17 @@ export function legendRows(args: {
             { label: "macd", text: fmt(at("macd")), color: color("macd") },
             { label: "signal", text: fmt(at("signal")), color: color("signal") },
             { label: "hist", text: fmt(hist), color: hist !== null && hist < 0 ? color("histDown") : color("histUp") },
+          );
+          break;
+        }
+        case "vix": {
+          const v = at("vix");
+          const levels = { low: Number(item.params["low"] ?? 13), high: Number(item.params["high"] ?? 15) };
+          const zone = { low: color("low"), mid: color("mid"), high: color("high") };
+          const shown = v === null ? color("mid") : vixColor(v, levels, zone);
+          row.entries.push(
+            { label: "", text: fmt(v), color: shown },
+            { label: "chg", text: formatVixChange(at("change")), color: shown },
           );
           break;
         }

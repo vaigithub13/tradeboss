@@ -1,6 +1,6 @@
 import type { Timeframe } from "../api/client";
 
-export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg"] as const;
+export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg", "vix"] as const;
 export type IndicatorType = (typeof INDICATOR_TYPES)[number];
 
 export const SOURCES = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"] as const;
@@ -202,6 +202,23 @@ export const CATALOG: Record<IndicatorType, IndicatorDef> = {
     ],
     outputs: ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
   },
+  vix: {
+    type: "vix", label: "India VIX", pane: "separate",
+    params: [
+      { key: "low", label: "Low level", kind: "float", default: 13, min: 0, max: 100, step: 0.5 },
+      { key: "high", label: "High level", kind: "float", default: 15, min: 0, max: 100, step: 0.5 },
+      {
+        key: "shade", label: "Shade candles above high", kind: "choice", default: "on",
+        options: [{ value: "on", label: "On" }, { value: "off", label: "Off" }],
+      },
+    ],
+    colors: [
+      { key: "low", label: "Below low", default: "#8b93a7" },
+      { key: "mid", label: "Low to high", default: "#f6c343" },
+      { key: "high", label: "Above high", default: "#ef5350" },
+    ],
+    outputs: ["vix", "change"],
+  },
 };
 
 export const isIndicatorType = (v: unknown): v is IndicatorType =>
@@ -247,6 +264,9 @@ export function validateParams(type: IndicatorType, params: Params): string | nu
   }
   if (type === "macd" && Number(params["fast"]) >= Number(params["slow"])) {
     return "Fast length must be smaller than slow length";
+  }
+  if (type === "vix" && Number(params["low"]) > Number(params["high"])) {
+    return "Low level must not be above the high level";
   }
   return null;
 }
@@ -295,6 +315,8 @@ export function indicatorName(inst: Pick<IndicatorInstance, "type" | "params">):
       return `${label} (${fmtNum(p["source"])})`;
     case "vwap_fut":
       return "VWAP (futures volume)";
+    case "vix":
+      return `${label} (${fmtNum(p["low"])} / ${fmtNum(p["high"])})`;
     case "fvg": {
       const tf = p["timeframe"] ? String(p["timeframe"]) : "chart";
       const gaps = p["session_gaps"] === "exclude" ? "overnight gaps excluded" : "overnight gaps included";

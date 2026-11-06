@@ -19,11 +19,11 @@ from app.indicators.momentum import macd, rsi, stochastic
 from app.indicators.volatility import supertrend
 from app.indicators.volume import VolumeRequired, vwap
 
-INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg")
+INDICATOR_TYPES: tuple[str, ...] = ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg", "vix")
 
 PANES: dict[str, str] = {
     "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price", "vwap_fut": "price",
-    "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price",
+    "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price", "vix": "separate",
 }  # fmt: skip
 
 OUTPUTS: dict[str, list[str]] = {
@@ -37,6 +37,7 @@ OUTPUTS: dict[str, list[str]] = {
     "vwap": ["vwap"],
     "vwap_fut": ["vwap"],
     "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
+    "vix": ["vix", "change"],
 }
 
 MIN_WARMUP_BARS = 500
@@ -95,6 +96,12 @@ PARAMS: dict[str, dict[str, ParamSpec]] = {
         "roll_days": ParamSpec("int", 2, 0, 20),
         "roll_on_volume": ParamSpec("choice", "on", options=("on", "off")),
     },
+    # thresholds and shading only colour the chart; the values do not depend on them
+    "vix": {
+        "low": ParamSpec("float", 13.0, 0, 100),
+        "high": ParamSpec("float", 15.0, 0, 100),
+        "shade": ParamSpec("choice", "on", options=("on", "off")),
+    },
 }
 
 
@@ -138,6 +145,8 @@ def validate_params(itype: str, params: Mapping[str, Any] | None) -> dict[str, A
     out = {name: _coerce(name, spec, given.get(name, spec.default)) for name, spec in specs.items()}
     if itype == "macd" and out["fast"] >= out["slow"]:
         raise ValueError("macd: fast length must be smaller than slow length")
+    if itype == "vix" and out["low"] > out["high"]:
+        raise ValueError("vix: the low level must not be above the high level")
     return out
 
 
@@ -163,6 +172,8 @@ def warmup_bars(itype: str, params: Mapping[str, Any], bar_minutes: int) -> int:
         rule = math.ceil(1440 / bar_minutes)  # 24h of bars: always reaches the start of the day
     elif itype == "fvg":
         rule = 2  # candle 3 is the first bar a gap can exist on
+    elif itype == "vix":
+        rule = 1  # no state: only the previous candle (for the change)
     else:
         raise ValueError(f"Unknown indicator type {itype!r}")
     floor = MIN_SUPERTREND_WARMUP_BARS if itype == "supertrend" else MIN_WARMUP_BARS
@@ -200,6 +211,12 @@ def compute(df: pd.DataFrame, itype: str, params: Mapping[str, Any]) -> dict[str
         series = {"vwap": session_vwap(df, df["fut_volume"].to_numpy(dtype=float), params["source"])}
     elif itype == "fvg":
         return compute_fvg(df, dict(params))
+    elif itype == "vix":
+        if "vix_close" not in df.columns:
+            raise ValueError("India VIX needs VIX bars aligned to the chart (vix_close)")
+        from app.indicators.vix import vix_outputs
+
+        return vix_outputs(df["vix_close"].to_numpy(dtype=float))
     else:
         raise ValueError(f"Unknown indicator type {itype!r}")
     return {name: s.to_numpy(dtype=float) for name, s in series.items()}

@@ -26,6 +26,7 @@ import {
   type HistogramPoint,
   type LinePoint,
 } from "../indicators/seriesData";
+import { vixLinePoints, vixShadePoints } from "../indicators/vix";
 
 type AnySeries = ISeriesApi<"Line"> | ISeriesApi<"Histogram">;
 
@@ -56,6 +57,9 @@ const SLICE_THRESHOLD = 20000;
 const SEPARATE_PANE_STRETCH = 0.35;
 const GUIDE_COLOR = "#8b93a7";
 const NONE = [] as const;
+/** roles whose series is a histogram (colours live in the data) */
+const HIST_ROLES = new Set(["hist", "shade"]);
+const VIX_SHADE_ALPHA = 0.12;
 
 const asLine = (points: readonly LinePoint[]) =>
   points.map((p) => {
@@ -261,6 +265,41 @@ export class IndicatorLayer {
       }
       case "fvg":
         return bundle("fvg", {});
+      case "vix": {
+        const pane = this.newPane();
+        const vix = line(color("mid"), pane, 2, {
+          lastValueVisible: true,
+          priceFormat: { type: "price", precision: 2, minMove: 0.01 },
+        });
+        const guides = (["upper", "lower"] as const).map((role) => ({
+          role,
+          line: vix.createPriceLine({
+            price: Number(item.params[role === "upper" ? "high" : "low"] ?? 0),
+            color: color(role === "upper" ? "high" : "mid"),
+            lineWidth: 1,
+            lineStyle: LineStyle.Dashed,
+            axisLabelVisible: true,
+            title: "",
+          }),
+        }));
+        // full-height tint behind the candles where VIX is above the high level (own hidden scale, 0..1)
+        const shade = this.chart.addSeries(
+          HistogramSeries,
+          {
+            priceScaleId: `vix-shade-${item.id}`,
+            priceLineVisible: false,
+            lastValueVisible: false,
+            base: 0,
+            autoscaleInfoProvider: () => ({ priceRange: { minValue: 0, maxValue: 1 } }),
+          },
+          0,
+        );
+        shade.priceScale().applyOptions({ visible: false, scaleMargins: { top: 0, bottom: 0 } });
+        this.chart.panes()[pane]?.setStretchFactor(SEPARATE_PANE_STRETCH);
+        const created = bundle("vix", { line: vix, shade });
+        created.guides = guides;
+        return created;
+      }
     }
   }
 
@@ -310,6 +349,17 @@ export class IndicatorLayer {
         lineJob("signal", () => linePoints(t, out("signal")));
         jobs.push({ role: "hist", points: () => histogramPoints(t, out("hist"), color("histUp"), color("histDown")) });
         break;
+      case "vix": {
+        const levels = { low: Number(item.params["low"] ?? 13), high: Number(item.params["high"] ?? 15) };
+        const zone = { low: color("low"), mid: color("mid"), high: color("high") };
+        lineJob("line", () => vixLinePoints(t, out("vix"), levels, zone));
+        jobs.push({
+          role: "shade",
+          points: () =>
+            vixShadePoints(t, out("vix"), levels.high, hexAlpha(color("high"), VIX_SHADE_ALPHA), item.params["shade"] !== "off"),
+        });
+        break;
+      }
       case "fvg":
         break;
     }
@@ -342,14 +392,27 @@ export class IndicatorLayer {
     for (const job of this.jobsFor(item, tail, color)) {
       const pts = job.points().filter((p) => p.time >= firstDrawn);
       try {
-        if (job.role === "hist") {
-          for (const p of asHist(pts as HistogramPoint[])) (bundle.series["hist"] as ISeriesApi<"Histogram"> | undefined)?.update(p);
+        if (HIST_ROLES.has(job.role)) {
+          for (const p of asHist(pts as HistogramPoint[])) (bundle.series[job.role] as ISeriesApi<"Histogram"> | undefined)?.update(p);
         } else {
           for (const p of asLine(pts as LinePoint[])) s[job.role]?.update(p);
         }
       } catch {
         // series removed in the meantime
       }
+    }
+  }
+
+  /** VIX guide lines follow the low / high levels and their colours. */
+  private syncVix(item: IndicatorInstance, bundle: Bundle): void {
+    if (item.type !== "vix") return;
+    const color = (key: string): string => item.colors[key] ?? "#d1d4dc";
+    for (const guide of bundle.guides) {
+      const upper = guide.role === "upper";
+      guide.line.applyOptions({
+        price: Number(item.params[upper ? "high" : "low"] ?? 0),
+        color: color(upper ? "high" : "mid"),
+      });
     }
   }
 
@@ -386,6 +449,7 @@ export class IndicatorLayer {
 
     // Colours of lines are series options (cheap). Histogram colours live in the data.
     this.syncStoch(item, bundle);
+    this.syncVix(item, bundle);
     const recolour = (role: string, col: string): void => void s[role]?.applyOptions({ color: col });
     switch (item.type) {
       case "sma":
@@ -409,10 +473,16 @@ export class IndicatorLayer {
         recolour("signal", color("signal"));
         break;
       case "stoch":
+      case "vix":
         break;
     }
 
-    const dataColors = item.type === "macd" ? `${color("histUp")}|${color("histDown")}` : "";
+    const dataColors =
+      item.type === "macd"
+        ? `${color("histUp")}|${color("histDown")}`
+        : item.type === "vix"
+          ? [color("low"), color("mid"), color("high"), item.params["low"], item.params["high"], item.params["shade"]].join("|")
+          : "";
     const prev = bundle.filledWith;
     if (prev && prev.entry === entry && prev.dataColors === dataColors) return; // data unchanged
     bundle.filledWith = { entry, dataColors };
@@ -434,8 +504,8 @@ export class IndicatorLayer {
     const run = (job: (typeof jobs)[number]): void => {
       if (bundle.version !== version) return; // superseded by a newer fill
       try {
-        if (job.role === "hist") {
-          (bundle.series["hist"] as ISeriesApi<"Histogram"> | undefined)?.setData(asHist(job.points() as HistogramPoint[]));
+        if (HIST_ROLES.has(job.role)) {
+          (bundle.series[job.role] as ISeriesApi<"Histogram"> | undefined)?.setData(asHist(job.points() as HistogramPoint[]));
         } else {
           s[job.role]?.setData(asLine(job.points() as LinePoint[]));
         }

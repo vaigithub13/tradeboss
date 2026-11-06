@@ -31,10 +31,10 @@ PRICE_TOLERANCE = 0.01
 
 
 def test_types_panes_and_outputs() -> None:
-    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg")
+    assert INDICATOR_TYPES == ("sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg", "vix")
     assert PANES == {
         "sma": "price", "ema": "price", "bb": "price", "supertrend": "price", "vwap": "price", "vwap_fut": "price",
-        "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price",
+        "rsi": "separate", "stoch": "separate", "macd": "separate", "fvg": "price", "vix": "separate",
     }  # fmt: skip
     assert OUTPUTS == {
         "sma": ["sma"],
@@ -47,6 +47,7 @@ def test_types_panes_and_outputs() -> None:
         "vwap": ["vwap"],
         "vwap_fut": ["vwap"],
         "fvg": ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
+        "vix": ["vix", "change"],
     }
 
 
@@ -186,6 +187,9 @@ def test_compute_returns_named_arrays_of_equal_length() -> None:
         if itype == "vwap_fut":
             frame = df.copy()
             frame["fut_volume"] = df["volume"]
+        if itype == "vix":
+            frame = df.copy()
+            frame["vix_close"] = 14.0
         out = compute(frame, itype, validate_params(itype, {}))
         assert list(out) == OUTPUTS[itype]
         assert all(isinstance(v, np.ndarray) and len(v) == len(df) for v in out.values())

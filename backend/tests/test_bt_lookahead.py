@@ -222,7 +222,7 @@ def test_1d_covers_every_registry_type() -> None:
     import inspect
 
     source = inspect.getsource(test_1d_ctx_indicator_values_equal_the_chart_code_run_on_the_past_only)
-    exempt = {"vwap_fut"}  # needs futures volume on the bars; a strategy cannot request it in a backtest
+    exempt = {"vwap_fut", "vix"}  # need futures volume / VIX bars on the bars; a strategy cannot request them in a backtest
     missing = [t for t in registry.INDICATOR_TYPES if t not in exempt and f'("{t}",' not in source]
     assert missing == []
 

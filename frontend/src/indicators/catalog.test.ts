@@ -46,7 +46,7 @@ describe("defaults mirror the backend registry", () => {
       expect(CATALOG[t].outputs.length).toBeGreaterThan(0);
       expect(CATALOG[t].colors.length).toBeGreaterThan(0);
     }
-    expect(INDICATOR_TYPES.filter((t) => CATALOG[t].pane === "separate")).toEqual(["rsi", "stoch", "macd"]);
+    expect(INDICATOR_TYPES.filter((t) => CATALOG[t].pane === "separate")).toEqual(["rsi", "stoch", "macd", "vix"]);
   });
 });
 
