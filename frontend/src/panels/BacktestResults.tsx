@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 
-import type { BacktestRun, EquityPoint, ResultTrade, RunResult } from "../api/backtests";
+import type { BacktestRun, EquityPoint, ResultTrade, RunResult, TagStats } from "../api/backtests";
 import { fetchRun } from "../api/backtests";
 import {
   HOLDOUT_COUNT,
@@ -188,6 +188,41 @@ function Breakdowns({ run }: { run: BacktestRun }) {
           ))}
         </ul>
       </div>
+      <Tags rows={blocks.tags ?? {}} />
+    </div>
+  );
+}
+
+function Tags({ rows }: { rows: Record<string, TagStats> }) {
+  const entries = Object.entries(rows);
+  if (entries.length === 0) return null;
+  return (
+    <div className="col-span-2">
+      <h3 className="mb-1 font-semibold text-white">Entry tags</h3>
+      <table className="w-full text-left">
+        <thead>
+          <tr className="text-white/50">
+            <th>Tag</th>
+            <th>Trades</th>
+            <th>Win</th>
+            <th>Avg R</th>
+            <th>PF</th>
+            <th>Net</th>
+          </tr>
+        </thead>
+        <tbody>
+          {entries.map(([name, row]) => (
+            <tr key={name}>
+              <td>{name}</td>
+              <td>{row.trades}</td>
+              <td>{pct(row.win_rate)}</td>
+              <td>{row.avg_r == null ? "—" : row.avg_r.toFixed(3)}</td>
+              <td>{row.profit_factor == null ? "—" : row.profit_factor.toFixed(2)}</td>
+              <td>{inr(row.net_pnl)}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   );
 }

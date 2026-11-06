@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from app.backtest.breakdowns import dte_breakdown, flag_breakdown
+from app.backtest.breakdowns import dte_breakdown, flag_breakdown, tag_breakdown
 from app.backtest.catalog import NIFTY_SYMBOL, build_strategy
 from app.backtest.costs import get_cost_model, load_default_cost_table
 from app.backtest.curve import equity_and_drawdown
@@ -254,9 +254,27 @@ def _view(result: BacktestResult, option: Any, config: dict[str, Any]) -> dict[s
             "time_of_day": metrics_for_split["pnl_by_time_of_day"],
             "dte": dte_breakdown(opt_rows) if option is not None else {},
             "flags": flag_breakdown(chosen) if option is not None else {},
+            "tags": tag_breakdown(_tag_rows(result.trades, by_id if option is not None else None)),
         },
         "mode": config["mode"],
     }
+
+
+def _index_r(trade: Trade) -> float | None:
+    """Net over the risk to the bracket stop (index points x units); None without a stop."""
+    if trade.stop_level is None:
+        return None
+    risk = abs(trade.entry_price - trade.stop_level) * trade.units
+    return trade.net_pnl / risk if risk > 0 else None
+
+
+def _tag_rows(trades: list[Trade], option_by_id: dict[int, dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Rows for the tag breakdown: the index trade's net and R, or in options mode the option's net (R needs a
+    premium stop, so only the index R is not used there)."""
+    if option_by_id is None:
+        return [{"entry_tag": t.entry_tag, "net_pnl": t.net_pnl, "r": _index_r(t)} for t in trades]
+    return [{"entry_tag": t.entry_tag, "net_pnl": option_by_id[t.id]["net_pnl"], "r": None}
+            for t in trades if t.id in option_by_id]
 
 
 def _step_s(timeframe: str) -> int:

@@ -1286,3 +1286,102 @@ From the open item in the 6 Nov forward-test entry. Written test-first (`tests/t
   refusals from 14:01 and on almost every frame from 14:30 (paper's set 24 keys), matching the subscribe frames
   the backend sent (none between 13:44 and 15:30, then unsubscribe 20 / subscribe 10 when the slots stopped).
 - Suite: backend 1487 passed, 1 skipped; frontend 370 passed; typecheck clean.
+
+## 6 Nov 2026: 5 EMA baselines and context tags
+
+Suite before any change: backend 1487 passed, 1 skipped; frontend 370 passed; typecheck clean. The five_ema commit
+broke nothing, so nothing was fixed.
+
+### Baselines (research period only)
+
+NIFTY50, index mode, sessions `normal`, 2022-01-03 (first stored bar) to 2026-06-30; the holdout (2026-07-01 to
+2026-10-01) is not touched. Only `direction`, `rr` and ORB's `range_minutes` are set; everything else is the
+default (entry_bars 1, max 4 trades a day, entries 09:15-14:50, square-off 15:15, live timing). **Index mode has no
+costs and no slippage** (`cost_model zero`); net is in ₹ at the Nifty lot of the day (50, 25 from 26 Apr 2024, 75
+from 20 Nov 2024, 65 from 29 Oct 2025), so ₹ and points can differ in sign. R = net / (|entry − bracket stop| ×
+units); one 5m trade filled at its own stop level (risk 0) has no R. Drawdown is on closed-trade equity.
+
+| Run | Trades | Win | Avg R | PF | Net ₹ | Points | Max DD ₹ | Losing streak |
+|---|---|---|---|---|---|---|---|---|
+| a) five_ema short_only 5m, rr 3 | 3,562 | 26.9% | +0.011 | 1.05 | +1,13,806.00 | +1,573.80 | 89,115.00 | 19 |
+| a) rr 2 | 3,731 | 33.7% | −0.020 | 1.01 | +28,973.25 | −435.55 | 1,18,848.75 | 17 |
+| a) rr 4 | 3,454 | 23.1% | +0.021 | 1.06 | +1,62,880.50 | +2,936.65 | 90,423.00 | 27 |
+| b) five_ema long_only 15m, rr 3 | 1,384 | 31.8% | −0.014 | 0.99 | −10,650.00 | −274.25 | 1,55,300.00 | 12 |
+| b) rr 2 | 1,414 | 35.6% | −0.040 | 0.93 | −1,11,987.00 | −1,830.65 | 2,08,231.00 | 10 |
+| b) rr 4 | 1,370 | 29.9% | −0.009 | 1.00 | −2,330.75 | −125.65 | 1,71,586.50 | 14 |
+| c) opening_range_breakout 15 min, 5m | 1,100 | 41.9% | +0.071 | 1.10 | +2,33,264.00 | +4,739.40 | 91,695.00 | 12 |
+
+By year (trades / win / avg R / PF / net ₹):
+
+| Year | a) short 5m rr 3 | b) long 15m rr 3 | c) ORB 5m |
+|---|---|---|---|
+| 2022 | 842 / 26.6% / −0.022 / 1.07 / +34,150.00 | 314 / 34.4% / +0.073 / 1.15 / +51,520.00 | 247 / 45.8% / +0.205 / 1.31 / +1,32,197.50 |
+| 2023 | 799 / 25.0% / −0.060 / 0.97 / −10,452.50 | 307 / 36.2% / +0.071 / 1.16 / +36,387.50 | 245 / 36.7% / −0.058 / 0.85 / −56,145.00 |
+| 2024 | 772 / 25.9% / −0.005 / 0.95 / −21,211.25 | 266 / 28.6% / −0.108 / 0.91 / −23,683.75 | 244 / 38.9% / +0.072 / 1.24 / +78,067.50 |
+| 2025 | 774 / 29.6% / +0.107 / 1.13 / +1,00,702.00 | 328 / 29.6% / −0.074 / 0.90 / −56,625.00 | 245 / 44.9% / +0.072 / 1.10 / +75,643.75 |
+| 2026 (to 30 Jun) | 375 / 28.0% / +0.075 / 1.03 / +10,617.75 | 169 / 28.4% / −0.067 / 0.94 / −18,248.75 | 119 / 44.5% / +0.054 / 1.01 / +3,500.25 |
+
+Avg R by year for every run (2022 / 2023 / 2024 / 2025 / 2026): a) rr 2 −0.049 / −0.100 / −0.040 / +0.070 / +0.070;
+rr 3 −0.022 / −0.060 / −0.005 / +0.107 / +0.075; rr 4 −0.000 / −0.040 / +0.031 / +0.058 / +0.105. b) rr 2
++0.009 / +0.096 / −0.107 / −0.108 / −0.138; rr 3 +0.073 / +0.071 / −0.108 / −0.074 / −0.067; rr 4 +0.071 / +0.056 /
+−0.088 / −0.100 / +0.019. Longest losing streak by year is in the run output only.
+
+With costs (options mode, ATM, delta-adjusted fill, 0.5 slippage, the shipped model; rr 3 runs only): a) 3,562
+trades, net −5,14,719.68 (gross −3,11,041.29, charges 2,03,678.39), max DD 5,20,448.89; b) 1,384, −2,88,749.97
+(gross −2,08,179.53, charges 80,570.44); c) 1,100, −2,56,496.19 (gross −1,92,541.87, charges 63,954.32). About 37-42%
+of trades priced from real option candles, the rest modelled. Read plainly: none of the three is positive after
+option costs. The 5m short is about +0.44 index points a trade before costs; one option round trip costs more.
+
+### Context tags (test-first: `tests/test_bt_five_ema_tags.py`, 17 tests, by hand)
+
+`five_ema` now tags each entry after a "|" in its tag (`5ema_short|gap_zone,range_shift`); untagged trades keep
+`5ema_short` / `5ema_long`. Trades are unchanged: the tagged reruns give the same trades and net as the baselines,
+and a test checks the same fills with the tags made unreachable (gap_buffer 0, swing_bars 50). New parameters: `gap_buffer` (30 points) and `swing_bars`
+(5).
+- `gap_zone`: entry within `gap_buffer` of an edge of an unfilled daily gap (gap up: day low > previous day high;
+  gap down the mirror). Today's gap uses today's closed bars so far; earlier gaps stay open, partly filled, until
+  a bar reaches the far edge.
+- `range_shift`: the first signal of a side after a structure break turns the bias that way. Pivots are strict
+  over `swing_bars` bars each side, known once those bars close; a close beyond the latest swing high/low sets the
+  bias. An alert candle that replaces the waiting order keeps the tag; a lapsed order uses it up.
+- `against_structure`: a sell while the bias is up, a buy while it is down.
+- `app/backtest/breakdowns.py` `tag_breakdown`: trades, wins, win rate, avg R, PF, net per tag, untagged first
+  (a trade with two tags counts in both). The run view carries it as `breakdowns.tags` (index mode: index net and
+  R; options mode: option net, no R); the panel shows an "Entry tags" table when a run has tags.
+- No look-ahead: a tag test on gapped random data (replace every bar from T, events before T unchanged; it checks
+  that gap and swing tags really occur), and `five_ema` short_only with tags added to `test_bt_lookahead.py`. Note:
+  long_only and both fail that file's 1a check only because a fill in the minute that starts at T places its
+  `:stop`/`:target` orders stamped at T; the shared filter counts them as decisions at T. Checked: with
+  reduce-only orders left out the events agree. The shared filter is left as is.
+
+### Per-tag results (same runs as a) and b), rr 3)
+
+t is the difference in avg R from untagged over its standard error (rough; the groups overlap and are not
+independent trades).
+
+| Run / group | Trades | Win | Avg R (sd) | PF | Net ₹ | vs untagged |
+|---|---|---|---|---|---|---|
+| a) untagged | 631 | 29.5% | +0.161 (1.87) | 1.17 | +68,599.25 | — |
+| a) gap_zone | 396 | 26.8% | −0.073 (1.59) | 1.01 | +3,301.75 | −0.234 (t −2.1) |
+| a) range_shift | 518 | 25.3% | −0.043 (1.74) | 1.03 | +10,964.75 | −0.204 (t −1.9) |
+| a) against_structure | 2,376 | 26.5% | −0.018 (1.71) | 1.01 | +19,564.00 | −0.179 (t −2.2) |
+| b) untagged | 216 | 30.1% | −0.108 (1.38) | 0.95 | −12,357.00 | — |
+| b) gap_zone | 138 | 35.5% | +0.114 (1.58) | 0.94 | −13,105.50 | +0.222 (t +1.4) |
+| b) range_shift | 194 | 32.0% | −0.071 (1.44) | 0.90 | −22,670.50 | +0.037 (t +0.3) |
+| b) against_structure | 962 | 31.8% | +0.005 (1.55) | 1.01 | +16,258.50 | +0.113 (t +1.1) |
+
+Avg R by year, a) gap_zone −0.15 / −0.06 / +0.04 / −0.34 / +0.16, range_shift −0.02 / −0.12 / −0.06 / −0.00 / +0.02;
+b) gap_zone −0.01 / +0.21 / +0.72 / +0.21 / −0.18 (47 / 25 / 17 / 18 / 31 trades), range_shift −0.27 / +0.27 / −0.29
+/ −0.09 / −0.02.
+
+**Answer: no.** Neither `gap_zone` nor `range_shift` has a clearly better average R than untagged trades.
+- 5m sells: both are worse than untagged (−0.07 and −0.04 against +0.16).
+- 15m buys: `range_shift` is level with untagged.
+- 15m buys, `gap_zone`: the only positive gap (+0.11 against −0.11, 138 trades), but it is not clear. t is about
+  1.4, two of five years are negative, the net is negative and the PF is 0.94.
+- Not a basis for position sizing as it stands. About two thirds of the 5 EMA alerts are against the swing bias,
+  which follows from the setup: a candle wholly above the EMA comes in an up-move.
+- Untagged 5m sells (with the bias, or no bias yet) did best at +0.16 R, but 2025 alone is +0.60. This was found
+  after looking at the data, so it is a lead to test on fresh data, not a result.
+
+Suite after: backend 1506 passed, 1 skipped; frontend 370 passed; typecheck clean.

@@ -80,6 +80,15 @@ export interface WalkWindow {
   test: { net_pnl: number; max_drawdown: number; trades: number; flat: boolean };
 }
 
+export interface TagStats {
+  trades: number;
+  wins: number;
+  win_rate: number | null;
+  avg_r: number | null;
+  profit_factor: number | null;
+  net_pnl: number;
+}
+
 export interface RunResult {
   kind?: string;
   holdout?: { start: string; end: string; peeks: number };
@@ -96,6 +105,8 @@ export interface RunResult {
     time_of_day: Record<string, { trades: number; net_pnl: number }>;
     dte: Record<string, { trades: number; net_pnl: number }>;
     flags: Record<string, { flagged: { trades: number; net_pnl: number }; unflagged: { trades: number; net_pnl: number } }>;
+    /** per entry-tag context (five_ema), untagged first; absent on older runs, empty when nothing is tagged */
+    tags?: Record<string, TagStats>;
   };
   mode: "index" | "options";
 }

@@ -15,6 +15,7 @@ from app.data.candle import Candle
 from app.indicators import registry
 from app.indicators.frame import candles_to_frame
 from app.strategies.ema_cross import EmaCrossover
+from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
 from app.strategies.pivot_extension import PivotExtension
@@ -59,6 +60,7 @@ STRATEGIES: dict[str, Callable[[], Strategy]] = {
     "pivot_carried_tv": lambda: PivotExtension(variant="carried_pivots", left_bars=2, right_bars=1, execution="tv_parity"),
     "log_xz_tv": lambda: LogXZ(z_length=5, execution="tv_parity"),
     "price_channel_tv": lambda: PriceChannel(length=5, execution="tv_parity"),
+    "five_ema_short_only_tagged": lambda: FiveEma(direction="short_only", swing_bars=2),
 }
 
 

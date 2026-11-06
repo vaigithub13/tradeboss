@@ -67,6 +67,8 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "entry_bars": _Field("int", 1, min_value=1),
             "max_trades_per_day": _Field("int", 4, min_value=1),
             "lots": _Field("int", 1, min_value=1),
+            "gap_buffer": _Field("float", 30.0, min_value=0),
+            "swing_bars": _Field("int", 5, min_value=1),
         },
     ),
     "pivot_extension": (

@@ -227,7 +227,7 @@ def run_walk_forward(
         },
         "equity": {"index": [], "option": curve},
         "trades": [],
-        "breakdowns": {"weekday": {}, "time_of_day": {}, "dte": {}, "flags": {}},
+        "breakdowns": {"weekday": {}, "time_of_day": {}, "dte": {}, "flags": {}, "tags": {}},
         "mode": "options",
     }
 
