@@ -1218,6 +1218,8 @@ At most `max_trades_per_day` entries (default 4), entries only inside 09:15-14:5
 The faithful runs are `direction=short_only` on 5m and `direction=long_only` on 15m; `both` is a one-chart variant.
 The video's gap / range-shift position sizing is discretionary and is not implemented.
 Tests: `tests/test_bt_five_ema.py` (10, by hand). Not yet run on stored Nifty 50 candles.
+Committed in `002a049` together with the 6 Nov forward-test entry (it was staged when that commit was made); the
+commit message names only the forward-test entry. Left as is, no revert.
 
 ## 6 Nov 2026: forward-test day 8 (four slots)
 
