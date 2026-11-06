@@ -18,6 +18,7 @@ from app.routes.backtests import router as backtests_router
 from app.routes.candles import router as candles_router
 from app.routes.drawings import router as drawings_router
 from app.routes.fvg import router as fvg_router
+from app.routes.gex import router as gex_router
 from app.routes.indicators import router as indicators_router
 from app.routes.live import router as live_router
 from app.routes.paper import router as paper_router
@@ -68,6 +69,7 @@ app.include_router(candles_router)
 app.include_router(indicators_router)
 app.include_router(drawings_router)
 app.include_router(fvg_router)
+app.include_router(gex_router)
 app.include_router(upstox_router)
 app.include_router(live_router)
 app.include_router(paper_router)

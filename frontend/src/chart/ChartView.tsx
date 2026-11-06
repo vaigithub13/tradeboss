@@ -48,6 +48,9 @@ import { clipSeries, seriesThroughCursor } from "../replay/cap";
 import { fetchFvg } from "../draw/api";
 import { bindDrawings, type DrawBag } from "../draw/bind";
 import { DrawPrimitive, FvgPrimitive } from "../draw/primitive";
+import type { GexResponse } from "../api/gex";
+import { gexBars } from "./gex";
+import { GexPrimitive } from "./gexPrimitive";
 import { whitespaceTimes } from "../draw/model";
 import { loadOptionNotes, loadPositionLots, loadPositionMinutes, positionViews, publishPositionViews } from "../draw/positionFeed";
 import { isPositionTool } from "../draw/position";
@@ -95,11 +98,13 @@ interface Props {
   levels?: { price: number; title: string; color: string }[];
   /** Replay cursor. The series last-price line is the last bar at or before it. */
   cursor?: number | null;
+  /** Nifty gamma exposure: net GEX bars per strike at the right edge (null = hidden) */
+  gex?: GexResponse | null;
 }
 
 export function ChartView({
   symbol, displayName, timeframe, scope, candles: loadedCandles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
-  markers = [], focus = null, onPickTime, tradeCard, levels = [], cursor = null,
+  markers = [], focus = null, onPickTime, tradeCard, levels = [], cursor = null, gex = null,
 }: Props) {
   const candles = useMemo(() => seriesThroughCursor(loadedCandles, cursor).bars, [loadedCandles, cursor]);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -109,6 +114,7 @@ export function ChartView({
   const whitespaceRef = useRef<ISeriesApi<"Line"> | null>(null);
   const drawPrimitiveRef = useRef<DrawPrimitive | null>(null);
   const fvgPrimitiveRef = useRef<FvgPrimitive | null>(null);
+  const gexPrimitiveRef = useRef<GexPrimitive | null>(null);
   const drawBagRef = useRef<DrawBag>({ candles: [], timeframe, cursor });
   const timeframeRef = useRef(timeframe);
   const candlesRef = useRef<readonly Candle[]>(candles);
@@ -249,6 +255,8 @@ export function ChartView({
     const gaps = new FvgPrimitive();
     candleSeries.attachPrimitive(drawings);
     candleSeries.attachPrimitive(gaps);
+    const gexBarsPrimitive = new GexPrimitive();
+    candleSeries.attachPrimitive(gexBarsPrimitive);
     const unbind = bindDrawings(chart, candleSeries, el, drawings, drawBagRef);
 
     chartRef.current = chart;
@@ -256,6 +264,7 @@ export function ChartView({
     whitespaceRef.current = whitespace;
     drawPrimitiveRef.current = drawings;
     fvgPrimitiveRef.current = gaps;
+    gexPrimitiveRef.current = gexBarsPrimitive;
     layerRef.current = new IndicatorLayer(chart);
     return () => {
       unbind();
@@ -268,6 +277,7 @@ export function ChartView({
       whitespaceRef.current = null;
       drawPrimitiveRef.current = null;
       fvgPrimitiveRef.current = null;
+      gexPrimitiveRef.current = null;
       layerRef.current = null;
     };
   }, []);
@@ -294,6 +304,12 @@ export function ChartView({
       }),
     );
   }, [levels, candles]);
+
+  useEffect(() => {
+    const primitive = gexPrimitiveRef.current;
+    if (!primitive) return;
+    primitive.setBars(gex?.available && gex.spot ? gexBars(gex.strikes, gex.spot) : []);
+  }, [gex]);
 
   // ---- push data whenever candles change
   useEffect(() => {

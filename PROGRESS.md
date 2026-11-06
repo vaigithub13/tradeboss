@@ -1404,3 +1404,18 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - `scripts/compare_candidates.py` runs a list of 13 configurations (C1-C13) fixed before any run, in options
   mode, 2022-01-03 to 2026-06-30 (holdout refused), and writes `data/validation/candidates_<date>.md`.
   Not yet run on the stored candles.
+
+## 6 Nov 2026: GEX (gamma exposure) on the Nifty chart
+
+- `app/options/gex.py`: per-strike call / put / net GEX in ₹ crore per 1% move
+  (`gamma · OI · S² · 0.01 / 1e7`, puts negative). Upstox OI is in units, so no lot multiplier. Upstox rounds
+  gamma to 4 decimals, so gamma is recomputed with Black-Scholes from each leg's IV (calendar time to 15:30 IST,
+  floored at 15 minutes); the Upstox gamma is the fallback when a leg has no IV. Totals, call wall, put wall and
+  the gamma flip (zero crossing of total net GEX within ±5% of spot, nearest to spot).
+- `UpstoxClient.option_chain` (GET /v2/option/chain, read-only). `GET /api/gex?expiry=` defaults to the nearest
+  weekly expiry (the next one after 15:30 on expiry day), cached 30 s per expiry.
+- Frontend: `GEX` button in the header (Nifty only, off in replay, setting kept in localStorage), polled every
+  60 s. Net GEX bars per strike at the right edge of the price pane (`chart/gexPrimitive.ts`), price lines for
+  γ flip / call wall / put wall, and a summary badge.
+- Live only: Upstox has no historical option chain, so GEX cannot be backtested until snapshots are recorded.
+- Tests: `tests/test_gex.py` (maths, client, route), `src/chart/gex.test.ts`.

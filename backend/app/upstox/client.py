@@ -230,6 +230,21 @@ class UpstoxClient:
         return [x for x in data if isinstance(x, dict)]
 
 
+    def option_chain(self, instrument_key: str, expiry: date | str) -> list[dict[str, Any]]:
+        """GET /v2/option/chain: one row per strike with call_options / put_options
+        (market_data: oi in units, ltp, ...; option_greeks: delta, gamma, iv in %, ...)."""
+        body = self._get(
+            "/v2/option/chain",
+            {"instrument_key": instrument_key, "expiry_date": str(expiry)},
+        )
+        data = body.get("data")
+        if data is None:
+            return []
+        if not isinstance(data, list):
+            raise UpstoxApiError("unexpected response shape (no data list)", status=200)
+        return [x for x in data if isinstance(x, dict)]
+
+
 def _candles_of(body: dict[str, Any]) -> list[RawCandle]:
     data = body.get("data")
     candles = data.get("candles") if isinstance(data, dict) else None

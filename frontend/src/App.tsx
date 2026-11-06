@@ -31,11 +31,15 @@ import { scopeKey } from "./indicators/cache";
 import { useIndicatorStore } from "./store/indicatorStore";
 import { liveView, useLiveStore } from "./store/liveStore";
 import type { LevelLine } from "./ai/present";
+import { useGexStore } from "./store/gexStore";
+import { gexLevels, gexSummary } from "./chart/gex";
 
 const POLL_INTERVAL_MS = 3000;
 const NO_PAPER_SIGNALS: PaperSignal[] = [];
 /** wait for typing in a parameter box to settle before asking the backend */
 const INDICATOR_DEBOUNCE_MS = 200;
+/** the backend caches the option chain for 30 s; one minute is plenty for GEX */
+const GEX_POLL_MS = 60_000;
 
 const STATUS_UI: Record<BackendStatus, { label: string; dot: string; text: string }> = {
   checking: { label: "checking backend…", dot: "bg-yellow-400", text: "text-yellow-300" },
@@ -131,6 +135,23 @@ export default function App() {
   const ui = STATUS_UI[backendStatus];
   const panelOpen = useBacktestStore((s) => s.panelOpen);
   const replayActive = useReplayStore((s) => s.active);
+  const gexEnabled = useGexStore((s) => s.enabled);
+  const gexData = useGexStore((s) => s.data);
+  const gexError = useGexStore((s) => s.error);
+  const setGexEnabled = useGexStore((s) => s.setEnabled);
+  const loadGex = useGexStore((s) => s.load);
+  const gexOn = gexEnabled && symbol === "NIFTY50" && !replayActive;
+  useEffect(() => {
+    if (!gexOn) return;
+    const ac = new AbortController();
+    void loadGex(ac.signal);
+    const id = setInterval(() => void loadGex(ac.signal), GEX_POLL_MS);
+    return () => {
+      clearInterval(id);
+      ac.abort();
+    };
+  }, [gexOn, loadGex]);
+  const gexShown = gexOn && gexData?.available ? gexData : null;
   const replayCursorTime = useReplayStore((s) => s.cursor);
   useReplayClock();
   usePaperAlerts();
@@ -268,6 +289,22 @@ export default function App() {
         >
           Paper
         </button>
+        <button
+          type="button"
+          className={`rounded border px-2 py-1 text-xs ${
+            gexEnabled ? "border-amber-400/60 bg-amber-400/10 text-amber-200" : "border-white/15 text-white/80"
+          } disabled:opacity-40`}
+          disabled={symbol !== "NIFTY50"}
+          title={
+            symbol === "NIFTY50"
+              ? "Gamma exposure from the live Nifty option chain (nearest weekly expiry)"
+              : "GEX is only for Nifty 50"
+          }
+          onClick={() => setGexEnabled(!gexEnabled)}
+          data-testid="gex-toggle"
+        >
+          GEX
+        </button>
         {status === "loading" && <span className="text-xs text-white/40">loading…</span>}
         <div className="ml-auto flex items-center gap-2">
           <LiveBadge />
@@ -331,9 +368,23 @@ export default function App() {
             levels={[
               ...analysisLevels,
               ...(replayReveal?.stops.map((stop) => ({ price: stop.price, title: "stop", color: "#ef5350" })) ?? []),
+              ...(gexShown ? gexLevels(gexShown) : []),
             ]}
             cursor={replayActive ? replayCursorTime : null}
+            gex={gexShown}
           />
+          {gexOn && (gexData || gexError) && (
+            <div
+              className="pointer-events-none absolute bottom-8 left-2 z-10 rounded bg-black/55 px-2 py-0.5 font-mono text-[11px] text-white/75"
+              data-testid="gex-badge"
+            >
+              {gexError ? (
+                <span className="text-amber-300">GEX: {gexError}</span>
+              ) : gexData ? (
+                <span className={gexData.regime === "negative" ? "text-red-300" : "text-emerald-300"}>{gexSummary(gexData)}</span>
+              ) : null}
+            </div>
+          )}
           </div>
           </>
         ) : (
