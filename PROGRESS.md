@@ -1452,3 +1452,5 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   with the forming candle.
 - Not available to strategies in a backtest (exempt in `test_1d_covers_every_registry_type`, like `vwap_fut`).
 - Tests: `tests/test_vix_indicator.py`, `src/indicators/vix.test.ts`; registry and catalog type lists updated.
+- Suite on this Mac: backend 1566 passed, 1 skipped; frontend 379 passed; typecheck clean
+  (was 1559 passed, 1 skipped; frontend 375 passed).
