@@ -193,19 +193,23 @@ def route():
 
 
 def test_route_uses_the_nearest_weekly_expiry_and_caches(route: dict) -> None:
+    # Clock is Fri 6 Nov 2026. Tue 10 Nov is an NSE holiday, so that weekly expires Mon 9 Nov.
     first = route["http"].get("/api/gex")
     assert first.status_code == 200
     body = first.json()
-    assert body["available"] is True and body["expiry"] == "2026-11-10"
+    assert body["available"] is True and body["expiry"] == "2026-11-09"
     route["http"].get("/api/gex")
-    assert route["client"].calls == [("NSE_INDEX|Nifty 50", "2026-11-10")]
+    assert route["client"].calls == [("NSE_INDEX|Nifty 50", "2026-11-09")]
     route["now"] += gex_route.CACHE_SECONDS + 1
     route["http"].get("/api/gex")
     assert len(route["client"].calls) == 2
 
 
 def test_route_moves_to_the_next_expiry_after_the_close_on_expiry_day(route: dict) -> None:
-    route["now"] = float(ts(2026, 11, 10, 15, 45))
+    # The contract expires on the shifted day (Mon 9 Nov), and rolls at 15:30 that day.
+    route["now"] = float(ts(2026, 11, 9, 15, 29))
+    assert route["http"].get("/api/gex").json()["expiry"] == "2026-11-09"
+    route["now"] = float(ts(2026, 11, 9, 15, 30))
     assert route["http"].get("/api/gex").json()["expiry"] == "2026-11-17"
 
 

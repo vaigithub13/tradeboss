@@ -228,6 +228,7 @@ def test_client_exposes_only_read_methods_and_only_issues_GET() -> None:
         "market_status", "historical_candles", "intraday_candles",
         "expired_historical_candles", "expired_expiries",
         "expired_future_contracts", "expired_option_contracts",
+        "option_chain",
     }
     src = inspect.getsource(client_module)
     for verb in (".post(", ".put(", ".delete(", ".patch(", ".request("):

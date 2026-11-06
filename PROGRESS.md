@@ -1435,3 +1435,7 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   Writes `data/validation/gex_<day>.md` and `data/gex/report_latest.json` (`GET /api/gex/report`). Fewer than
   20 days is flagged as too few to judge.
 - Tests: `tests/test_gex_history.py`.
+- Suite on this Mac: backend 1559 passed, 1 skipped; frontend 375 passed; typecheck clean
+  (was 1506 passed, 1 skipped; frontend 370 passed). Two tests were corrected: the route test
+  expected 10 Nov 2026, an NSE holiday, so that Tuesday weekly expires Monday 9 Nov and rolls at
+  15:30 that day; the read-only client allowlist now includes `option_chain` (a GET).
