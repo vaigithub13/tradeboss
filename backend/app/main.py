@@ -56,7 +56,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         live = build_service()
         _app.state.live = live
         await live.start()
+    gex = None
+    if settings.gex_recorder_enabled and settings.upstox_token_value() is not None:
+        from app.options.gex_scheduler import build_scheduler
+
+        gex = build_scheduler()
+        await gex.start()
     yield
+    if gex is not None:
+        await gex.stop()
     if live is not None:
         await live.stop()
 

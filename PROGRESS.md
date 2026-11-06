@@ -1419,3 +1419,19 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   γ flip / call wall / put wall, and a summary badge.
 - Live only: Upstox has no historical option chain, so GEX cannot be backtested until snapshots are recorded.
 - Tests: `tests/test_gex.py` (maths, client, route), `src/chart/gex.test.ts`.
+
+## 7 Nov 2026: GEX snapshots every 5 minutes and an end-of-day GEX study
+
+- `app/options/gex_scheduler.py` (started in the lifespan when `GEX_RECORDER_ENABLED` and the data token are
+  set): on listed session days it reads the option chain at 09:15, 09:20 ... 15:30 IST (a slot missed by more
+  than 3 minutes is skipped) and appends one line to `data/gex/<day>.jsonl` (spot, totals, flip, walls,
+  per-strike call/put GEX). Reads run in a worker thread; a failed read is logged and the next slot goes on.
+- At 15:40 it runs `python -m scripts.gex_report --day <today>` in a child process (no GIL sharing with the
+  live engine). The study (`app/options/gex_history.py`):
+  1. regime of the day = spot vs flip at the first snapshot from 09:45; range and move for the rest of the day;
+  2. the 13 pre-registered candidates (moved to `app/backtest/candidates.py`; `compare_candidates.py` imports
+     them) in options mode from a 45-day warm-up start (never inside the holdout) to the last recorded day, each
+     trade labelled from the last snapshot at or before entry (no look-ahead).
+  Writes `data/validation/gex_<day>.md` and `data/gex/report_latest.json` (`GET /api/gex/report`). Fewer than
+  20 days is flagged as too few to judge.
+- Tests: `tests/test_gex_history.py`.

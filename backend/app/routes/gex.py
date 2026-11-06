@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 import time
 from collections.abc import Callable
@@ -11,6 +12,7 @@ from typing import Annotated, Any, Protocol
 from fastapi import APIRouter, Depends, HTTPException, Query
 
 from app.ai.chain import NIFTY_CHAIN_KEY, weekly_expiry
+from app.config import settings
 from app.options.gex import compute_gex
 from app.options.time import IST
 from app.upstox.client import UpstoxAuthError, UpstoxError
@@ -58,6 +60,10 @@ def get_gex_clock() -> Callable[[], float]:
     return time.time
 
 
+def get_gex_dir():
+    return settings.data_dir / "gex"
+
+
 def default_expiry(now: float) -> str:
     """Nearest weekly expiry; after 15:30 IST on expiry day, the next one."""
     local = datetime.fromtimestamp(now, IST)
@@ -97,3 +103,12 @@ def gex(
     result = compute_gex(rows, now=int(now), expiry=exp_date)
     cache.put(exp, now, result)
     return result
+
+
+@router.get("/gex/report")
+def gex_report(gex_dir: Annotated[Any, Depends(get_gex_dir)]) -> dict[str, Any]:
+    """The latest end-of-day GEX study (written by scripts/gex_report.py)."""
+    path = gex_dir / "report_latest.json"
+    if not path.is_file():
+        raise HTTPException(404, "no GEX report yet: it is written after the close on a day with snapshots")
+    return json.loads(path.read_text(encoding="utf-8"))

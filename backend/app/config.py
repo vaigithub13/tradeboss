@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     live_reconcile_at: str = "15:45"
     live_reconcile_until: str = "16:30"
 
+    # GEX: a snapshot of the Nifty option chain every 5 minutes in market hours, and the GEX study after
+    # the close (data/gex/, data/validation/gex_<day>.md). Needs the data token.
+    gex_recorder_enabled: bool = True
+
     # Option book recorder. Stays off until it is turned on after the first live session.
     spread_recorder_enabled: bool = False
 
