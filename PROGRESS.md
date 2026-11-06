@@ -1265,3 +1265,22 @@ Trades (9 Nov expiry, DTE 1, 1 lot of 65; paper / backtest):
   keys went, and the recorder's set came in). The same cap could also leave out paper's own newest ATM contracts (keys
   sort by number), so a late signal would have filled from the model. No signal came after 09:46, so no trade was
   affected. Today's ATM figures rest on fewer seconds (20,663 per kind against about 22,000).
+
+## 6 Nov 2026: option key priority and cap 40
+
+From the open item in the 6 Nov forward-test entry. Written test-first (`tests/test_paper_option_keys.py`,
+`tests/test_option_key_priority.py`, the desk and S4 cap tests).
+- A paper session now asks for its held contracts (`held_keys`: the open position, and the last closed trade's
+  contract until an index minute after its exit minute, so its exchange-final minutes still reach the shadow check)
+  and its current ATM call and put (`atm_keys`; `prepare` replaces the pair, it no longer adds to it). `wanted` is
+  their union. The desk and runners pass both tiers on.
+- `subscription_keys` orders the option list held, then ATM, then the recorder's ATM ±2 (`order_option_keys`).
+  `OPTION_CAP` 20 → 40, still one connection (Upstox v3 market data feed docs: full mode 1500 keys combined per
+  user, 2 connections; our connection's `MAX_KEYS` is 100; chart keys stay capped at 12).
+- A key the cap refuses is logged as a warning (`option cap refused N option keys: ...`), once per refused set.
+- Replay of the 6 Nov recording (164,104 frames, no server; the real `SpreadSession` and key composition, the
+  slots' actual positions, the ATM pair from the real chooser at each Nifty minute close): new rule 0 frames with
+  a refused key all session, largest option list 14 keys. Control, the old rule (growing paper set first, cap 20):
+  refusals from 14:01 and on almost every frame from 14:30 (paper's set 24 keys), matching the subscribe frames
+  the backend sent (none between 13:44 and 15:30, then unsubscribe 20 / subscribe 10 when the slots stopped).
+- Suite: backend 1487 passed, 1 skipped; frontend 370 passed; typecheck clean.

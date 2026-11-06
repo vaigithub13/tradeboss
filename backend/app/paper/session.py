@@ -116,7 +116,8 @@ class PaperSession:
         #: the model at the last stored VIX close: the square-off's last resort (no quote, no live VIX)
         self.stale_model_price = stale_model_price
         self._square_off_noted: int | None = None  # when a square-off first found no price (one row, then retries)
-        self.wanted: set[str] = set()  # option keys this session needs quoted (the live feed subscribes them)
+        self._atm: set[str] = set()  # the current ATM call and put (prepare); an older pair is released
+        self._index_minute: int | None = None  # the newest exchange-final index minute seen (epoch s)
         self.lots = lots
         self.symbol = symbol
         self.exit_rule = exit_rule
@@ -196,7 +197,6 @@ class PaperSession:
                 kind=pos.kind, strike=pos.strike, expiry=pos.expiry, cycle="weekly", lot_size=pos.lot_size,
                 symbol=pos.symbol, step=0, step_verification="restored",
             )
-            self.wanted.add(pos.key)
 
     def on_depth(self, quotes: Iterable[DepthQuote]) -> None:
         self.quotes.on_depth(quotes)
@@ -207,6 +207,7 @@ class PaperSession:
         Returns the signal records made by the bars this minute closed."""
         out: list[dict[str, Any]] = []
         self._spot = float(minute["close"])
+        self._index_minute = int(minute["time"]) // 60 * 60
         for bar in self.bars.on_minute(minute):
             out += self._on_closed_bar(bar, now_ms)
         for t in self.bars.given_up[self._given_up_seen:]:
@@ -428,7 +429,6 @@ class PaperSession:
                 return
             self.book.close(exit_fill, index_exit_time=index_time, reason=close_reason, index_exit=spot)
         self._contract_of[key] = contract
-        self.wanted.add(key)
         self.book.open(Position(
             direction=direction, key=key, symbol=contract.symbol, kind=contract.kind, strike=contract.strike,
             expiry=contract.expiry, lots=self.lots, units=units, lot_size=contract.lot_size, entry=entry,
@@ -559,11 +559,34 @@ class PaperSession:
         return [trade_report_row(t, self.exit_rule) for t in self.book.trades]
 
     def prepare(self, spot: float) -> None:
-        """Ask for the ATM call and put of the nearest weekly, so a signal finds its quote already subscribed."""
+        """Ask for the ATM call and put of the nearest weekly, so a signal finds its quote already subscribed.
+        The previous pair is released (a held contract stays wanted through `held_keys`)."""
+        atm: set[str] = set()
         for direction in ("LONG", "SHORT"):
             key = self.key_for(self.choose(direction, spot, self.day).symbol)
             if key is not None:
-                self.wanted.add(key)
+                atm.add(key)
+        self._atm = atm
+
+    def held_keys(self) -> set[str]:
+        """The open position's contract, and the last closed trade's until an index minute after its exit
+        minute has arrived: that contract's exchange-final minutes can still come in (a shadow exit)."""
+        out: set[str] = set()
+        if self.book.position is not None:
+            out.add(self.book.position.key)
+        last = self.book.trades[-1] if self.book.trades else None
+        if last is not None and (self._index_minute is None
+                                 or int(last["exit_at_ms"]) // 60_000 * 60 >= self._index_minute):
+            out.add(str(last["key"]))
+        return out
+
+    def atm_keys(self) -> set[str]:
+        return set(self._atm)
+
+    @property
+    def wanted(self) -> set[str]:
+        """Option keys this session needs quoted (the live feed subscribes them): held first, then the ATM pair."""
+        return self.held_keys() | self._atm
 
     def close_now(self, now_ms: int, reason: str) -> None:
         """Square off the open position at the current quote (used when the user stops the strategy)."""

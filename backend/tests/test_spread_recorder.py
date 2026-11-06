@@ -155,13 +155,13 @@ def test_s3_a_third_center_drops_the_oldest_generation() -> None:
 # ---------------------------------------------------------------- S4 one connection
 def test_s4_flag_off_keeps_the_chart_cap_and_flag_on_appends_options() -> None:
     chart = [NIFTY_INDEX_KEY, VIX_KEY] + [f"NSE_EQ|{i}" for i in range(20)]
-    options = [f"NSE_FO|{i}" for i in range(25)]
+    options = [f"NSE_FO|{i}" for i in range(45)]
     off = compose_keys(chart, options, enabled=False)
     assert off == chart[:12]
     assert off[0] == NIFTY_INDEX_KEY and off[1] == VIX_KEY
     on = compose_keys(chart, options, enabled=True)
     assert on[:12] == chart[:12]
-    assert on[12:] == options[:20]
+    assert on[12:] == options[:40]
     assert NIFTY_INDEX_KEY in on and VIX_KEY in on
 
 

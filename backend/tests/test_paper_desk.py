@@ -70,6 +70,16 @@ def test_wanted_keys_are_the_union_and_an_unknown_slot_is_refused(tmp_path) -> N
         d.runner("5")
 
 
+def test_held_and_atm_keys_are_each_the_union_of_the_slots(tmp_path) -> None:
+    d = desk(tmp_path, {"1": {0: "BUY"}, "2": {0: "SELL"}})
+    for slot in ("1", "2"):
+        d.runner(slot).start(DAY, "log_xz", {})
+    feed(d, [(9, m, 22600.0) for m in range(15, 22)])
+    assert d.held_keys() == {"KEY|NIFTY 22600 CE 06 OCT 26", "KEY|NIFTY 22600 PE 06 OCT 26"}
+    assert d.atm_keys() == {"KEY|NIFTY 22600 CE 06 OCT 26", "KEY|NIFTY 22600 PE 06 OCT 26"}
+    assert d.held_keys() | d.atm_keys() == d.wanted_keys()
+
+
 def test_a_failure_in_one_slot_never_reaches_the_other_slot_or_the_feed(tmp_path, caplog) -> None:
     d = desk(tmp_path, {"1": {0: "BUY"}, "2": {0: "SELL"}})
     for slot in SLOTS:

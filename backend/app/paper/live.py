@@ -354,6 +354,16 @@ class PaperRunner:
             return frozenset()
         return frozenset(self.session.wanted)
 
+    def held_keys(self) -> frozenset[str]:
+        if self.state != "running" or self.session is None:
+            return frozenset()
+        return frozenset(self.session.held_keys())
+
+    def atm_keys(self) -> frozenset[str]:
+        if self.state != "running" or self.session is None:
+            return frozenset()
+        return frozenset(self.session.atm_keys())
+
     def _sync_wanted(self) -> None:
         wanted = self.wanted_keys()
         if wanted != self._wanted_sent:

@@ -54,6 +54,20 @@ class PaperDesk:
             out |= r.wanted_keys()
         return out
 
+    def held_keys(self) -> set[str]:
+        """Every slot's held contracts: the feed never refuses these."""
+        out: set[str] = set()
+        for r in self.runners.values():
+            out |= r.held_keys()
+        return out
+
+    def atm_keys(self) -> set[str]:
+        """Every slot's current ATM call and put."""
+        out: set[str] = set()
+        for r in self.runners.values():
+            out |= r.atm_keys()
+        return out
+
     def resume_if_running(self, day: date) -> bool:
         resumed = False
         for r in self.runners.values():

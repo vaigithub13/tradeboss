@@ -173,6 +173,7 @@ class LiveService:
             on_views_changed=self.refresh_subscriptions,
         )
         self._spreads = None
+        self._refused_logged: tuple[str, ...] = ()  # the option keys the cap refused, as last logged
         self._day_files_closed = False
         self.vix = VixSeries()
         paper_base = cfg.paper_dir or (cfg.state_dir.parent / "paper")
@@ -616,17 +617,22 @@ class LiveService:
         return list(dict.fromkeys(keys))[:MAX_SUBSCRIPTIONS]
 
     def subscription_keys(self) -> list[str]:
-        """Chart keys, then option keys: the spread recorder's ATM+-2 set, then any contract the paper
-        strategy needs that the set does not already hold."""
-        from app.live.spreads.keys import compose_keys
+        """Chart keys, then option keys in priority order: the contracts paper holds, each slot's current ATM
+        call and put, then the spread recorder's ATM+-2 set. A key the option cap refuses is logged once per set."""
+        from app.live.spreads.keys import compose_keys, order_option_keys
 
         chart = self._chart_keys()
         spread = self._spread_session().keys() if self.cfg.spread_recorder_enabled else []
-        # paper keys first: the option list is capped, and a paper fill cannot wait behind the recorder's set
-        options = list(dict.fromkeys([*sorted(self.paper.wanted_keys()), *spread]))
+        options = order_option_keys(self.paper.held_keys(), self.paper.atm_keys(), spread)
         if not options:
             return chart
-        return compose_keys(chart, options, enabled=True)
+        keys = compose_keys(chart, options, enabled=True)
+        taken = set(keys)
+        refused = tuple(k for k in options if k not in taken)
+        if refused and refused != self._refused_logged:
+            log.warning("option cap refused %d option keys: %s", len(refused), ", ".join(refused))
+        self._refused_logged = refused
+        return keys
 
     def _spread_session(self):
         if self._spreads is None:
