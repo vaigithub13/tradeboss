@@ -9,6 +9,7 @@ from app.backtest.contracts import Strategy
 from app.backtest.engine import INTRADAY_MIN
 from app.data.sessions import SESSION_TYPES
 from app.strategies.ema_cross import EmaCrossover
+from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
 from app.strategies.pivot_extension import PivotExtension
@@ -54,6 +55,17 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
         OpeningRangeBreakout,
         {
             "range_minutes": _Field("int", 15, min_value=1),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "five_ema": (
+        FiveEma,
+        {
+            "ema_length": _Field("int", 5, min_value=1),
+            "direction": _Field("str", "short_only", choices=("short_only", "long_only", "both")),
+            "rr": _Field("float", 3.0, min_value=0.1),
+            "entry_bars": _Field("int", 1, min_value=1),
+            "max_trades_per_day": _Field("int", 4, min_value=1),
             "lots": _Field("int", 1, min_value=1),
         },
     ),

@@ -1206,3 +1206,62 @@ Trades (9 Nov expiry, DTE 2, 1 lot of 65; paper / backtest):
   no traceback. The strike window grew with the rally (new pairs at 09:51, 13:17, 13:37, 13:48); the 13:48 pair
   (24700 CE/PE) took its 09:15-13:47 minutes from the intraday history (272/273 bars). No index or future gap.
   Session gate: listed trading day, recording from 09:00. Snapshot 08:32 (15 kept), launchd job loaded.
+
+## 6 Nov 2026: 5 EMA strategy (Power of Stocks)
+
+Added `five_ema` (`backend/app/strategies/five_ema.py`) to the backtest catalog and panel ("5 EMA (Power of
+Stocks)"). It follows the rules of youtube.com/watch?v=fBTMspiqjS4. A sell alert candle closes with its whole
+range above EMA(5) (low > EMA). A stop-entry SELL waits at its low, with the stop at its high and the target `rr`
+times the risk away (default 1:3). Buys are the mirror image (whole candle below the EMA, BUY stop at its high).
+A newer alert candle replaces the waiting order; otherwise the order lives for `entry_bars` candles (default 1).
+At most `max_trades_per_day` entries (default 4), entries only inside 09:15-14:50, square-off as configured.
+The faithful runs are `direction=short_only` on 5m and `direction=long_only` on 15m; `both` is a one-chart variant.
+The video's gap / range-shift position sizing is discretionary and is not implemented.
+Tests: `tests/test_bt_five_ema.py` (10, by hand). Not yet run on stored Nifty 50 candles.
+
+## 6 Nov 2026: forward-test day 8 (four slots)
+
+Fresh `npm run session` at 08:31 (startup reconcile: 5 Nov `final`, 3 instrument-days ok). All four slots warm 500
+bars, 75 closed bars each, no incomplete, late-after-gap or given-up bars; every signal and trade `live`, every
+premium leg a real quote (0 modelled). Settings unchanged. No shadow exits. End-of-day check: slots 1 and 3 2 live vs
+2 backtest trades, slots 2 and 4 1 vs 1; every slot 0 differences, 0 fill-driven, 0 exchange-only, no warnings. Nifty
+opened 24538.20, low 24388.05 (09:16), was 24941.10 at the 15:15 square-off and closed at the day high 25030.35 (15:29,
++91 in the last minute; the official bars agree). Day range 642 points, the widest of the forward test.
+
+Trades (9 Nov expiry, DTE 1, 1 lot of 65; paper / backtest):
+- Slot 1 (Log XZ): 09:25 bar sell, filled 09:31:00 at Nifty 24521.45, 24500 PE 181.70 / 181.20; reversal 09:46:00 at
+  Nifty 24591.20, 142.45 / 142.45; net −2,621.55 / −2,589.02. 09:40 bar buy, filled 09:46:00 at Nifty 24591.20,
+  24600 CE 148.45 / 148.80; square-off 15:15 at Nifty 24941.10, 435.45 / 436.70; net +18,549.09 / +18,607.42.
+- Slot 2 (Price Channel 20): 09:30 bar, buy stop 24576.15, filled 09:36:29 at Nifty 24576.15, 24600 CE 142.30 /
+  141.88; square-off 15:15 at Nifty 24941.10, 435.45 / 436.70; net +18,949.02 / +19,057.20. The square-off sold 0.625
+  under the mid (the CE was 340 points in the money).
+- Slot 3 (Log XZ, 1:2 premium): the PE, stop 145.36 / 144.96, target 254.38 / 253.68; stop 09:45:35 at Nifty
+  24582.55, 145.15 / 144.76 (09:45); net −2,446.38 / −2,439.15, R −1.04 / −1.04. The CE, stop 118.76 / 119.04, target
+  207.83 / 208.32; target 10:29:14 at Nifty 24684.70, 207.20 / 208.12 (10:29); net +3,741.34 / +3,778.26, R +1.94 /
+  +1.95. The square-off-held CE in slot 1 went on to +18,549.09.
+- Slot 4 (Price Channel 20, 1:2 premium): slot 2's entry; stop 113.84 / 113.51, target 199.22 / 198.64; target
+  10:29:05 at Nifty 24672.30, 198.50 / 198.44 (10:29); net +3,576.87 / +3,600.06, R +1.93 / +1.95.
+- Today: slot 1 +15,927.54 (2 trades, 1 win; reversal 1, square-off 1), slot 2 +18,949.02 (1, 1; square-off), slot 3
+  +1,294.96 (2, 1; stop 1, target 1), slot 4 +3,576.87 (1, 1; target).
+- Running (live days 8, 9, 12 Oct, 2-6 Nov; target/stop/reversal/square-off): slot 1 +44,984.81 (18 trades, 12
+  wins; 0/0/11/7), slot 2 +43,927.05 (14, 9; 0/0/6/8), slot 3 +17,835.14 (17, 10; 8/4/4/1), slot 4 +6,249.35 (13, 7;
+  4/4/2/3). Shadow difference unchanged: slot 3 +53.20, slot 4 −117.43, all −64.23 (2 shadows). The vacation
+  backtest (13-30 Oct, 31 Oct entry) is not in these totals.
+- Spreads 6 Nov, ATM, DTE 1: CE median 0.35 / p90 0.45, PE 0.35 / 0.45; one-side 1-lot fill 0.175 (both), round trip
+  ₹22.75. Since 6 Oct (10 days: DTE 0, 4, 3, 2, 1, 1, 0, 3, 2, 1): mean one-side 0.134, round trip ₹17.39. Paper's own
+  legs today: 0.28 (slot 1), 0.39 (slot 2), 0.19 (slot 3), 0.20 (slot 4) points on average.
+- Reconcile: 6 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 volume 339,365 vs
+  359,775; 14 expected: 4 OI and 15:30-15:39). 5 Nov `final` at the 08:31 start (61471 0 differences, 10 expected).
+  Option capture 15:45: 9 Nov expiry, 24 strikes, 48 stored, 0 empty, 0 failed.
+- Health: one backend 08:31-16:11 (stopped with Ctrl+C; the `app.crash` KeyboardInterrupt line after "Application
+  shutdown complete", as on 2-4 Nov), feed live 08:55-15:40 (and 15:50-16:00) with no reconnect; 0 warnings, 0
+  errors. One new pair took its morning minutes from the intraday history at 13:44 (40020/40021, 269 bars). No index
+  or future gap. Session gate: listed trading day, recording from 09:00. Snapshot 08:30 (16 kept), launchd job loaded.
+- **Open: the option key cap (not changed).** Spread snapshots per 15 minutes fell from about 8,700 to 7,208 (14:30),
+  5,975, 4,628 and 3,355 (15:15, two strikes, 24850 and 24900). No contract above 24900 was quoted before 15:30, when
+  24950-25150 arrived. Cause: `subscription_keys` puts the paper keys first under `OPTION_CAP = 20`, and each slot's
+  `prepare()` adds the ATM call and put on every new ATM without removing any. With the rally, paper's set alone
+  reached about 20 keys by 13:55, so the recorder's newest strikes were left out (at 15:30 the slots stopped, their
+  keys went, and the recorder's set came in). The same cap could also leave out paper's own newest ATM contracts (keys
+  sort by number), so a late signal would have filled from the model. No signal came after 09:46, so no trade was
+  affected. Today's ATM figures rest on fewer seconds (20,663 per kind against about 22,000).
