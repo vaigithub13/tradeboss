@@ -1385,3 +1385,22 @@ b) gap_zone −0.01 / +0.21 / +0.72 / +0.21 / −0.18 (47 / 25 / 17 / 18 / 31 tr
   after looking at the data, so it is a lead to test on fresh data, not a result.
 
 Suite after: backend 1506 passed, 1 skipped; frontend 370 passed; typecheck clean.
+
+## 6 Nov 2026: options candidates (orb_plus, pdh_pdl_breakout) and a fixed comparison list
+
+After five_ema failed after costs, two families aimed at fewer, larger moves (minimum 1:2) were added:
+
+- `orb_plus` (`app/strategies/orb_plus.py`): opening range breakout, one OCO pair a day, stop at the opposite
+  side (or the midpoint), target `rr` x risk (`rr=0`: square-off only), entries cancelled at 14:50. Optional day
+  filters from finished days only: `prior_day` nr4 / nr7 / inside (Crabel compression), `cpr=narrow` (today's
+  CPR at most `cpr_max_ratio` of the mean of the previous 20), `bias=cpr` (open above the CPR: long only; below:
+  short only; inside: no trade), `range_atr_max` (skip a first range wider than that multiple of daily ATR(14)).
+- `pdh_pdl_breakout` (`app/strategies/pdh_pdl.py`): after the first 15 minutes, stop-entries at the previous
+  day's high and low (OCO), a side already gapped through is skipped, stop `stop_atr` x daily ATR, target `rr` x
+  risk, entries cancelled at 14:50, optional `bias=cpr`.
+- Daily levels come from `app/strategies/daily_levels.py` (`DailyTracker`), built from closed bars only.
+- Tests: `tests/test_bt_orb_plus_pdh.py` (19, by hand, with its own look-ahead cut check); `orb_plus` added to
+  `test_bt_lookahead.py`.
+- `scripts/compare_candidates.py` runs a list of 13 configurations (C1-C13) fixed before any run, in options
+  mode, 2022-01-03 to 2026-06-30 (holdout refused), and writes `data/validation/candidates_<date>.md`.
+  Not yet run on the stored candles.

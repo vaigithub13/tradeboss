@@ -9,6 +9,8 @@ const STRATEGY_LABEL: Record<string, string> = {
   ema_crossover: "EMA crossover",
   supertrend_flip: "Supertrend flip",
   opening_range_breakout: "Opening range breakout",
+  orb_plus: "ORB + target + filters",
+  pdh_pdl_breakout: "Previous-day high/low breakout",
   five_ema: "5 EMA (Power of Stocks)",
   pivot_extension: "Pivot Extension",
   log_xz: "Log XZ",

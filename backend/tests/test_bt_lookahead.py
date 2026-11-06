@@ -18,6 +18,7 @@ from app.strategies.ema_cross import EmaCrossover
 from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
+from app.strategies.orb_plus import OrbPlus
 from app.strategies.pivot_extension import PivotExtension
 from app.strategies.price_channel import PriceChannel
 from app.strategies.supertrend_flip import SupertrendFlip
@@ -51,6 +52,7 @@ STRATEGIES: dict[str, Callable[[], Strategy]] = {
     "ema": lambda: EmaCrossover(fast=5, slow=13),
     "supertrend": lambda: SupertrendFlip(atr_length=7, multiplier=2.0),
     "orb": lambda: OpeningRangeBreakout(range_minutes=15),
+    "orb_plus": lambda: OrbPlus(rr=2.0, stop_mode="mid"),
     "bracket": BracketTrader,
     "pivot_faithful": lambda: PivotExtension(left_bars=2, right_bars=1),
     "pivot_carried": lambda: PivotExtension(variant="carried_pivots", left_bars=2, right_bars=1),

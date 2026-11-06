@@ -12,6 +12,8 @@ from app.strategies.ema_cross import EmaCrossover
 from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
+from app.strategies.orb_plus import OrbPlus
+from app.strategies.pdh_pdl import PdhPdlBreakout
 from app.strategies.pivot_extension import PivotExtension
 from app.strategies.price_channel import PriceChannel
 from app.strategies.supertrend_flip import SupertrendFlip
@@ -69,6 +71,31 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "lots": _Field("int", 1, min_value=1),
             "gap_buffer": _Field("float", 30.0, min_value=0),
             "swing_bars": _Field("int", 5, min_value=1),
+        },
+    ),
+    "orb_plus": (
+        OrbPlus,
+        {
+            "range_minutes": _Field("int", 15, min_value=1),
+            "rr": _Field("float", 2.0, min_value=0.0),
+            "stop_mode": _Field("str", "opposite", choices=("opposite", "mid")),
+            "prior_day": _Field("str", "off", choices=("off", "nr4", "nr7", "inside")),
+            "cpr": _Field("str", "off", choices=("off", "narrow")),
+            "cpr_max_ratio": _Field("float", 0.5, min_value=0.0),
+            "bias": _Field("str", "off", choices=("off", "cpr")),
+            "range_atr_max": _Field("float", 0.0, min_value=0.0),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "pdh_pdl_breakout": (
+        PdhPdlBreakout,
+        {
+            "wait_minutes": _Field("int", 15, min_value=1),
+            "rr": _Field("float", 2.0, min_value=0.1),
+            "stop_atr": _Field("float", 0.2, min_value=0.01),
+            "bias": _Field("str", "off", choices=("off", "cpr")),
+            "atr_length": _Field("int", 14, min_value=1),
+            "lots": _Field("int", 1, min_value=1),
         },
     ),
     "pivot_extension": (
