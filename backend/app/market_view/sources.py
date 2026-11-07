@@ -3,6 +3,8 @@ the view shows that check as unavailable instead of failing the whole card.
 
 * Global and crude: Yahoo Finance chart API (no key). At 08:50 IST the US indices show their last
   session, US futures (ES=F) and Brent (BZ=F) show the overnight move, Nikkei and Hang Seng are trading.
+  query1 often answers 429 ("Too Many Requests") to this client; the quote page is the fallback. It
+  embeds the same last price and previous close, and no account data is sent.
 * FII/DII cash: NSE /api/fiidiiTradeReact (needs the cookies NSE sets on its home page).
 * FII index futures long/short: NSE participant-wise OI CSV of the previous trading day.
 
@@ -14,9 +16,11 @@ from __future__ import annotations
 import csv
 import io
 import logging
+import re
 from collections.abc import Callable
 from datetime import date, timedelta
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -25,6 +29,7 @@ log = logging.getLogger(__name__)
 UA = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
 TIMEOUT_S = 10.0
 YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+YAHOO_QUOTE = "https://finance.yahoo.com/quote/{symbol}/"
 GLOBAL_SYMBOLS: dict[str, tuple[str, str]] = {
     "sp500": ("^GSPC", "S&P 500"),
     "nasdaq": ("^IXIC", "Nasdaq"),
@@ -78,17 +83,80 @@ def parse_yahoo(body: Any, symbol: str, name: str) -> dict[str, Any] | None:
     }
 
 
-def fetch_quote(http: httpx.Client, symbol: str, name: str) -> dict[str, Any] | None:
-    """Last price vs the previous session's close (range=1d, so chartPreviousClose is yesterday)."""
+def parse_yahoo_page(html: str, symbol: str, name: str) -> dict[str, Any] | None:
+    """Last price and previous close from the quote page's embedded spark meta.
+
+    The page inlines that payload as escaped JSON (`\\"regularMarketPrice\\":7376.86`). A bare
+    number is required so a streamer card (`\\"regularMarketPrice\\":{\\"raw\\":...`) is skipped.
+    """
+    marker = '\\"symbol\\":\\"' + symbol + '\\"'
+    start = 0
+    while True:
+        i = html.find(marker, start)
+        if i < 0:
+            return None
+        window = html[i:i + 2500]
+
+        def grab(key: str) -> float | None:
+            m = re.search(r'\\"' + re.escape(key) + r'\\":(-?\d+(?:\.\d+)?)', window)
+            return float(m.group(1)) if m else None
+
+        last = grab("regularMarketPrice")
+        prev = grab("chartPreviousClose") or grab("previousClose")
+        if last is not None and prev:
+            t = grab("regularMarketTime")
+            return {
+                "symbol": symbol,
+                "name": name,
+                "last": last,
+                "prev_close": prev,
+                "change_pct": (last / prev - 1.0) * 100.0,
+                "time": int(t) if t is not None else None,
+            }
+        start = i + len(marker)
+
+
+def _chart_quote(http: httpx.Client, symbol: str, name: str) -> dict[str, Any] | None:
     try:
         resp = http.get(YAHOO_CHART.format(symbol=symbol), params={"range": "1d", "interval": "5m"})
-        if resp.status_code != 200:
-            log.warning("yahoo %s: HTTP %s", symbol, resp.status_code)
-            return None
+    except httpx.HTTPError as e:
+        log.info("yahoo %s chart failed: %s", symbol, type(e).__name__)
+        return None
+    if resp.status_code != 200:
+        log.info("yahoo %s chart: HTTP %s", symbol, resp.status_code)
+        return None
+    try:
         return parse_yahoo(resp.json(), symbol, name)
-    except (httpx.HTTPError, ValueError) as e:
+    except ValueError:
+        return None
+
+
+def _page_quote(http: httpx.Client, symbol: str, name: str) -> dict[str, Any] | None:
+    try:
+        resp = http.get(
+            YAHOO_QUOTE.format(symbol=quote(symbol, safe="")),
+            headers={"Accept": "text/html"},
+            timeout=20.0,
+        )
+    except httpx.HTTPError as e:
         log.warning("yahoo %s failed: %s", symbol, type(e).__name__)
         return None
+    if resp.status_code != 200:
+        log.warning("yahoo %s page: HTTP %s", symbol, resp.status_code)
+        return None
+    got = parse_yahoo_page(resp.text, symbol, name)
+    if got is None:
+        log.warning("yahoo %s page: no quote in the response", symbol)
+    return got
+
+
+def fetch_quote(http: httpx.Client, symbol: str, name: str) -> dict[str, Any] | None:
+    """Last price vs the previous session's close.
+
+    The chart call (range=1d, so chartPreviousClose is the previous session) is first. A 429 or any
+    other miss falls through to the quote page; a failure of both leaves this quote unavailable.
+    """
+    return _chart_quote(http, symbol, name) or _page_quote(http, symbol, name)
 
 
 # ------------------------------------------------------------------ NSE

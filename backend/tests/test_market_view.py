@@ -57,6 +57,51 @@ def test_parse_yahoo_uses_the_previous_session_close() -> None:
     assert sources.parse_yahoo({"chart": {"result": [{"meta": {"regularMarketPrice": 1}}]}}, "x", "x") is None
 
 
+# The quote page inlines the spark meta as escaped JSON. A streamer card uses an object, which must be ignored.
+YAHOO_PAGE = (
+    '{"body":"{\\"symbol\\":\\"^GSPC\\",\\"regularMarketPrice\\":{\\"raw\\":5},'
+    '\\"symbol\\":\\"^GSPC\\",\\"regularMarketPrice\\":101.0,\\"chartPreviousClose\\":100.0,'
+    '\\"regularMarketTime\\":1700000000}"}'
+)
+
+
+def test_parse_yahoo_page_reads_the_embedded_spark_meta() -> None:
+    got = sources.parse_yahoo_page(YAHOO_PAGE, "^GSPC", "S&P 500")
+    assert got["last"] == 101.0 and got["prev_close"] == 100.0
+    assert got["change_pct"] == pytest.approx(1.0) and got["time"] == 1700000000
+    assert sources.parse_yahoo_page(YAHOO_PAGE, "ES=F", "Brent") is None
+    assert sources.parse_yahoo_page("", "^GSPC", "S&P 500") is None
+
+
+def test_chart_429_falls_back_to_the_quote_page() -> None:
+    seen: list[str] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        if "query1.finance.yahoo.com" in str(req.url):
+            return httpx.Response(429, text="Too Many Requests")
+        return httpx.Response(200, text=YAHOO_PAGE)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    got = sources.fetch_quote(http, "^GSPC", "S&P 500")
+    assert got["last"] == 101.0 and got["change_pct"] == pytest.approx(1.0)
+    assert len(seen) == 2 and "query1.finance.yahoo.com" in seen[0] and "finance.yahoo.com/quote/" in seen[1]
+
+
+def test_a_chart_hit_does_not_fetch_the_quote_page() -> None:
+    seen: list[str] = []
+    body = {"chart": {"result": [{"meta": {"regularMarketPrice": 101.0, "chartPreviousClose": 100.0,
+                                           "regularMarketTime": 1}}]}}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(str(req.url))
+        return httpx.Response(200, json=body)
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    got = sources.fetch_quote(http, "^GSPC", "S&P 500")
+    assert got["last"] == 101.0 and len(seen) == 1
+
+
 def test_parse_fii_dii() -> None:
     body = [
         {"category": "DII **", "date": "06-Nov-2026", "buyValue": "12,000.5", "sellValue": "10,000", "netValue": "2,000.50"},

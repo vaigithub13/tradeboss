@@ -1477,3 +1477,9 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - Frontend: `View` header button. Before 09:15 IST the full panel opens beside the chart (unless collapsed that
   day); collapsed, a small verdict box with five dots sits on the chart. Levels drawn on Nifty (toggle).
 - Tests: `tests/test_market_view.py`, `src/marketView/present.test.ts`.
+- Suite on this Mac: backend 1584 passed, 1 skipped; frontend 382 passed; typecheck clean
+  (was 1566 passed, 1 skipped; frontend 379 passed).
+- Live build on this Mac: `query1` chart API returns HTTP 429, body "Too Many Requests", even with a
+  browser User-Agent and the finance.yahoo.com cookies. Quotes are taken from the quote page, which
+  embeds the same spark meta (last price, chartPreviousClose). NSE FII/DII and the participant OI
+  file both returned. No account data or token is sent to Yahoo or NSE.
