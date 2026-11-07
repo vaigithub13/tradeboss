@@ -1492,3 +1492,15 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   The live feed and candles are unchanged and still run the Muhurat window.
 - The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
   Muhurat one.
+
+## 7 Nov 2026: automatic market-day session (launchd)
+
+- `backend/scripts/launchd/install-session.sh`: agents `com.tradeboss.session-start` (08:40 IST Mon-Fri) and
+  `com.tradeboss.session-stop` (16:35 IST Mon-Fri), local times computed from IST like the snapshot job; PATH for
+  npm / uv baked into the plist. Prints `sudo pmset repeat wakeorpoweron MTWRF 08:30` (in local time).
+- `session-start.sh`: exits 0 (no restart) outside 08:00-15:30 IST, on non-session days (`listed_session`), or
+  when :8000 is already listening; otherwise `exec caffeinate -ims npm run session`. KeepAlive on non-zero exit
+  only, ThrottleInterval 60.
+- `session-stop.sh`: one SIGINT to `app.serve` (serve.py ignores the duplicate a parent forwards), wait <= 60 s,
+  then SIGINT to `vite preview`.
+- `check-session.sh`, `uninstall-session.sh`. MARKET_DAY_CHECKLIST.md has the section. Not run on the Mac yet.

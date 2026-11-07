@@ -12,6 +12,19 @@ For every trading day (first used for Monday sessions). Times are IST.
   On 6 Oct 2026 a reload between 15:30 and 15:45 dropped the day's close log and its end-of-day check.
 - Read-only work (reading files, `git log`, looking at `data/`) is fine.
 
+## Automatic session (optional)
+
+`backend/scripts/launchd/install-session.sh` installs two launchd agents and prints a `sudo pmset` wake command:
+
+- 08:30 IST Mon-Fri the Mac wakes (pmset); 08:40 `session-start.sh` runs `npm run session` under `caffeinate`
+  on a session day, only between 08:00 and 15:30, and never when :8000 is already in use. A crash restarts it
+  (at most once a minute) inside that window.
+- 16:35 `session-stop.sh` sends ONE SIGINT to the backend (after the reconcile retries end at 16:30), waits up to
+  60 s for the clean shutdown, then stops the frontend preview.
+- Logs: `data/logs/com.tradeboss.session-start.log`, `...session-stop.log`; status: `check-session.sh`.
+- Weekdays only: a Sunday Muhurat session is started by hand. Keep the Mac on power (caffeinate does not stop
+  sleep on battery with the lid closed).
+
 ## Before 08:55
 
 1. Instrument snapshot: `backend/scripts/launchd/check.sh` should say today's snapshot exists or is unchanged.
