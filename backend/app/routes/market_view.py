@@ -37,9 +37,10 @@ def get_mv_builder() -> Callable[..., dict[str, Any]]:
 
 
 def get_mv_trading_day() -> Callable[[date], bool]:
-    from app.live.session_days import listed_session
+    # regular sessions only: the participant-OI file of a Muhurat day is not the one to read
+    from app.backtest.expiry import load_default_calendar
 
-    return listed_session
+    return load_default_calendar().is_trading_day
 
 
 @router.get("/market-view")

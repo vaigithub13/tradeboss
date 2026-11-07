@@ -150,7 +150,7 @@ class GexScheduler:
 
 def build_scheduler() -> GexScheduler:
     from app.config import settings
-    from app.live.session_days import listed_session
+    from app.backtest.expiry import load_default_calendar
     from app.options.gex import compute_gex
     from app.options.gex_history import append_snapshot, snapshot_row
     from app.routes.gex import NIFTY_CHAIN_KEY, default_expiry
@@ -180,6 +180,9 @@ def build_scheduler() -> GexScheduler:
 
         today = datetime.fromtimestamp(_time.time(), IST).date()
         return build_for(today, data_dir=settings.data_dir, store=CandleStore(settings.candles_dir),
-                         is_trading_day=listed_session)
+                         is_trading_day=load_default_calendar().is_trading_day)
 
-    return GexScheduler(record=record, has_snapshots=has_snapshots, is_session=listed_session, premarket=premarket)
+    # Regular trading days only: on a Muhurat / special session the chain is stale until the short window
+    # opens, so snapshots, the 08:50 view and the study would record Friday's data as that day's.
+    regular_day = load_default_calendar().is_trading_day
+    return GexScheduler(record=record, has_snapshots=has_snapshots, is_session=regular_day, premarket=premarket)

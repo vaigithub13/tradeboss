@@ -12,7 +12,7 @@ from datetime import date
 
 from app.config import settings
 from app.data.store import CandleStore
-from app.live.session_days import listed_session
+from app.backtest.expiry import load_default_calendar
 from app.market_view import service
 
 
@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> None:
     day = date.fromisoformat(args.day)
     store = CandleStore(settings.candles_dir)
     if args.build:
-        view = service.build_for(day, data_dir=settings.data_dir, store=store, is_trading_day=listed_session)
+        view = service.build_for(day, data_dir=settings.data_dir, store=store, is_trading_day=load_default_calendar().is_trading_day)
         print(f"{view['bias']} (score {view['score']}), {view['day_type']} day, range {view['expected_range']}")
         for f in view["factors"]:
             print(f"  {f['label']:<10} {f['score'] if f['available'] else '-':>3}  {f['value']}  ({f['reason']})")

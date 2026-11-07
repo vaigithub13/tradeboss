@@ -1483,3 +1483,12 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   browser User-Agent and the finance.yahoo.com cookies. Quotes are taken from the quote page, which
   embeds the same spark meta (last price, chartPreviousClose). NSE FII/DII and the participant OI
   file both returned. No account data or token is sent to Yahoo or NSE.
+
+## 7 Nov 2026: GEX recorder and market view run on regular sessions only
+
+- The scheduler's session check is now the regular NSE calendar (`load_default_calendar().is_trading_day`), not
+  `listed_session`. On Muhurat (Sun 8 Nov 2026, 14:20-15:30) the option chain is Friday's until the window opens,
+  so 5-minute snapshots from 09:15, the 08:50 view and the 15:40 study would have saved stale data as that day's.
+  The live feed and candles are unchanged and still run the Muhurat window.
+- The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
+  Muhurat one.
