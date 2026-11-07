@@ -32,6 +32,9 @@ import { useIndicatorStore } from "./store/indicatorStore";
 import { liveView, useLiveStore } from "./store/liveStore";
 import type { LevelLine } from "./ai/present";
 import { useGexStore } from "./store/gexStore";
+import { useMarketViewStore } from "./store/marketViewStore";
+import { MarketViewBox, MarketViewPanel } from "./panels/MarketViewPanel";
+import { viewLevels } from "./marketView/present";
 import { gexLevels, gexSummary } from "./chart/gex";
 
 const POLL_INTERVAL_MS = 3000;
@@ -40,6 +43,8 @@ const NO_PAPER_SIGNALS: PaperSignal[] = [];
 const INDICATOR_DEBOUNCE_MS = 200;
 /** the backend caches the option chain for 30 s; one minute is plenty for GEX */
 const GEX_POLL_MS = 60_000;
+/** the view is built at 08:50 IST; re-read it every 5 minutes so an open page picks it up */
+const MARKET_VIEW_POLL_MS = 5 * 60_000;
 
 const STATUS_UI: Record<BackendStatus, { label: string; dot: string; text: string }> = {
   checking: { label: "checking backend…", dot: "bg-yellow-400", text: "text-yellow-300" },
@@ -152,6 +157,22 @@ export default function App() {
     };
   }, [gexOn, loadGex]);
   const gexShown = gexOn && gexData?.available ? gexData : null;
+  const marketView = useMarketViewStore((s) => s.view);
+  const marketPanelOpen = useMarketViewStore((s) => s.panelOpen);
+  const setMarketPanelOpen = useMarketViewStore((s) => s.setPanelOpen);
+  const marketLevelsOn = useMarketViewStore((s) => s.showLevels);
+  const loadMarketView = useMarketViewStore((s) => s.load);
+  useEffect(() => {
+    const ac = new AbortController();
+    void loadMarketView(false, ac.signal);
+    const id = setInterval(() => void loadMarketView(false, ac.signal), MARKET_VIEW_POLL_MS);
+    return () => {
+      clearInterval(id);
+      ac.abort();
+    };
+  }, [loadMarketView]);
+  const marketLevels =
+    marketView && marketLevelsOn && symbol === "NIFTY50" && !replayActive ? viewLevels(marketView.levels) : [];
   const replayCursorTime = useReplayStore((s) => s.cursor);
   useReplayClock();
   usePaperAlerts();
@@ -305,6 +326,17 @@ export default function App() {
         >
           GEX
         </button>
+        <button
+          type="button"
+          className={`rounded border px-2 py-1 text-xs ${
+            marketPanelOpen ? "border-sky-400/60 bg-sky-400/10 text-sky-200" : "border-white/15 text-white/80"
+          }`}
+          title="Pre-market view: global, FII/DII, crude, India VIX, structure"
+          onClick={() => setMarketPanelOpen(!marketPanelOpen)}
+          data-testid="market-view-toggle"
+        >
+          View
+        </button>
         {status === "loading" && <span className="text-xs text-white/40">loading…</span>}
         <div className="ml-auto flex items-center gap-2">
           <LiveBadge />
@@ -369,10 +401,12 @@ export default function App() {
               ...analysisLevels,
               ...(replayReveal?.stops.map((stop) => ({ price: stop.price, title: "stop", color: "#ef5350" })) ?? []),
               ...(gexShown ? gexLevels(gexShown) : []),
+              ...marketLevels,
             ]}
             cursor={replayActive ? replayCursorTime : null}
             gex={gexShown}
           />
+          {!marketPanelOpen && <MarketViewBox />}
           {gexOn && (gexData || gexError) && (
             <div
               className="pointer-events-none absolute bottom-8 left-2 z-10 rounded bg-black/55 px-2 py-0.5 font-mono text-[11px] text-white/75"
@@ -400,6 +434,7 @@ export default function App() {
             {error}
           </div>
         )}
+        {marketPanelOpen && <MarketViewPanel />}
         {paperOpen && <PaperPanel />}
       </main>
       <BacktestResults />

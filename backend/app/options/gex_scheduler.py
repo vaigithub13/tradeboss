@@ -25,6 +25,9 @@ SLOT_MINUTES = 5
 #: a slot missed by more than this (sleep, restart) is skipped, not taken late
 SLOT_GRACE = timedelta(minutes=3)
 REPORT_AT = time(15, 40)
+#: the pre-market view is built once between these times on a session day
+PREMARKET_AT = time(8, 50)
+PREMARKET_UNTIL = time(9, 14)
 REPORT_UNTIL = time(23, 0)
 TICK_SECONDS = 15
 REPORT_TIMEOUT_S = 30 * 60
@@ -47,6 +50,11 @@ def due_slot(now: datetime, last_slot: datetime | None) -> datetime | None:
     return slot
 
 
+def premarket_due(now: datetime, last_day: date | None) -> bool:
+    local = now.astimezone(IST)
+    return last_day != local.date() and PREMARKET_AT <= local.time() <= PREMARKET_UNTIL
+
+
 def report_due(now: datetime, last_report_day: date | None, has_snapshots: bool) -> bool:
     local = now.astimezone(IST)
     if not has_snapshots or last_report_day == local.date():
@@ -62,7 +70,10 @@ class GexScheduler:
         has_snapshots: Callable[[date], bool],
         is_session: Callable[[date], bool],
         clock: Callable[[], float] = _time.time,
+        premarket: Callable[[], object] | None = None,
     ) -> None:
+        self._premarket = premarket
+        self._last_premarket: date | None = None
         self._record = record
         self._has_snapshots = has_snapshots
         self._is_session = is_session
@@ -87,6 +98,13 @@ class GexScheduler:
         now = datetime.fromtimestamp(self._clock(), IST)
         if not self._is_session(now.date()):
             return
+        if self._premarket is not None and premarket_due(now, self._last_premarket):
+            self._last_premarket = now.date()
+            try:
+                await asyncio.to_thread(self._premarket)
+                log.info("market view built for %s", now.date())
+            except Exception as e:
+                log.warning("market view build failed: %s", type(e).__name__)
         slot = due_slot(now, self._last_slot)
         if slot is not None:
             self._last_slot = slot
@@ -100,8 +118,12 @@ class GexScheduler:
             await self._run_report(now.date())
 
     async def _run_report(self, day: date) -> None:
+        await self._run_script(day, "scripts.gex_report", "--day", day.isoformat())
+        await self._run_script(day, "scripts.market_view", "--score", "--day", day.isoformat())
+
+    async def _run_script(self, day: date, module: str, *args: str) -> None:
         proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", "scripts.gex_report", "--day", day.isoformat(),
+            sys.executable, "-m", module, *args,
             cwd=str(BACKEND_DIR),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
@@ -110,10 +132,10 @@ class GexScheduler:
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=REPORT_TIMEOUT_S)
         except TimeoutError:
             proc.kill()
-            log.warning("gex report for %s timed out", day)
+            log.warning("%s for %s timed out", module, day)
             return
         tail = (out or b"").decode(errors="replace").strip().splitlines()[-1:] or [""]
-        log.info("gex report for %s exited %s: %s", day, proc.returncode, tail[0])
+        log.info("%s for %s exited %s: %s", module, day, proc.returncode, tail[0])
 
     async def _run(self) -> None:
         while True:
@@ -152,4 +174,12 @@ def build_scheduler() -> GexScheduler:
     def has_snapshots(day: date) -> bool:
         return (gex_dir / f"{day.isoformat()}.jsonl").is_file()
 
-    return GexScheduler(record=record, has_snapshots=has_snapshots, is_session=listed_session)
+    def premarket() -> object:
+        from app.data.store import CandleStore
+        from app.market_view.service import build_for
+
+        today = datetime.fromtimestamp(_time.time(), IST).date()
+        return build_for(today, data_dir=settings.data_dir, store=CandleStore(settings.candles_dir),
+                         is_trading_day=listed_session)
+
+    return GexScheduler(record=record, has_snapshots=has_snapshots, is_session=listed_session, premarket=premarket)

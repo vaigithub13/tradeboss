@@ -21,6 +21,7 @@ from app.routes.fvg import router as fvg_router
 from app.routes.gex import router as gex_router
 from app.routes.indicators import router as indicators_router
 from app.routes.live import router as live_router
+from app.routes.market_view import router as market_view_router
 from app.routes.paper import router as paper_router
 from app.routes.pine import router as pine_router
 from app.routes.upstox import router as upstox_router
@@ -78,6 +79,7 @@ app.include_router(indicators_router)
 app.include_router(drawings_router)
 app.include_router(fvg_router)
 app.include_router(gex_router)
+app.include_router(market_view_router)
 app.include_router(upstox_router)
 app.include_router(live_router)
 app.include_router(paper_router)

@@ -1454,3 +1454,26 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - Tests: `tests/test_vix_indicator.py`, `src/indicators/vix.test.ts`; registry and catalog type lists updated.
 - Suite on this Mac: backend 1566 passed, 1 skipped; frontend 379 passed; typecheck clean
   (was 1559 passed, 1 skipped; frontend 375 passed).
+
+## 7 Nov 2026: pre-market market view
+
+- `app/market_view/`: five checks scored -1 / 0 / +1 (thresholds in `view.py`, fixed before any data):
+  1. Global: mean of US close (S&P 500, Nasdaq), US futures (ES=F) and Asia (Nikkei, Hang Seng), ±0.3%.
+  2. FII/DII: NSE provisional FII cash net (±₹1,000 Cr) and FII index-futures long % from the previous day's
+     participant-wise OI CSV (above 55% / below 30%).
+  3. Crude: Brent (BZ=F) overnight, inverted, ±1.5%.
+  4. India VIX: last close vs previous, inverted, ±5%.
+  5. Structure: daily trend (close vs 20-day average, 5-day HH/HL vs the 5 before), close vs CPR.
+  Bias = sum (±2 or more: Bullish / Bearish). Expected range = previous close ± close × VIX / 100 / √252.
+  Day type: negative GEX or narrow CPR = trend; positive GEX (and wide CPR) = range; else mixed. Levels: PDH,
+  PDL, CPR top / bottom, range high / low. A one-line plan from the bias and levels.
+- Sources (`sources.py`) fail soft: a failed fetch shows that check as unavailable. Yahoo Finance chart API,
+  NSE fiidiiTradeReact (home-page cookies first), NSE participant OI CSV (nsearchives, then archives host).
+  Generic browser User-Agent, no account data sent.
+- Built at 08:50 IST on session days by the GEX scheduler (`premarket`), or on demand via
+  `GET /api/market-view?refresh=true`; saved to `data/market-view/<day>.json`. At 15:40 the scheduler also runs
+  `scripts.market_view --score`, which adds the outcome (bias right, range held, trend vs range) from the day's 5m
+  candles. `GET /api/market-view/history` gives the hit rates.
+- Frontend: `View` header button. Before 09:15 IST the full panel opens beside the chart (unless collapsed that
+  day); collapsed, a small verdict box with five dots sits on the chart. Levels drawn on Nifty (toggle).
+- Tests: `tests/test_market_view.py`, `src/marketView/present.test.ts`.
