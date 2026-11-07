@@ -1504,3 +1504,7 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - `session-stop.sh`: one SIGINT to `app.serve` (serve.py ignores the duplicate a parent forwards), wait <= 60 s,
   then SIGINT to `vite preview`.
 - `check-session.sh`, `uninstall-session.sh`. MARKET_DAY_CHECKLIST.md has the section. Not run on the Mac yet.
+- Paper autostart: `scripts/paper_autostart.py` (stdlib only), launched in the background by `session-start.sh`.
+  At 09:16 IST it POSTs `/api/paper/start` for each slot in `scripts/launchd/paper_slots.json` (slots 1-4 as in the
+  checklist) not already running; 409 "already running" counts as done, 400 is not retried, other failures retry
+  every 30 s until 09:45. Tests: `tests/test_paper_autostart.py` (5, fake transport).

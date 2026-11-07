@@ -21,6 +21,8 @@ For every trading day (first used for Monday sessions). Times are IST.
   (at most once a minute) inside that window.
 - 16:35 `session-stop.sh` sends ONE SIGINT to the backend (after the reconcile retries end at 16:30), waits up to
   60 s for the clean shutdown, then stops the frontend preview.
+- Paper: at 09:16 `scripts/paper_autostart.py` starts the slots in `backend/scripts/launchd/paper_slots.json`
+  (the four below), skipping any already running, retrying until 09:45. Log: `data/logs/paper-autostart.log`.
 - Logs: `data/logs/com.tradeboss.session-start.log`, `...session-stop.log`; status: `check-session.sh`.
 - Weekdays only: a Sunday Muhurat session is started by hand. Keep the Mac on power (caffeinate does not stop
   sleep on battery with the lid closed).

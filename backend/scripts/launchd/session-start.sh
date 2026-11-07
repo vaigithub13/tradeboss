@@ -38,6 +38,8 @@ if /usr/sbin/lsof -nP -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 log "starting npm run session (Mac kept awake while it runs)"
+# Paper slots: started on the running backend at 09:16 IST (scripts/launchd/paper_slots.json).
+(cd "$BACKEND" && "$PY" -m scripts.paper_autostart) >> "$REPO_ROOT/data/logs/paper-autostart.log" 2>&1 &
 cd "$REPO_ROOT"
 # -i: no idle sleep, -m: no disk sleep, -s: no system sleep on AC power. The display may still sleep.
 exec /usr/bin/caffeinate -ims npm run session

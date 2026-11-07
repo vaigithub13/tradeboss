@@ -1,0 +1,12 @@
+{
+  "_note": "Paper slots started automatically on a session day (scripts/paper_autostart.py). Same as MARKET_DAY_CHECKLIST.md. Set enabled to false to start them by hand.",
+  "enabled": true,
+  "start_at_ist": "09:16",
+  "give_up_at_ist": "09:45",
+  "slots": [
+    {"slot": "1", "strategy": "log_xz", "params": {}},
+    {"slot": "2", "strategy": "price_channel", "params": {"length": 20}},
+    {"slot": "3", "strategy": "log_xz", "params": {"exit_rule": "premium_1to2"}},
+    {"slot": "4", "strategy": "price_channel", "params": {"length": 20, "exit_rule": "premium_1to2"}}
+  ]
+}
