@@ -15,6 +15,7 @@ from app.ai.chain import NIFTY_CHAIN_KEY, weekly_expiry
 from app.backtest.expiry import load_default_calendar
 from app.config import settings
 from app.options.chain_history import latest_snapshot, trend_points, view_from_snapshot
+from app.options.chain_phase3 import enrich_phase3, india_vix_at, t_hold_days
 from app.options.chain_view import build_chain_view, market_status
 from app.options.time import IST
 from app.upstox.client import UpstoxAuthError, UpstoxError, UpstoxRateLimited
@@ -67,6 +68,10 @@ def get_options_dir() -> Path:
     return settings.data_dir / "options"
 
 
+def get_candles_dir() -> Path:
+    return settings.data_dir / "candles"
+
+
 def get_options_cache() -> ChainCache:
     return _CACHE
 
@@ -87,6 +92,45 @@ def next_expiry_after(exp: str) -> str:
 
 def _is_session(day: date) -> bool:
     return load_default_calendar().is_trading_day(day)
+
+
+def _lot_size(client: OptionsSource, expiry: str) -> int | None:
+    fn = getattr(client, "option_lot_size", None)
+    if not callable(fn):
+        return None
+    try:
+        lot = fn(NIFTY_CHAIN_KEY, expiry)
+    except UpstoxError:
+        return None
+    try:
+        return int(lot) if lot is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _attach_phase3(
+    view: dict[str, Any],
+    *,
+    client: OptionsSource,
+    options_dir: Path,
+    candles_dir: Path,
+    now: float,
+    expiry: str,
+) -> dict[str, Any]:
+    if not view.get("available"):
+        return view
+    vix = india_vix_at(int(view.get("as_of") or now), candles_dir=candles_dir)
+    lot = _lot_size(client, expiry)
+    enrich_phase3(view, vix=vix, options_dir=options_dir, lot_size=lot, hold_mode="1d")
+    # t_hold for each UI mode so the browser can reprice θ·t without a refetch
+    as_of = int(view.get("as_of") or now)
+    picker = view.get("strike_picker")
+    if isinstance(picker, dict):
+        picker["t_holds"] = {
+            mode: t_hold_days(as_of, expiry, mode)  # type: ignore[arg-type]
+            for mode in ("intraday", "1d", "2d")
+        }
+    return view
 
 
 def _public(view: dict[str, Any], *, expiries: list[str] | None = None) -> dict[str, Any]:
@@ -166,6 +210,7 @@ def option_chain(
     clock: Annotated[Callable[[], float], Depends(get_options_clock)],
     cache: Annotated[ChainCache, Depends(get_options_cache)],
     options_dir: Annotated[Path, Depends(get_options_dir)],
+    candles_dir: Annotated[Path, Depends(get_candles_dir)],
     expiry: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
     refresh: bool = False,
 ) -> dict[str, Any]:
@@ -189,6 +234,9 @@ def option_chain(
                 expiries = _list_expiries(client, now)
             except UpstoxError:
                 expiries = [exp]
+            _attach_phase3(
+                view, client=client, options_dir=options_dir, candles_dir=candles_dir, now=now, expiry=exp
+            )
             return _public(view, expiries=expiries)
         # no snapshot yet → one live Upstox call, still labelled MARKET CLOSED
         try:
@@ -201,6 +249,9 @@ def option_chain(
         except UpstoxError as e:
             raise HTTPException(502, f"option chain failed: {e}") from e
         view["from_snapshot"] = False
+        _attach_phase3(
+            view, client=client, options_dir=options_dir, candles_dir=candles_dir, now=now, expiry=exp
+        )
         return _public(view, expiries=expiries)
 
     cache_key = exp
@@ -218,6 +269,9 @@ def option_chain(
     except UpstoxError as e:
         raise HTTPException(502, f"option chain failed: {e}") from e
     view["from_snapshot"] = False
+    _attach_phase3(
+        view, client=client, options_dir=options_dir, candles_dir=candles_dir, now=now, expiry=exp
+    )
     payload = _public(view, expiries=expiries)
     cache.put(cache_key, now, payload)
     return payload

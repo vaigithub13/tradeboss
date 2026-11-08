@@ -232,13 +232,21 @@ class UpstoxClient:
 
     def option_contracts(self, instrument_key: str) -> list[date]:
         """GET /v2/option/contract: live option contracts for an underlying → unique expiry dates ASC."""
+        return [e for e, _ in self.option_contracts_meta(instrument_key)]
+
+    def option_contracts_meta(self, instrument_key: str) -> list[tuple[date, int | None]]:
+        """GET /v2/option/contract → [(expiry, lot_size), ...] unique expiries ASC.
+
+        `lot_size` comes from the Upstox contract row (never hard-coded). When several
+        contracts share an expiry, the first non-null lot_size wins.
+        """
         body = self._get("/v2/option/contract", {"instrument_key": instrument_key})
         data = body.get("data")
         if data is None:
             return []
         if not isinstance(data, list):
             raise UpstoxApiError("unexpected response shape (no data list)", status=200)
-        expiries: set[date] = set()
+        by_exp: dict[date, int | None] = {}
         for item in data:
             if not isinstance(item, dict):
                 continue
@@ -246,10 +254,28 @@ class UpstoxClient:
             if raw is None:
                 continue
             try:
-                expiries.add(date.fromisoformat(str(raw)[:10]))
+                exp = date.fromisoformat(str(raw)[:10])
             except ValueError:
                 continue
-        return sorted(expiries)
+            lot: int | None = None
+            for key in ("lot_size", "lotSize", "minimum_lot"):
+                if item.get(key) is not None:
+                    try:
+                        lot = int(item[key])
+                        break
+                    except (TypeError, ValueError):
+                        continue
+            if exp not in by_exp or (by_exp[exp] is None and lot is not None):
+                by_exp[exp] = lot
+        return sorted(by_exp.items(), key=lambda x: x[0])
+
+    def option_lot_size(self, instrument_key: str, expiry: date | str) -> int | None:
+        """Lot size for one expiry from GET /v2/option/contract (None if missing)."""
+        target = date.fromisoformat(str(expiry)[:10]) if not isinstance(expiry, date) else expiry
+        for exp, lot in self.option_contracts_meta(instrument_key):
+            if exp == target:
+                return lot
+        return None
 
     def option_chain(self, instrument_key: str, expiry: date | str) -> list[dict[str, Any]]:
         """GET /v2/option/chain: one row per strike with call_options / put_options

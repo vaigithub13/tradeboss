@@ -1493,6 +1493,23 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
   Muhurat one.
 
+## 8 Nov 2026: Options tab Phase 3 (greeks, IV, EM, probs, strike picker)
+
+- Chain columns: Delta / Gamma / Theta / Vega from Upstox `option_greeks`; Columns toggle
+  (default Δ + Θ on).
+- IV panel: ATM IV = mean(ATM call, put); vs India VIX (±2 → expensive / cheap / fair);
+  skew = IV(Δ≈−0.25 put) − IV(Δ≈+0.25 call); IV percentile from `data/options/` daily ATM IV
+  of the nearest expiry with ≥3 calendar days left (placeholder until 20 days).
+- Expected move: straddle `(ATM CE+PE LTP)×0.85` primary; IV cross-check
+  `spot×(ATM IV/100)×√T` (T calendar to 15:30 IST, 15‑min floor); band on OI chart + Key Levels.
+- Level probs (R/S, Pivot, Max Pain): lognormal N(d2), touch ≈ min(95%, 2×close); not Upstox `pop`.
+- Strike picker: Bullish/Bearish; target next R/S; stop = level∓buffer with
+  `buffer=max(20, 0.1% spot)`, min dist `max(40, 0.25×EM)`, else next level; show why.
+  ITM/ATM/OTM by |Δ|; lot_size from Upstox `/v2/option/contract` (not hard-coded);
+  estimate `ΔP ≈ δΔS + ½γ(ΔS)² + θ·t_hold` with t_hold = intraday / 1d / 2d (capped by expiry).
+- Units locked: IV percent (GEX `/100`); theta premium points per day. Tests:
+  `tests/test_options_phase3.py`, frontend `estimate.test.ts`.
+
 ## 8 Nov 2026: Options tab Phase 2 refinements (PCR cards)
 
 - PCR ΔOI: ratio >5 or <0.2 → display “One-sided” with capped label (`> 5 · Strong Bullish` /

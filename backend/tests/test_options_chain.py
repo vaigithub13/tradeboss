@@ -305,10 +305,10 @@ def test_client_option_contracts_unique_sorted_expiries() -> None:
             json={
                 "status": "success",
                 "data": [
-                    {"expiry": "2026-11-17"},
+                    {"expiry": "2026-11-17", "lot_size": 65},
+                    {"expiry": "2026-11-10", "lot_size": 65},
                     {"expiry": "2026-11-10"},
-                    {"expiry": "2026-11-10"},
-                    {"expiry": "2026-11-24"},
+                    {"expiry": "2026-11-24", "lot_size": 75},
                 ],
             },
         )
@@ -319,6 +319,9 @@ def test_client_option_contracts_unique_sorted_expiries() -> None:
         date(2026, 11, 17),
         date(2026, 11, 24),
     ]
+    assert client.option_lot_size("NSE_INDEX|Nifty 50", "2026-11-10") == 65
+    assert client.option_lot_size("NSE_INDEX|Nifty 50", date(2026, 11, 24)) == 75
+    assert client.option_contracts_meta("NSE_INDEX|Nifty 50")[0] == (date(2026, 11, 10), 65)
 
 
 def test_client_option_contracts_rejects_strange_shape() -> None:

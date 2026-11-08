@@ -9,6 +9,8 @@ export type BuildupLabel =
   | "Neutral";
 export type NiftyBias = "Bullish" | "Bearish";
 export type PcrRead = "Bullish" | "Neutral" | "Bearish" | "Strong Bullish" | "Strong Bearish";
+export type StrikeDirection = "Bullish" | "Bearish";
+export type HoldMode = "intraday" | "1d" | "2d";
 
 export interface OptionsLeg {
   oi: number;
@@ -23,6 +25,10 @@ export interface OptionsLeg {
   bid: number;
   ask: number;
   spread_pct: number | null;
+  delta?: number | null;
+  gamma?: number | null;
+  theta?: number | null;
+  vega?: number | null;
   buildup?: BuildupLabel;
   buildup_nifty?: NiftyBias | null;
 }
@@ -36,6 +42,8 @@ export interface OptionsLevel {
   strength?: OptionsStrength;
   oi_pct?: number;
   edge?: boolean;
+  p_close?: number | null;
+  p_touch?: number | null;
 }
 
 export interface OptionsWall {
@@ -56,6 +64,8 @@ export interface OptionsPivot {
   heavy_put: boolean;
   tag: "PIVOT";
   read: string;
+  p_close?: number | null;
+  p_touch?: number | null;
 }
 
 export interface OptionsMaxPain {
@@ -63,6 +73,8 @@ export interface OptionsMaxPain {
   pain?: number;
   distance?: number;
   tag: string;
+  p_close?: number | null;
+  p_touch?: number | null;
 }
 
 export interface PcrValue {
@@ -107,6 +119,87 @@ export interface OptionsRow {
   put_itm: boolean;
 }
 
+export interface IvPercentile {
+  available: boolean;
+  label: string;
+  percentile: number | null;
+  days: number;
+  need: number;
+}
+
+export interface IvPanel {
+  atm_iv: number | null;
+  call_iv?: number | null;
+  put_iv?: number | null;
+  india_vix: number | null;
+  diff: number | null;
+  verdict: "Options expensive" | "Options cheap" | "Fair" | null;
+  skew: number | null;
+  percentile: IvPercentile;
+  iv_unit?: string;
+  theta_unit?: string;
+}
+
+export interface ExpectedMoveBand {
+  move: number;
+  upper: number;
+  lower: number;
+}
+
+export interface ExpectedMove {
+  t_years: number;
+  straddle: ExpectedMoveBand;
+  iv: ExpectedMoveBand | null;
+  primary: string;
+  move: number;
+  upper: number;
+  lower: number;
+}
+
+export interface StrikeCandidate {
+  bucket: "ITM" | "ATM" | "OTM" | string;
+  strike: number;
+  side: "call" | "put";
+  ltp: number;
+  delta: number;
+  gamma: number;
+  theta: number;
+  theta_pct_premium: number | null;
+  iv: number | null;
+  spread_pct: number | null;
+  lot_size: number | null;
+  cost_per_lot: number | null;
+  est_at_target: number | null;
+  est_at_stop: number | null;
+}
+
+export interface StrikePickerSide {
+  direction: StrikeDirection;
+  side: "call" | "put";
+  target: number | null;
+  stop: number | null;
+  stop_level?: number | null;
+  stop_tag?: string | null;
+  stop_why?: string | null;
+  stop_buffer?: number | null;
+  min_stop_distance?: number | null;
+  lot_size: number | null;
+  t_hold: number;
+  hold_mode: HoldMode;
+  hold_label?: string;
+  candidates: StrikeCandidate[];
+}
+
+export interface StrikePicker {
+  lot_size: number | null;
+  hold_mode: HoldMode;
+  hold_modes?: HoldMode[];
+  t_holds?: Partial<Record<HoldMode, number>>;
+  Bullish: StrikePickerSide;
+  Bearish: StrikePickerSide;
+  active: StrikePickerSide;
+}
+
 export interface OptionsChainResponse {
   available: boolean;
   reason?: string | null;
@@ -134,6 +227,9 @@ export interface OptionsChainResponse {
   rows: OptionsRow[];
   max_oi?: number;
   max_oi_chg?: number;
+  iv_panel?: IvPanel | null;
+  expected_move?: ExpectedMove | null;
+  strike_picker?: StrikePicker | null;
 }
 
 export interface OptionsTrendPoint {

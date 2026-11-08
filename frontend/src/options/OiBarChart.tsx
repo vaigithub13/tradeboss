@@ -147,6 +147,15 @@ export function OiBarChart({ data }: { data: OptionsChainResponse }) {
         {data.max_pain ? (
           <Guide label="MP" color="#c084fc" x={strikeX(rows, data.max_pain.strike, geometry)} h={H} />
         ) : null}
+        {data.expected_move ? (
+          <EmBand
+            lower={data.expected_move.lower}
+            upper={data.expected_move.upper}
+            rows={rows}
+            geometry={geometry}
+            h={H}
+          />
+        ) : null}
       </svg>
     </div>
   );
@@ -203,6 +212,44 @@ function Guide({
       <line x1={x} x2={x} y1={PAD.t} y2={h - PAD.b} stroke={color} strokeWidth={1} strokeDasharray="3 2" opacity={0.8} />
       <text x={x + 3} y={PAD.t + 8} style={{ fontSize: 8 }} fill={color}>
         {label}
+      </text>
+    </g>
+  );
+}
+
+/** Expected-move band (straddle primary) as a translucent strip between lower and upper. */
+function EmBand({
+  lower,
+  upper,
+  rows,
+  geometry,
+  h,
+}: {
+  lower: number;
+  upper: number;
+  rows: OptionsChainResponse["rows"];
+  geometry: { slot: number };
+  h: number;
+}) {
+  const x0 = priceX(rows, lower, geometry);
+  const x1 = priceX(rows, upper, geometry);
+  if (x0 == null || x1 == null) return null;
+  const left = Math.min(x0, x1);
+  const width = Math.abs(x1 - x0);
+  return (
+    <g data-testid="options-em-band">
+      <rect
+        x={left}
+        y={PAD.t}
+        width={Math.max(width, 1)}
+        height={h - PAD.t - PAD.b}
+        fill="rgba(251, 191, 36, 0.08)"
+        stroke="rgba(251, 191, 36, 0.35)"
+        strokeWidth={1}
+        strokeDasharray="4 3"
+      />
+      <text x={left + 2} y={PAD.t + 8} style={{ fontSize: 8 }} fill="rgba(251, 191, 36, 0.85)">
+        EM
       </text>
     </g>
   );
