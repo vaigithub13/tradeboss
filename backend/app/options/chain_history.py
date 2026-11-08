@@ -33,6 +33,7 @@ def snapshot_row(view: dict[str, Any]) -> dict[str, Any]:
         "atm": view.get("atm"),
         "pcr": view.get("pcr"),
         "pcrs": view.get("pcrs"),
+        "pcr_mixed_signals": view.get("pcr_mixed_signals", False),
         "total_call_oi": view.get("total_call_oi"),
         "total_put_oi": view.get("total_put_oi"),
         "resistance": view.get("resistance") or [],

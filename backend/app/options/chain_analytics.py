@@ -9,6 +9,9 @@ from typing import Any, Literal
 
 NEAR_ATM = 5
 NEUTRAL_OI_PCT = 2.0
+PCR_CAP_HIGH = 5.0
+PCR_CAP_LOW = 0.2
+CONCENTRATION_SHARE = 0.40
 
 BuildupLabel = Literal[
     "Long Build-up",
@@ -18,7 +21,7 @@ BuildupLabel = Literal[
     "Neutral",
 ]
 NiftyBias = Literal["Bullish", "Bearish"]
-PcrRead = Literal["Bullish", "Neutral", "Bearish"]
+PcrRead = Literal["Bullish", "Neutral", "Bearish", "Strong Bullish", "Strong Bearish"]
 
 SIDE = Literal["call", "put"]
 
@@ -98,32 +101,107 @@ def pcr_read(pcr: float | None) -> PcrRead | None:
     return "Neutral"
 
 
+def _normalize_pcr_direction(read: str | None) -> str | None:
+    """Collapse Strong* into Bullish/Bearish for agreement checks."""
+    if read is None:
+        return None
+    if read.startswith("Strong "):
+        return read[len("Strong ") :]
+    return read
+
+
 def _pcr_payload(value: float | None, *, reason: str | None = None) -> dict[str, Any]:
     return {
         "value": value,
         "display": "n/a" if value is None else round(value, 4),
         "reason": reason,
         "read": pcr_read(value),
+        "one_sided": False,
+        "capped_label": None,
+        "net_doi": None,
+        "concentration": None,
     }
 
 
-def oi_pcr(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def oi_pcr(rows: list[dict[str, Any]], *, spot: float | None = None) -> dict[str, Any]:
     call = sum(float(r["call"]["oi"]) for r in rows)
     put = sum(float(r["put"]["oi"]) for r in rows)
     if call <= 0:
-        return _pcr_payload(None, reason="no call OI in zone")
-    return _pcr_payload(put / call)
+        out = _pcr_payload(None, reason="no call OI in zone")
+    else:
+        out = _pcr_payload(put / call)
+    if spot is not None:
+        out["concentration"] = oi_concentration_note(rows, spot)
+    return out
 
 
 def change_oi_pcr(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Σ Put ΔOI / Σ Call ΔOI. Zero or negative call sum → n/a (not a usable ratio)."""
+    """Σ Put ΔOI / Σ Call ΔOI. Zero or negative call sum → n/a (not a usable ratio).
+
+    Extreme ratios (>5 or <0.2) stay exact in ``value`` but display as One-sided with a
+    capped label; ``net_doi`` is Put ΔOI − Call ΔOI for the raw flow readout.
+    """
     call_d = sum(float(r["call"].get("oi_chg") or 0.0) for r in rows)
     put_d = sum(float(r["put"].get("oi_chg") or 0.0) for r in rows)
     if call_d == 0:
         return _pcr_payload(None, reason="no call OI change in zone")
     if call_d < 0:
         return _pcr_payload(None, reason="call OI fell in zone (negative denominator)")
-    return _pcr_payload(put_d / call_d)
+    ratio = put_d / call_d
+    out = _pcr_payload(ratio)
+    out["net_doi"] = put_d - call_d
+    if ratio > PCR_CAP_HIGH:
+        out["display"] = "One-sided"
+        out["capped_label"] = f"> {PCR_CAP_HIGH:g} · Strong Bullish"
+        out["read"] = "Strong Bullish"
+        out["one_sided"] = True
+    elif ratio < PCR_CAP_LOW:
+        out["display"] = "One-sided"
+        out["capped_label"] = f"< {PCR_CAP_LOW:g} · Strong Bearish"
+        out["read"] = "Strong Bearish"
+        out["one_sided"] = True
+    return out
+
+
+def _leg_moneyness(side: str, strike: float, spot: float) -> str:
+    if side == "call":
+        return "ITM" if strike < spot else "OTM"
+    return "ITM" if strike > spot else "OTM"
+
+
+def oi_concentration_note(rows: list[dict[str, Any]], spot: float) -> str | None:
+    """If one strike holds >40% of Call or Put OI in the zone, return a short warning."""
+    call_total = sum(float(r["call"]["oi"]) for r in rows)
+    put_total = sum(float(r["put"]["oi"]) for r in rows)
+    best: tuple[float, str] | None = None  # (share, note)
+    for r in rows:
+        strike = float(r["strike"])
+        for side, total in (("call", call_total), ("put", put_total)):
+            if total <= 0:
+                continue
+            oi = float(r[side]["oi"])
+            share = oi / total
+            if share <= CONCENTRATION_SHARE:
+                continue
+            money = _leg_moneyness(side, strike, spot)
+            gloss = "ITM — trapped writers" if money == "ITM" else "OTM"
+            side_label = "Call" if side == "call" else "Put"
+            note = f"Dominated by {strike:,.0f} {side_label} OI ({gloss})"
+            if best is None or share > best[0]:
+                best = (share, note)
+    return best[1] if best else None
+
+
+def pcr_mixed_signals(pcrs: dict[str, Any]) -> bool:
+    """True when full / near-ATM / ΔOI reads are all present and not unanimous."""
+    directions: list[str] = []
+    for key in ("full", "near_atm", "change_oi"):
+        payload = pcrs.get(key) or {}
+        direction = _normalize_pcr_direction(payload.get("read"))
+        if direction is None:
+            return False
+        directions.append(direction)
+    return len(set(directions)) > 1
 
 
 def max_pain(rows: list[dict[str, Any]]) -> dict[str, Any] | None:
@@ -196,14 +274,16 @@ def enrich_chain(
         annotate_leg(r["put"], "put")
 
     zone = near_atm_slice(all_strikes, atm, NEAR_ATM)
+    if full_pcr is not None:
+        full = _pcr_payload(full_pcr)
+        full["concentration"] = oi_concentration_note(all_strikes, spot)
+    else:
+        full = oi_pcr(all_strikes, spot=spot)
     pcrs = {
-        "full": _pcr_payload(full_pcr) if full_pcr is not None else oi_pcr(all_strikes),
-        "near_atm": oi_pcr(zone),
+        "full": full,
+        "near_atm": oi_pcr(zone, spot=spot),
         "change_oi": change_oi_pcr(zone),
     }
-    # keep full consistent with existing total ratio when provided
-    if full_pcr is not None:
-        pcrs["full"] = _pcr_payload(full_pcr)
 
     mp = max_pain(all_strikes)
     if mp is not None:
@@ -220,6 +300,7 @@ def enrich_chain(
 
     return {
         "pcrs": pcrs,
+        "pcr_mixed_signals": pcr_mixed_signals(pcrs),
         "max_pain": mp,
         "buildup_analysis": analysis,
         "near_atm_strikes": [r["strike"] for r in zone],

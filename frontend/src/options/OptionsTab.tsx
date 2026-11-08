@@ -290,33 +290,58 @@ function MaxPainPanel({ data }: { data: OptionsChainResponse }) {
   );
 }
 
+function pcrTone(read: PcrValue["read"]): string {
+  if (read === "Bullish" || read === "Strong Bullish") return "text-emerald-300";
+  if (read === "Bearish" || read === "Strong Bearish") return "text-red-300";
+  return "text-white/35";
+}
+
+function formatNetDoiLakhs(net: number): string {
+  const abs = formatOiLakhs(Math.abs(net));
+  if (net > 0) return `+${abs}`;
+  if (net < 0) return `−${abs}`;
+  return abs;
+}
+
 function PcrCard({ label, pcr }: { label: string; pcr?: PcrValue }) {
+  const oneSided = Boolean(pcr?.one_sided);
   const value =
     pcr == null
       ? "—"
       : pcr.value == null
         ? "n/a"
-        : typeof pcr.display === "number"
-          ? pcr.display.toFixed(2)
-          : String(pcr.display);
+        : oneSided
+          ? "One-sided"
+          : typeof pcr.display === "number"
+            ? pcr.display.toFixed(2)
+            : String(pcr.display);
   const read = pcr?.read;
-  const sub =
-    pcr?.value == null
-      ? pcr?.reason ?? undefined
-      : read
-        ? read
-        : undefined;
+  const tooltip =
+    pcr?.value != null
+      ? `Exact PCR ${pcr.value.toFixed(4)}`
+      : pcr?.reason ?? undefined;
+  let sub: string | undefined;
+  if (pcr?.value == null) {
+    sub = pcr?.reason ?? undefined;
+  } else if (oneSided && pcr.capped_label) {
+    const net =
+      pcr.net_doi != null ? ` · net ΔOI ${formatNetDoiLakhs(pcr.net_doi)}` : "";
+    sub = `${pcr.capped_label}${net}`;
+  } else if (read) {
+    sub = read;
+  }
   return (
-    <div className="min-w-[7.5rem] rounded border border-white/10 bg-white/[0.03] px-3 py-2">
+    <div
+      className="min-w-[7.5rem] max-w-[14rem] rounded border border-white/10 bg-white/[0.03] px-3 py-2"
+      title={tooltip}
+      data-testid={`pcr-card-${label}`}
+    >
       <div className="text-[10px] uppercase tracking-wide text-white/40">{label}</div>
       <div className="font-mono text-sm text-white/90">{value}</div>
-      {sub ? (
-        <div
-          className={`text-[10px] ${
-            read === "Bullish" ? "text-emerald-300" : read === "Bearish" ? "text-red-300" : "text-white/35"
-          }`}
-        >
-          {sub}
+      {sub ? <div className={`text-[10px] ${pcrTone(read)}`}>{sub}</div> : null}
+      {pcr?.concentration ? (
+        <div className="mt-0.5 text-[9px] leading-snug text-amber-200/70" data-testid="pcr-concentration">
+          {pcr.concentration}
         </div>
       ) : null}
     </div>
@@ -476,9 +501,18 @@ export function OptionsTab() {
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
         <Card label="Spot" value={formatSpot(data?.spot)} />
         <Card label="ATM" value={data?.atm != null ? formatStrike(data.atm) : "—"} />
-        <PcrCard label="PCR full" pcr={data?.pcrs?.full} />
-        <PcrCard label="PCR near" pcr={data?.pcrs?.near_atm} />
-        <PcrCard label="PCR ΔOI" pcr={data?.pcrs?.change_oi} />
+        <div className="flex flex-col gap-0.5">
+          <div className="flex flex-wrap gap-2">
+            <PcrCard label="PCR full" pcr={data?.pcrs?.full} />
+            <PcrCard label="PCR near" pcr={data?.pcrs?.near_atm} />
+            <PcrCard label="PCR ΔOI" pcr={data?.pcrs?.change_oi} />
+          </div>
+          {data?.pcr_mixed_signals ? (
+            <div className="px-1 text-[10px] text-amber-200/80" data-testid="pcr-mixed-signals">
+              Mixed signals
+            </div>
+          ) : null}
+        </div>
         <Card label="Call OI" value={formatOiLakhs(data?.total_call_oi)} />
         <Card label="Put OI" value={formatOiLakhs(data?.total_put_oi)} />
         <Card label="R1" value={r1 ? formatStrike(r1.strike) : "—"} sub={r1 ? formatOiLakhs(r1.oi) : undefined} />

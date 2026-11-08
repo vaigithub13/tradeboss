@@ -350,6 +350,7 @@ def build_chain_view(
         "pivot": pivot,
         "major_walls": major_walls,
         "pcrs": phase2["pcrs"],
+        "pcr_mixed_signals": phase2.get("pcr_mixed_signals", False),
         "max_pain": phase2["max_pain"],
         "buildup_analysis": phase2["buildup_analysis"],
         "near_atm_strikes": phase2["near_atm_strikes"],

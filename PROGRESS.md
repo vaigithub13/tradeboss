@@ -1493,6 +1493,15 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
   Muhurat one.
 
+## 8 Nov 2026: Options tab Phase 2 refinements (PCR cards)
+
+- PCR ΔOI: ratio >5 or <0.2 → display “One-sided” with capped label (`> 5 · Strong Bullish` /
+  `< 0.2 · Strong Bearish`) plus raw net ΔOI (Put − Call, lakhs); exact ratio stays in tooltip.
+- Near-ATM / full PCR: if one strike holds >40% of either side’s OI, show concentration note with
+  ITM (“trapped writers”) vs OTM.
+- When the three PCR reads disagree → “Mixed signals” under the cards (Phase 4 bias score weights later).
+- Tests extended in `tests/test_options_phase2.py`.
+
 ## 8 Nov 2026: Options tab Phase 2 (build-up, PCR set, max pain, OI chart)
 
 - Per-leg build-up tags (Long/Short build-up, covering, unwinding, Neutral <2% ΔOI) + Nifty bias.

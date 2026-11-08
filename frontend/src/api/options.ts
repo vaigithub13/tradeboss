@@ -8,7 +8,7 @@ export type BuildupLabel =
   | "Long Unwinding"
   | "Neutral";
 export type NiftyBias = "Bullish" | "Bearish";
-export type PcrRead = "Bullish" | "Neutral" | "Bearish";
+export type PcrRead = "Bullish" | "Neutral" | "Bearish" | "Strong Bullish" | "Strong Bearish";
 
 export interface OptionsLeg {
   oi: number;
@@ -70,6 +70,12 @@ export interface PcrValue {
   display: number | string;
   reason?: string | null;
   read?: PcrRead | null;
+  one_sided?: boolean;
+  capped_label?: string | null;
+  /** Put ΔOI − Call ΔOI (raw units); shown for PCR ΔOI. */
+  net_doi?: number | null;
+  /** Near-ATM / full: single-strike OI concentration note. */
+  concentration?: string | null;
 }
 
 export interface OptionsPcrs {
@@ -121,6 +127,8 @@ export interface OptionsChainResponse {
   max_pain?: OptionsMaxPain | null;
   major_walls?: OptionsMajorWalls;
   pcrs?: OptionsPcrs;
+  /** True when full / near / ΔOI reads disagree (Phase 4 bias score will weight them). */
+  pcr_mixed_signals?: boolean;
   buildup_analysis?: BuildupAnalysis;
   near_atm_strikes?: number[];
   rows: OptionsRow[];

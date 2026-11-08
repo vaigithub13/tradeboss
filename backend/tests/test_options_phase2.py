@@ -126,6 +126,33 @@ def test_change_oi_pcr_happy_path() -> None:
     out = ca.change_oi_pcr(zone)
     assert out["value"] == pytest.approx(300 / 200)
     assert out["read"] == "Bullish"  # 1.5 > 1.2
+    assert out["one_sided"] is False
+    assert out["net_doi"] == pytest.approx(100)  # 300 − 200
+
+
+def test_change_oi_pcr_one_sided_high() -> None:
+    zone = [
+        {"strike": 25000, "call": {"oi": 1, "oi_chg": 100}, "put": {"oi": 1, "oi_chg": 2500}},
+    ]
+    out = ca.change_oi_pcr(zone)
+    assert out["value"] == pytest.approx(25.0)
+    assert out["display"] == "One-sided"
+    assert out["capped_label"] == "> 5 · Strong Bullish"
+    assert out["read"] == "Strong Bullish"
+    assert out["one_sided"] is True
+    assert out["net_doi"] == pytest.approx(2400)
+
+
+def test_change_oi_pcr_one_sided_low() -> None:
+    zone = [
+        {"strike": 25000, "call": {"oi": 1, "oi_chg": 1000}, "put": {"oi": 1, "oi_chg": 100}},
+    ]
+    out = ca.change_oi_pcr(zone)
+    assert out["value"] == pytest.approx(0.1)
+    assert out["display"] == "One-sided"
+    assert out["capped_label"] == "< 0.2 · Strong Bearish"
+    assert out["read"] == "Strong Bearish"
+    assert out["net_doi"] == pytest.approx(-900)
 
 
 def test_pcr_read_bands() -> None:
@@ -133,6 +160,59 @@ def test_pcr_read_bands() -> None:
     assert ca.pcr_read(1.0) == "Neutral"
     assert ca.pcr_read(0.7) == "Bearish"
     assert ca.pcr_read(None) is None
+
+
+def test_oi_concentration_note_itm_call() -> None:
+    # Spot 25050 → 25000 Call is ITM; that strike holds 50% of Call OI (>40%).
+    rows = [
+        {"strike": 25000.0, "call": {"oi": 50_000}, "put": {"oi": 10_000}},
+        {"strike": 25050.0, "call": {"oi": 30_000}, "put": {"oi": 10_000}},
+        {"strike": 25100.0, "call": {"oi": 20_000}, "put": {"oi": 10_000}},
+    ]
+    note = ca.oi_concentration_note(rows, spot=25050.0)
+    assert note == "Dominated by 25,000 Call OI (ITM — trapped writers)"
+
+
+def test_oi_concentration_note_otm_put() -> None:
+    rows = [
+        {"strike": 24900.0, "call": {"oi": 10_000}, "put": {"oi": 10_000}},
+        {"strike": 25000.0, "call": {"oi": 10_000}, "put": {"oi": 80_000}},  # OTM put (strike < spot)
+        {"strike": 25100.0, "call": {"oi": 10_000}, "put": {"oi": 10_000}},
+    ]
+    note = ca.oi_concentration_note(rows, spot=25050.0)
+    assert note == "Dominated by 25,000 Put OI (OTM)"
+
+
+def test_oi_concentration_below_threshold() -> None:
+    rows = [
+        {"strike": 25000.0, "call": {"oi": 35_000}, "put": {"oi": 35_000}},
+        {"strike": 25050.0, "call": {"oi": 35_000}, "put": {"oi": 35_000}},
+        {"strike": 25100.0, "call": {"oi": 30_000}, "put": {"oi": 30_000}},
+    ]
+    assert ca.oi_concentration_note(rows, spot=25050.0) is None
+
+
+def test_pcr_mixed_signals() -> None:
+    agree = {
+        "full": {"read": "Bullish"},
+        "near_atm": {"read": "Bullish"},
+        "change_oi": {"read": "Strong Bullish"},  # Strong counts as Bullish
+    }
+    assert ca.pcr_mixed_signals(agree) is False
+
+    mixed = {
+        "full": {"read": "Bullish"},
+        "near_atm": {"read": "Bearish"},
+        "change_oi": {"read": "Bullish"},
+    }
+    assert ca.pcr_mixed_signals(mixed) is True
+
+    incomplete = {
+        "full": {"read": "Bullish"},
+        "near_atm": {"read": None},
+        "change_oi": {"read": "Bullish"},
+    }
+    assert ca.pcr_mixed_signals(incomplete) is False
 
 
 # ------------------------------------------------------------------ near-ATM edge
@@ -181,6 +261,12 @@ def test_enrich_attaches_phase2_to_view() -> None:
     assert out["pcrs"]["full"]["value"] is not None
     assert out["pcrs"]["near_atm"]["value"] is not None
     assert "change_oi" in out["pcrs"]
+    assert "concentration" in out["pcrs"]["full"]
+    assert "concentration" in out["pcrs"]["near_atm"]
+    # 25000 Call OI is 10× others → dominates full Call OI
+    assert out["pcrs"]["full"]["concentration"] is not None
+    assert "Dominated by" in out["pcrs"]["full"]["concentration"]
+    assert isinstance(out["pcr_mixed_signals"], bool)
     assert out["max_pain"] is not None and "strike" in out["max_pain"]
     assert out["buildup_analysis"]["summary"]
     assert out["rows"][0]["call"]["buildup"] in {
