@@ -13,6 +13,8 @@ const RR_PASS = 2.0;
 const RR_WARN = 1.5;
 const THETA_DRAG_PASS = 0.1;
 const THETA_DRAG_WARN = 0.15;
+const LOSS_PASS_PCT = 0.4;
+const LOSS_WARN_PCT = 0.7;
 export const NO_SETUP_MSG = "No good buy setup now";
 
 /** ΔP ≈ δ·ΔS + ½γ·(ΔS)² + θ·t_hold; floored at 0. θ is premium/day (Upstox). */
@@ -50,6 +52,7 @@ export function scoreCandidate(c: StrikeCandidate, tHold: number): StrikeCandida
   const estLoss = c.est_at_stop != null ? ltp - c.est_at_stop : null;
   const rr = estGain != null && estLoss != null && estLoss > 0 ? estGain / estLoss : null;
   const drag = ltp > 0 ? (Math.abs(c.theta) * tHold) / ltp : null;
+  const lossPct = estLoss != null && ltp > 0 ? estLoss / ltp : null;
   const checks: StrikeCheck[] = [
     {
       id: "spread",
@@ -69,8 +72,11 @@ export function scoreCandidate(c: StrikeCandidate, tHold: number): StrikeCandida
     {
       id: "loss",
       label: "Est. loss",
-      status: estLoss != null && estLoss > 0 ? "pass" : "fail",
-      detail: estLoss == null ? null : estLoss.toFixed(2),
+      status:
+        lossPct != null && estLoss != null && estLoss > 0
+          ? checkStatus(lossPct, LOSS_PASS_PCT, LOSS_WARN_PCT, false)
+          : "fail",
+      detail: estLoss == null ? null : `-${estLoss.toFixed(2)}`,
     },
     {
       id: "theta_drag",
@@ -173,16 +179,20 @@ export function repricePickerSide(
     repriceCandidate(c, spot, side.target, side.stop, tHold),
   );
   const hi = applyPickerHighlight(scored);
+  // Auto "needs move" keeps no-setup even if fallback target scores pass after reprice
+  const blocked = Boolean(side.auto_message);
   return {
     ...side,
     t_hold: tHold,
     hold_mode: holdMode,
-    candidates: hi.candidates,
-    highlight: hi.highlight,
+    candidates: blocked
+      ? hi.candidates.map((c) => ({ ...c, highlighted: false, closest_failed: c.closest_failed }))
+      : hi.candidates,
+    highlight: blocked ? null : hi.highlight,
     closest: hi.closest,
     closest_fails: hi.closest_fails,
-    setup_message: hi.setup_message,
-    has_setup: hi.has_setup,
+    setup_message: blocked ? side.setup_message ?? NO_SETUP_MSG : hi.setup_message,
+    has_setup: blocked ? false : hi.has_setup,
   };
 }
 

@@ -12,7 +12,7 @@ import pytest
 from app.options import chain_phase3 as p3
 from app.options import chain_view
 from app.options.bs import ncdf
-from app.options.time import CALENDAR_MIN_PER_YEAR
+from app.options.time import SESSION_MIN  # noqa: F401 — used in T tests via local import
 
 IST = timezone(timedelta(hours=5, minutes=30))
 EXPIRY = "2026-11-17"
@@ -196,16 +196,30 @@ def test_iv_percentile_computes_after_20_days(tmp_path: Path) -> None:
 
 # ------------------------------------------------------------------ Expected move / T floor
 def test_expected_move_straddle_and_iv() -> None:
-    assert p3.expected_move_straddle(100, 80) == pytest.approx(153.0)  # 180 * 0.85
-    t = 1.0 / CALENDAR_MIN_PER_YEAR * (24 * 60)  # ~1 calendar day in years
+    # Market-priced move = CE + PE (no 0.85 discount)
+    assert p3.expected_move_straddle(100, 80) == pytest.approx(180.0)
+    t = 1.0 / 252  # one trading day
     move = p3.expected_move_iv(25000, 20.0, t)
     assert move == pytest.approx(25000 * 0.20 * math.sqrt(t))
 
 
+def test_t_uses_trading_days_over_252() -> None:
+    # Mon 10:00 → Tue expiry = remaining Mon session + full Tue = (CLOSE-10:00) + 375
+    # From 10:00 = 330 min left today + 375 = 705 → 705/375/252
+    from app.options.time import SESSION_MIN
+
+    is_td = lambda d: d.weekday() < 5  # noqa: E731
+    t = p3.years_to_expiry_trading(ts(2026, 11, 16, 10, 0), "2026-11-17", is_td)
+    assert t == pytest.approx((705 / SESSION_MIN) / 252)
+
+
 def test_t_floor_fifteen_minutes() -> None:
-    # After 15:30 on expiry day, calendar minutes = 0 → floor 15 min
-    t = p3.years_to_expiry_calendar(ts(2026, 11, 17, 15, 45), "2026-11-17")
-    assert t == pytest.approx(15 / CALENDAR_MIN_PER_YEAR)
+    # After 15:30 on expiry day, trading minutes = 0 → floor 15 min → 15/375/252
+    from app.options.time import SESSION_MIN
+
+    is_td = lambda d: True  # noqa: E731
+    t = p3.years_to_expiry_trading(ts(2026, 11, 17, 15, 45), "2026-11-17", is_td)
+    assert t == pytest.approx((15 / SESSION_MIN) / 252)
 
 
 # ------------------------------------------------------------------ Probabilities (not pop)
@@ -230,25 +244,35 @@ def test_attach_probs_ignores_pop_field() -> None:
 
 
 # ------------------------------------------------------------------ Stop buffer
-def test_stop_skips_pivot_when_too_close() -> None:
-    # Spot 25000, EM 200 → min dist = max(40, 50) = 50
-    # Pivot 24980 → stop = 24980 − max(20, 25) = 24980 − 25 = 24955, dist = 45 < 50 → skip
-    # S1 24900 → stop = 24900 − 25 = 24875, dist = 125 ≥ 50 → use
+def test_stop_floors_to_min_distance_not_far_level() -> None:
+    # Spot 25000, EM 200 → min dist = 50, vol stop = 24950
+    # Pivot 24980: stop = min(24955, 24950) = 24950 (volatility stop) — never walk to S1 at 24500
     levels = [
         {"strike": 24980.0, "tag": "PIVOT"},
-        {"strike": 24900.0, "tag": "S1"},
+        {"strike": 24500.0, "tag": "S1"},  # 500 pts away > 1×EM
     ]
     got = p3.choose_stop(spot=25000.0, direction="Bullish", levels=levels, expected_move=200.0)
-    assert got["tag"] == "S1"
-    assert got["stop"] == pytest.approx(24900.0 - 25.0)
-    assert "PIVOT" in got["why"] or any(r["tag"] == "PIVOT" for r in got["rejected"])
+    assert got["stop"] == pytest.approx(24950.0)
+    assert got["volatility_stop"] is True
+    assert got["distance"] == pytest.approx(50.0)
 
 
-def test_stop_bearish_adds_buffer() -> None:
+def test_stop_beyond_em_uses_volatility_stop() -> None:
+    # Only far S1 beyond 1×EM → volatility stop, do not use 500-pt structural stop
+    levels = [{"strike": 24400.0, "tag": "S1"}]
+    got = p3.choose_stop(spot=25000.0, direction="Bullish", levels=levels, expected_move=200.0)
+    assert got["tag"] == "VOL"
+    assert got["stop"] == pytest.approx(25000.0 - 50.0)
+    assert "beyond 1×EM" in (got["rejected"][0]["reason"] if got["rejected"] else "")
+
+
+def test_stop_bearish_mirrors() -> None:
     levels = [{"strike": 25100.0, "tag": "R1"}]
     got = p3.choose_stop(spot=25000.0, direction="Bearish", levels=levels, expected_move=100.0)
+    need = p3.min_stop_distance(25000.0, 100.0)
     buf = p3.stop_buffer(25000.0)
-    assert got["stop"] == pytest.approx(25100.0 + buf)
+    # stop = max(level+buf, spot+need)
+    assert got["stop"] == pytest.approx(max(25100.0 + buf, 25000.0 + need))
     assert got["why"]
 
 
@@ -303,6 +327,37 @@ def test_strike_picker_three_buckets_and_lot() -> None:
         assert c["est_at_stop"] is not None
         assert "est_gain" in c and "est_loss" in c and "reward_risk" in c
         assert c["checks"]
+
+
+def test_loss_check_by_premium_fraction() -> None:
+    c = p3.score_candidate(
+        {
+            "bucket": "ATM",
+            "strike": 25000.0,
+            "side": "call",
+            "ltp": 100.0,
+            "delta": 0.5,
+            "gamma": 0.0,
+            "theta": -1.0,
+            "theta_pct_premium": 1.0,
+            "iv": 15.0,
+            "spread_pct": 0.5,
+            "lot_size": 65,
+            "cost_per_lot": 6500.0,
+            "est_at_target": 150.0,
+            "est_at_stop": 70.0,  # loss 30 → 30% of premium → pass
+        },
+        t_hold=1.0,
+    )
+    loss_chk = next(ch for ch in c["checks"] if ch["id"] == "loss")
+    assert loss_chk["status"] == "pass"
+    assert loss_chk["detail"] == "-30.00"
+    c2 = p3.score_candidate(
+        {**{k: c[k] for k in ("bucket", "strike", "side", "ltp", "delta", "gamma", "theta", "theta_pct_premium", "iv", "spread_pct", "lot_size", "cost_per_lot")},
+         "est_at_target": 120.0, "est_at_stop": 20.0},  # loss 80% → fail
+        t_hold=1.0,
+    )
+    assert next(ch for ch in c2["checks"] if ch["id"] == "loss")["status"] == "fail"
 
 
 def test_no_setup_does_not_highlight() -> None:

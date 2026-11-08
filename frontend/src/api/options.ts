@@ -148,6 +148,9 @@ export interface ExpectedMoveBand {
 
 export interface ExpectedMove {
   t_years: number;
+  trading_days?: number;
+  market_priced?: ExpectedMoveBand & { label?: string };
+  one_sigma?: ExpectedMoveBand & { label?: string; available?: boolean };
   straddle: ExpectedMoveBand;
   iv: ExpectedMoveBand | null;
   primary: string;
@@ -155,6 +158,8 @@ export interface ExpectedMove {
   upper: number;
   lower: number;
 }
+
+export type TargetMode = "Auto" | "R1" | "R2" | "R3" | "S1" | "S2" | "S3";
 
 export type StrikeCheckStatus = "pass" | "warn" | "fail";
 
@@ -194,6 +199,11 @@ export interface StrikePickerSide {
   direction: StrikeDirection;
   side: "call" | "put";
   target: number | null;
+  target_mode?: TargetMode | string | null;
+  target_tag?: string | null;
+  auto_resolved_tag?: string | null;
+  auto_message?: string | null;
+  needs_move_to?: number | null;
   stop: number | null;
   stop_distance?: number | null;
   stop_level?: number | null;
@@ -201,6 +211,7 @@ export interface StrikePickerSide {
   stop_why?: string | null;
   stop_buffer?: number | null;
   min_stop_distance?: number | null;
+  volatility_stop?: boolean;
   lot_size: number | null;
   t_hold: number;
   hold_mode: HoldMode;
@@ -217,9 +228,12 @@ export interface StrikePicker {
   lot_size: number | null;
   hold_mode: HoldMode;
   hold_modes?: HoldMode[];
+  target_mode?: TargetMode | string;
   t_holds?: Partial<Record<HoldMode, number>>;
   Bullish: StrikePickerSide;
   Bearish: StrikePickerSide;
+  Bullish_targets?: Partial<Record<string, StrikePickerSide>>;
+  Bearish_targets?: Partial<Record<string, StrikePickerSide>>;
   active: StrikePickerSide;
 }
 

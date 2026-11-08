@@ -1501,6 +1501,18 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   close off-hours), no history file required.
 - Tests: `test_no_setup_does_not_highlight`, frontend estimate scoring.
 
+## 8 Nov 2026: Options Phase 3 Friday-output fixes (stop / Auto / EM / loss)
+
+- Stop: `min(level−buffer, spot−min_distance)` (bearish mirrored); walk next level only if
+  within 1×EM of spot; else **volatility stop**. No 500-pt structural stop for a ~170-pt target.
+- Target selector: R1/R2/R3 (S1–S3) + **Auto** = nearest level where best candidate R:R ≥ 2;
+  else `"1:2 not possible with current levels — needs move to <level>"`.
+- Expected move labels: **Market-priced move (ATM straddle)** = CE+PE LTP (no 0.85);
+  **1σ range (IV), ≈68%** = `spot×IV×√T` with T = trading minutes/375/252 (NSE holiday calendar);
+  same T for level probs.
+- Est. loss check: ✅ ≤40% of premium, ⚠️ 40–70%, ❌ >70%; detail with minus sign.
+- Tests updated in `test_options_phase3.py` / frontend `estimate.ts`.
+
 ## 8 Nov 2026: Options tab Phase 3 (greeks, IV, EM, probs, strike picker)
 
 - Chain columns: Delta / Gamma / Theta / Vega from Upstox `option_greeks`; Columns toggle
@@ -1508,13 +1520,10 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - IV panel: ATM IV = mean(ATM call, put); vs India VIX (±2 → expensive / cheap / fair);
   skew = IV(Δ≈−0.25 put) − IV(Δ≈+0.25 call); IV percentile from `data/options/` daily ATM IV
   of the nearest expiry with ≥3 calendar days left (placeholder until 20 days).
-- Expected move: straddle `(ATM CE+PE LTP)×0.85` primary; IV cross-check
-  `spot×(ATM IV/100)×√T` (T calendar to 15:30 IST, 15‑min floor); band on OI chart + Key Levels.
+- Expected move: market-priced ATM straddle + 1σ IV (see Friday-output fixes above).
 - Level probs (R/S, Pivot, Max Pain): lognormal N(d2), touch ≈ min(95%, 2×close); not Upstox `pop`.
-- Strike picker: Bullish/Bearish; target next R/S; stop = level∓buffer with
-  `buffer=max(20, 0.1% spot)`, min dist `max(40, 0.25×EM)`, else next level; show why.
-  ITM/ATM/OTM by |Δ|; lot_size from Upstox `/v2/option/contract` (not hard-coded);
-  estimate `ΔP ≈ δΔS + ½γ(ΔS)² + θ·t_hold` with t_hold = intraday / 1d / 2d (capped by expiry).
+- Strike picker: Bullish/Bearish; Auto / R·S targets; volatility-floor stop; ITM/ATM/OTM by |Δ|;
+  lot_size from Upstox `/v2/option/contract`; Taylor + θ·t_hold (intraday / 1d / 2d).
 - Units locked: IV percent (GEX `/100`); theta premium points per day. Tests:
   `tests/test_options_phase3.py`, frontend `estimate.test.ts`.
 

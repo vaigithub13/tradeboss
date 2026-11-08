@@ -121,13 +121,20 @@ def _attach_phase3(
         return view
     vix = india_vix_at(int(view.get("as_of") or now), candles_dir=candles_dir)
     lot = _lot_size(client, expiry)
-    enrich_phase3(view, vix=vix, options_dir=options_dir, lot_size=lot, hold_mode="1d")
+    enrich_phase3(
+        view,
+        vix=vix,
+        options_dir=options_dir,
+        lot_size=lot,
+        hold_mode="1d",
+        is_trading_day=_is_session,
+    )
     # t_hold for each UI mode so the browser can reprice θ·t without a refetch
     as_of = int(view.get("as_of") or now)
     picker = view.get("strike_picker")
     if isinstance(picker, dict):
         picker["t_holds"] = {
-            mode: t_hold_days(as_of, expiry, mode)  # type: ignore[arg-type]
+            mode: t_hold_days(as_of, expiry, mode, is_trading_day=_is_session)  # type: ignore[arg-type]
             for mode in ("intraday", "1d", "2d")
         }
     return view

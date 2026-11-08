@@ -17,14 +17,17 @@ from pathlib import Path
 from typing import Any, Literal
 
 from app.options.bs import ncdf
-from app.options.time import CALENDAR_MIN_PER_YEAR, IST, calendar_minutes_to_expiry
+from collections.abc import Callable
 
-STRADDLE_FACTOR = 0.85
+from app.options.bs import ncdf
+from app.options.time import IST, SESSION_MIN, trading_minutes_to_expiry
+
 VIX_BAND = 2.0
 SKEW_DELTA = 0.25
 IV_HISTORY_DAYS = 20
 IV_MIN_DTE_DAYS = 3  # skip nearest expiry on its last calendar days
 T_FLOOR_MINUTES = 15
+TRADING_DAYS_PER_YEAR = 252  # T = trading_days / 252 for EM + probs
 TOUCH_CAP = 0.95
 STOP_BUFFER_PTS = 20.0
 STOP_BUFFER_PCT = 0.001  # 0.1% of spot
@@ -37,6 +40,7 @@ UPSTOX_THETA_UNIT = "premium_per_day"  # θ · t_hold with t_hold in days
 
 HoldMode = Literal["intraday", "1d", "2d"]
 Direction = Literal["Bullish", "Bearish"]
+TargetMode = Literal["Auto", "R1", "R2", "R3", "S1", "S2", "S3"]
 
 DELTA_BANDS: dict[str, tuple[float, float]] = {
     "ITM": (0.60, 0.70),
@@ -57,29 +61,55 @@ RR_PASS = 2.0
 RR_WARN = 1.5
 THETA_DRAG_PASS = 0.10
 THETA_DRAG_WARN = 0.15
+LOSS_PASS_PCT = 0.40  # |est_loss| / premium
+LOSS_WARN_PCT = 0.70
 NO_SETUP_MSG = "No good buy setup now"
+AUTO_RR = 2.0
 
 
-def years_to_expiry_calendar(now: int | float, expiry: str | date, *, floor_min: int = T_FLOOR_MINUTES) -> float:
-    """Calendar years to 15:30 IST on expiry, floored at `floor_min` minutes."""
-    exp = date.fromisoformat(expiry) if isinstance(expiry, str) else expiry
-    minutes = max(int(floor_min), calendar_minutes_to_expiry(int(now), exp))
-    return minutes / CALENDAR_MIN_PER_YEAR
+def years_to_expiry_trading(
+    now: int | float,
+    expiry: str | date,
+    is_trading_day: Callable[[date], bool],
+    *,
+    floor_min: int = T_FLOOR_MINUTES,
+) -> float:
+    """Trading years to 15:30 IST: (session minutes left / 375) / 252.
 
-
-def calendar_days_to_expiry(now: int | float, expiry: str | date, *, floor_min: int = T_FLOOR_MINUTES) -> float:
-    """Calendar days left to 15:30 IST on expiry (same clock as T, including floor)."""
-    return years_to_expiry_calendar(now, expiry, floor_min=floor_min) * (CALENDAR_MIN_PER_YEAR / (24 * 60))
-
-
-def t_hold_days(now: int | float, expiry: str | date, mode: HoldMode = "1d") -> float:
-    """Holding horizon in days for θ·t_hold, capped by time left to expiry.
-
-    - intraday: remaining calendar time until 15:30 IST today (floor 15 min if still in session)
-    - 1d / 2d: that many calendar days
-    Always min(requested, days_to_expiry).
+    `is_trading_day` is the NSE holiday calendar (same source GEX/session code uses).
+    Floored at `floor_min` session minutes so √T stays finite near expiry.
     """
-    left = calendar_days_to_expiry(now, expiry)
+    exp = date.fromisoformat(expiry) if isinstance(expiry, str) else expiry
+    minutes = max(int(floor_min), trading_minutes_to_expiry(int(now), exp, is_trading_day))
+    return (minutes / SESSION_MIN) / TRADING_DAYS_PER_YEAR
+
+
+def trading_days_to_expiry(
+    now: int | float,
+    expiry: str | date,
+    is_trading_day: Callable[[date], bool],
+    *,
+    floor_min: int = T_FLOOR_MINUTES,
+) -> float:
+    return years_to_expiry_trading(now, expiry, is_trading_day, floor_min=floor_min) * TRADING_DAYS_PER_YEAR
+
+
+def t_hold_days(
+    now: int | float,
+    expiry: str | date,
+    mode: HoldMode = "1d",
+    *,
+    is_trading_day: Callable[[date], bool] | None = None,
+) -> float:
+    """Holding horizon in days for θ·t_hold, capped by time left to expiry."""
+    if is_trading_day is not None:
+        left = trading_days_to_expiry(now, expiry, is_trading_day)
+    else:
+        # tests without a calendar: treat remaining clock as calendar days
+        from app.options.time import calendar_minutes_to_expiry
+
+        exp = date.fromisoformat(expiry) if isinstance(expiry, str) else expiry
+        left = max(T_FLOOR_MINUTES, calendar_minutes_to_expiry(int(now), exp)) / (24 * 60)
     if mode == "1d":
         requested = 1.0
     elif mode == "2d":
@@ -88,10 +118,10 @@ def t_hold_days(now: int | float, expiry: str | date, mode: HoldMode = "1d") -> 
         local = datetime.fromtimestamp(int(now), IST)
         end = datetime(local.year, local.month, local.day, 15, 30, tzinfo=IST)
         if local >= end:
-            requested = T_FLOOR_MINUTES / (24 * 60)
+            requested = T_FLOOR_MINUTES / SESSION_MIN
         else:
             mins = max(T_FLOOR_MINUTES, int((end - local).total_seconds() // 60))
-            requested = mins / (24 * 60)
+            requested = mins / SESSION_MIN
     return min(requested, left)
 
 
@@ -104,6 +134,10 @@ def min_stop_distance(spot: float, expected_move: float | None) -> float:
     return max(MIN_STOP_PTS, MIN_STOP_EM_FRAC * em)
 
 
+def _volatility_stop(spot: float, direction: Direction, need: float) -> float:
+    return float(spot) - need if direction == "Bullish" else float(spot) + need
+
+
 def choose_stop(
     *,
     spot: float,
@@ -111,14 +145,16 @@ def choose_stop(
     levels: list[dict[str, Any]],
     expected_move: float | None,
 ) -> dict[str, Any]:
-    """Buffered stop with minimum distance; walk to the next level when too close.
+    """Bullish: stop = min(level − buffer, spot − min_distance); bearish mirrored.
 
-    Bullish: levels on the downside (Pivot, S1, S2, …), stop = level − buffer.
-    Bearish: levels on the upside (Pivot, R1, R2, …), stop = level + buffer.
+    Walk to the next level only when it is within 1× expected move of spot; otherwise
+    use the volatility stop. Never a 500-pt structural stop for a ~170-pt target.
     """
     buf = stop_buffer(spot)
     need = min_stop_distance(spot, expected_move)
-    # Sort candidates: nearest to spot first on the protective side
+    em = float(expected_move) if expected_move is not None else 0.0
+    vol = _volatility_stop(spot, direction, need)
+
     if direction == "Bullish":
         cands = [lv for lv in levels if float(lv["strike"]) <= spot]
         cands.sort(key=lambda lv: (spot - float(lv["strike"]), float(lv["strike"])))
@@ -130,67 +166,53 @@ def choose_stop(
     for lv in cands:
         level = float(lv["strike"])
         tag = str(lv.get("tag") or lv.get("key") or "")
-        if direction == "Bullish":
-            stop = level - buf
-            dist = spot - stop
-        else:
-            stop = level + buf
-            dist = stop - spot
         label = tag or f"{level:g}"
-        if dist + 1e-9 < need:
+        dist_level = abs(spot - level)
+        if em > 0 and dist_level > em + 1e-9:
             rejected.append(
-                {
-                    "level": level,
-                    "tag": tag,
-                    "raw_stop": stop,
-                    "distance": dist,
-                    "reason": f"{label} too close ({dist:.0f} < min {need:.0f})",
-                }
+                {"level": level, "tag": tag, "reason": f"{label} beyond 1×EM ({dist_level:.0f} > {em:.0f})"}
             )
-            continue
-        why = (
-            f"{label} {'−' if direction == 'Bullish' else '+'} "
-            f"buffer {buf:.0f}; dist {dist:.0f} ≥ min {need:.0f}"
-        )
+            break
+
+        stop = min(level - buf, vol) if direction == "Bullish" else max(level + buf, vol)
+        dist = abs(spot - stop)
+        used_vol = abs(stop - vol) < 1e-6
+        if used_vol:
+            why = f"volatility stop (spot {'−' if direction == 'Bullish' else '+'} min {need:.0f})"
+            if tag:
+                why += f"; from {label}"
+        else:
+            why = (
+                f"{label} {'−' if direction == 'Bullish' else '+'} buffer {buf:.0f}; "
+                f"dist {dist:.0f} ≥ min {need:.0f}"
+            )
         if rejected:
             why += f"; skipped {[r['tag'] or r['level'] for r in rejected]}"
         return {
             "stop": stop,
-            "level": level,
-            "tag": tag,
+            "level": None if used_vol else level,
+            "tag": "VOL" if used_vol else tag,
             "buffer": buf,
             "min_distance": need,
             "distance": dist,
             "why": why,
+            "volatility_stop": used_vol,
             "rejected": rejected,
         }
 
-    # Fallback: furthest candidate with buffer, even if under min distance
-    if cands:
-        lv = cands[-1]
-        level = float(lv["strike"])
-        tag = str(lv.get("tag") or "")
-        label = tag or f"{level:g}"
-        stop = level - buf if direction == "Bullish" else level + buf
-        dist = abs(spot - stop)
-        return {
-            "stop": stop,
-            "level": level,
-            "tag": tag,
-            "buffer": buf,
-            "min_distance": need,
-            "distance": dist,
-            "why": f"fallback {label} ± buffer (no level met min dist {need:.0f})",
-            "rejected": rejected,
-        }
+    dist = abs(spot - vol)
+    why = f"volatility stop (spot {'−' if direction == 'Bullish' else '+'} min {need:.0f})"
+    if rejected:
+        why += f"; skipped {[r['tag'] or r['level'] for r in rejected]}"
     return {
-        "stop": None,
+        "stop": vol,
         "level": None,
-        "tag": None,
+        "tag": "VOL",
         "buffer": buf,
         "min_distance": need,
-        "distance": None,
-        "why": "no protective level",
+        "distance": dist,
+        "why": why,
+        "volatility_stop": True,
         "rejected": rejected,
     }
 
@@ -365,8 +387,9 @@ def iv_percentile(current: float | None, history: list[dict[str, Any]], *, need:
     }
 
 
-def expected_move_straddle(call_ltp: float, put_ltp: float, *, factor: float = STRADDLE_FACTOR) -> float:
-    return (float(call_ltp) + float(put_ltp)) * factor
+def expected_move_straddle(call_ltp: float, put_ltp: float) -> float:
+    """Market-priced move = ATM call LTP + ATM put LTP (no discount factor)."""
+    return float(call_ltp) + float(put_ltp)
 
 
 def expected_move_iv(spot: float, atm_iv_pct: float, t_years: float) -> float:
@@ -515,6 +538,7 @@ def score_candidate(c: dict[str, Any], *, t_hold: float) -> dict[str, Any]:
     spread_v = float(spread) if spread is not None else None
     drag = (abs(float(c.get("theta") or 0.0)) * float(t_hold) / ltp) if ltp > 0 else None
 
+    loss_pct = (est_loss / ltp) if est_loss is not None and ltp > 0 else None
     checks = [
         {
             "id": "spread",
@@ -533,8 +557,10 @@ def score_candidate(c: dict[str, Any], *, t_hold: float) -> dict[str, Any]:
         {
             "id": "loss",
             "label": "Est. loss",
-            "status": "pass" if est_loss is not None and est_loss > 0 else "fail",
-            "detail": None if est_loss is None else f"{est_loss:.2f}",
+            "status": _check_status(loss_pct, pass_at=LOSS_PASS_PCT, warn_at=LOSS_WARN_PCT, higher_is_better=False)
+            if loss_pct is not None and est_loss is not None and est_loss > 0
+            else "fail",
+            "detail": None if est_loss is None else f"-{est_loss:.2f}",
         },
         {
             "id": "theta_drag",
@@ -689,6 +715,7 @@ def build_strike_picker(
         "stop_why": stop_info.get("why"),
         "stop_buffer": stop_info.get("buffer"),
         "min_stop_distance": stop_info.get("min_distance"),
+        "volatility_stop": bool(stop_info.get("volatility_stop")),
         "lot_size": lot_size,
         "t_hold": t_hold,
         "hold_mode": hold_mode,
@@ -735,21 +762,182 @@ def build_expected_move(
     atm_iv_pct: float | None,
     now: int | float,
     expiry: str,
+    is_trading_day: Callable[[date], bool],
 ) -> dict[str, Any]:
-    t_years = years_to_expiry_calendar(now, expiry)
+    """Two labelled moves: market-priced ATM straddle, and 1σ IV range (≈68%)."""
+    t_years = years_to_expiry_trading(now, expiry, is_trading_day)
+    trading_days = t_years * TRADING_DAYS_PER_YEAR
     straddle_move = expected_move_straddle(call_ltp, put_ltp)
     straddle = expected_move_bands(spot, straddle_move)
     iv_move = expected_move_iv(spot, atm_iv_pct, t_years) if atm_iv_pct is not None else None
     iv_band = expected_move_bands(spot, iv_move) if iv_move is not None else None
     return {
         "t_years": t_years,
+        "trading_days": trading_days,
+        "market_priced": {
+            **straddle,
+            "label": "Market-priced move (ATM straddle)",
+        },
+        "one_sigma": {
+            **(iv_band or {"move": 0.0, "upper": spot, "lower": spot}),
+            "label": "1σ range (IV), ≈68% probability",
+            "available": iv_band is not None,
+        },
+        # backwards-compatible aliases (market-priced is primary for stops / walk distance)
         "straddle": straddle,
         "iv": iv_band,
-        "primary": "straddle",
+        "primary": "market_priced",
         "move": straddle["move"],
         "upper": straddle["upper"],
         "lower": straddle["lower"],
     }
+
+
+def level_by_tag(levels: list[dict[str, Any]], tag: str) -> dict[str, Any] | None:
+    for lv in levels:
+        if lv.get("tag") == tag:
+            return lv
+    return None
+
+
+def target_ladder(direction: Direction, resistance: list[dict[str, Any]], support: list[dict[str, Any]]) -> list[tuple[str, float]]:
+    """Ordered target choices nearest-first: R1→R3 (bull) or S1→S3 (bear)."""
+    tags = ("R1", "R2", "R3") if direction == "Bullish" else ("S1", "S2", "S3")
+    pool = resistance if direction == "Bullish" else support
+    out: list[tuple[str, float]] = []
+    for tag in tags:
+        lv = level_by_tag(pool, tag)
+        if lv is not None:
+            out.append((tag, float(lv["strike"])))
+    return out
+
+
+def best_rr(candidates: list[dict[str, Any]]) -> float | None:
+    rrs = [c.get("reward_risk") for c in candidates if c.get("reward_risk") is not None]
+    return max(rrs) if rrs else None
+
+
+def needed_move_for_rr2(
+    *,
+    spot: float,
+    direction: Direction,
+    candidate: dict[str, Any],
+    stop: float | None,
+    t_hold: float,
+) -> float | None:
+    """Index level where this candidate would reach R:R = 2 (linear δ approx + γ)."""
+    if stop is None or candidate.get("ltp") is None:
+        return None
+    ltp = float(candidate["ltp"])
+    delta = float(candidate["delta"])
+    gamma = float(candidate.get("gamma") or 0.0)
+    theta = float(candidate.get("theta") or 0.0)
+    at_stop = taylor_price(ltp, delta, gamma, float(stop) - spot, theta=theta, t_hold=t_hold)
+    est_loss = ltp - at_stop
+    if est_loss <= 0:
+        return None
+    need_gain = AUTO_RR * est_loss
+    # Solve  δ m + ½ γ m² + θ t ≈ need_gain  for move m (bullish call m>0)
+    # 0.5 γ m² + δ m + (θ t − need_gain) = 0
+    a = 0.5 * gamma
+    b = delta
+    c = theta * t_hold - need_gain
+    if abs(a) < 1e-12:
+        if abs(b) < 1e-12:
+            return None
+        m = -c / b
+    else:
+        disc = b * b - 4 * a * c
+        if disc < 0:
+            return None
+        r1 = (-b + math.sqrt(disc)) / (2 * a)
+        r2 = (-b - math.sqrt(disc)) / (2 * a)
+        # prefer the root in the trade direction
+        roots = [r for r in (r1, r2) if (r >= 0 if direction == "Bullish" else r <= 0)]
+        if not roots:
+            roots = [r1, r2]
+        m = min(roots, key=lambda x: abs(x)) if direction == "Bullish" else max(roots, key=lambda x: abs(x))
+    return spot + m
+
+
+def select_auto_target(
+    rows: list[dict[str, Any]],
+    *,
+    spot: float,
+    direction: Direction,
+    resistance: list[dict[str, Any]],
+    support: list[dict[str, Any]],
+    stop_info: dict[str, Any],
+    lot_size: int | None,
+    t_hold: float,
+    hold_mode: HoldMode,
+) -> dict[str, Any]:
+    """Nearest R/S where the best candidate hits R:R ≥ 2; else a needs-move message."""
+    ladder = target_ladder(direction, resistance, support)
+    chosen: dict[str, Any] | None = None
+    for tag, strike in ladder:
+        built = build_strike_picker(
+            rows,
+            spot=spot,
+            direction=direction,
+            target=strike,
+            stop_info=stop_info,
+            lot_size=lot_size,
+            t_hold=t_hold,
+            hold_mode=hold_mode,
+        )
+        built["target_mode"] = tag
+        built["target_tag"] = tag
+        rr = best_rr(built["candidates"])
+        if rr is not None and rr >= AUTO_RR:
+            chosen = built
+            break
+    if chosen is not None:
+        chosen["target_mode"] = "Auto"
+        chosen["auto_resolved_tag"] = chosen.get("target_tag")
+        chosen["auto_message"] = None
+        return chosen
+
+    # No level works — build against nearest target for display + needs-move hint
+    fallback_tag, fallback_strike = ladder[0] if ladder else ("R1", spot)
+    built = build_strike_picker(
+        rows,
+        spot=spot,
+        direction=direction,
+        target=fallback_strike if ladder else None,
+        stop_info=stop_info,
+        lot_size=lot_size,
+        t_hold=t_hold,
+        hold_mode=hold_mode,
+    )
+    # pick candidate with best R:R for the solve
+    cands = [c for c in built["candidates"] if c.get("reward_risk") is not None]
+    cands.sort(key=lambda c: float(c["reward_risk"]), reverse=True)
+    need_lvl = None
+    if cands:
+        need_lvl = needed_move_for_rr2(
+            spot=spot,
+            direction=direction,
+            candidate=cands[0],
+            stop=stop_info.get("stop"),
+            t_hold=t_hold,
+        )
+    if need_lvl is not None:
+        msg = f"1:2 not possible with current levels — needs move to {need_lvl:.0f}"
+    else:
+        msg = "1:2 not possible with current levels"
+    built["target_mode"] = "Auto"
+    built["target_tag"] = None
+    built["auto_resolved_tag"] = None
+    built["auto_message"] = msg
+    built["needs_move_to"] = need_lvl
+    # Auto with no R:R≥2 is not a setup
+    built["has_setup"] = False
+    built["highlight"] = None
+    built["setup_message"] = built.get("setup_message") or NO_SETUP_MSG
+    for c in built["candidates"]:
+        c["highlighted"] = False
+    return built
 
 
 def _picker_for(
@@ -765,17 +953,30 @@ def _picker_for(
     now: int | float,
     expiry: str,
     hold_mode: HoldMode,
+    is_trading_day: Callable[[date], bool] | None = None,
+    target_mode: TargetMode = "Auto",
 ) -> dict[str, Any]:
-    if direction == "Bullish":
-        tgt = next_resistance(resistance)
-        target = float(tgt["strike"]) if tgt else None
-    else:
-        tgt = next_support(support)
-        target = float(tgt["strike"]) if tgt else None
     levels = _protective_levels(direction=direction, resistance=resistance, support=support, pivot=pivot)
     stop_info = choose_stop(spot=spot, direction=direction, levels=levels, expected_move=expected_move)
-    th = t_hold_days(now, expiry, hold_mode)
-    return build_strike_picker(
+    th = t_hold_days(now, expiry, hold_mode, is_trading_day=is_trading_day)
+
+    if target_mode == "Auto":
+        return select_auto_target(
+            rows,
+            spot=spot,
+            direction=direction,
+            resistance=resistance,
+            support=support,
+            stop_info=stop_info,
+            lot_size=lot_size,
+            t_hold=th,
+            hold_mode=hold_mode,
+        )
+
+    pool = resistance if direction == "Bullish" else support
+    lv = level_by_tag(pool, target_mode)
+    target = float(lv["strike"]) if lv else None
+    built = build_strike_picker(
         rows,
         spot=spot,
         direction=direction,
@@ -785,6 +986,10 @@ def _picker_for(
         t_hold=th,
         hold_mode=hold_mode,
     )
+    built["target_mode"] = target_mode
+    built["target_tag"] = target_mode if target is not None else None
+    built["auto_message"] = None
+    return built
 
 
 def enrich_phase3(
@@ -794,6 +999,7 @@ def enrich_phase3(
     options_dir: Path | None = None,
     lot_size: int | None = None,
     hold_mode: HoldMode = "1d",
+    is_trading_day: Callable[[date], bool] | None = None,
 ) -> dict[str, Any]:
     """Attach Phase 3 blocks onto a chain view (mutates and returns `view`)."""
     if not view.get("available"):
@@ -801,6 +1007,11 @@ def enrich_phase3(
         view["expected_move"] = None
         view["strike_picker"] = None
         return view
+
+    if is_trading_day is None:
+        from app.backtest.expiry import load_default_calendar
+
+        is_trading_day = load_default_calendar().is_trading_day
 
     spot = float(view["spot"])
     atm = float(view["atm"])
@@ -824,7 +1035,7 @@ def enrich_phase3(
         options_dir=options_dir,
     )
     atm_iv_pct = iv_panel["atm_iv"]
-    t_years = years_to_expiry_calendar(now, expiry)
+    t_years = years_to_expiry_trading(now, expiry, is_trading_day)
 
     view["iv_panel"] = iv_panel
     em = build_expected_move(
@@ -834,6 +1045,7 @@ def enrich_phase3(
         atm_iv_pct=atm_iv_pct,
         now=now,
         expiry=expiry,
+        is_trading_day=is_trading_day,
     )
     view["expected_move"] = em
 
@@ -869,16 +1081,36 @@ def enrich_phase3(
         now=now,
         expiry=expiry,
         hold_mode=hold_mode,
+        is_trading_day=is_trading_day,
     )
-    bull = _picker_for(direction="Bullish", **common)  # type: ignore[arg-type]
-    bear = _picker_for(direction="Bearish", **common)  # type: ignore[arg-type]
+    bull_auto = _picker_for(direction="Bullish", target_mode="Auto", **common)  # type: ignore[arg-type]
+    bear_auto = _picker_for(direction="Bearish", target_mode="Auto", **common)  # type: ignore[arg-type]
+    bull_targets = {
+        "Auto": bull_auto,
+        **{
+            tag: _picker_for(direction="Bullish", target_mode=tag, **common)  # type: ignore[arg-type]
+            for tag in ("R1", "R2", "R3")
+            if level_by_tag(resistance, tag)
+        },
+    }
+    bear_targets = {
+        "Auto": bear_auto,
+        **{
+            tag: _picker_for(direction="Bearish", target_mode=tag, **common)  # type: ignore[arg-type]
+            for tag in ("S1", "S2", "S3")
+            if level_by_tag(support, tag)
+        },
+    }
     view["strike_picker"] = {
         "lot_size": lot_size,
         "hold_mode": hold_mode,
         "hold_modes": list(HOLD_LABELS.keys()),
-        "Bullish": bull,
-        "Bearish": bear,
-        "active": bull,
+        "target_mode": "Auto",
+        "Bullish": bull_auto,
+        "Bearish": bear_auto,
+        "Bullish_targets": bull_targets,
+        "Bearish_targets": bear_targets,
+        "active": bull_auto,
     }
     return view
 
@@ -888,10 +1120,16 @@ def rebuild_strike_picker(
     *,
     direction: Direction,
     hold_mode: HoldMode = "1d",
+    target_mode: TargetMode = "Auto",
+    is_trading_day: Callable[[date], bool] | None = None,
 ) -> dict[str, Any] | None:
     """Rebuild one side of the picker (used when the UI changes hold / direction without refetch)."""
     if not view.get("available"):
         return None
+    if is_trading_day is None:
+        from app.backtest.expiry import load_default_calendar
+
+        is_trading_day = load_default_calendar().is_trading_day
     all_rows = view.get("all_strikes") or [
         {"strike": r["strike"], "call": r["call"], "put": r["put"]} for r in view.get("rows", [])
     ]
@@ -909,6 +1147,8 @@ def rebuild_strike_picker(
         now=int(view["as_of"]),
         expiry=str(view["expiry"]),
         hold_mode=hold_mode,
+        is_trading_day=is_trading_day,
+        target_mode=target_mode,
     )
 
 

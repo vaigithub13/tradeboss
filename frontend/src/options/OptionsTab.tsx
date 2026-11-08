@@ -12,6 +12,7 @@ import {
   type PcrValue,
   type StrikeDirection,
   type StrikePickerSide,
+  type TargetMode,
 } from "../api/options";
 import { useOptionsStore } from "../store/optionsStore";
 import {
@@ -367,13 +368,23 @@ function MaxPainPanel({ data }: { data: OptionsChainResponse }) {
         <p className="text-white/40">Max Pain unavailable</p>
       )}
       {em ? (
-        <div className="mt-1 space-y-0.5 font-mono text-[10px] text-white/65" data-testid="options-expected-move">
+        <div className="mt-1 space-y-1 font-mono text-[10px] text-white/65" data-testid="options-expected-move">
           <div>
-            Straddle ±{formatStrike(em.move)} → {formatStrike(em.lower)} / {formatStrike(em.upper)}
+            <div className="text-[9px] uppercase tracking-wide text-white/40">
+              {em.market_priced?.label ?? "Market-priced move (ATM straddle)"}
+            </div>
+            ±{formatStrike(em.market_priced?.move ?? em.move)} →{" "}
+            {formatStrike(em.market_priced?.lower ?? em.lower)} /{" "}
+            {formatStrike(em.market_priced?.upper ?? em.upper)}
           </div>
-          {em.iv ? (
-            <div className="text-white/40">
-              IV check ±{formatStrike(em.iv.move)} → {formatStrike(em.iv.lower)} / {formatStrike(em.iv.upper)}
+          {em.one_sigma?.available !== false && (em.one_sigma || em.iv) ? (
+            <div className="text-white/45">
+              <div className="text-[9px] uppercase tracking-wide text-white/35">
+                {em.one_sigma?.label ?? "1σ range (IV), ≈68% probability"}
+              </div>
+              ±{formatStrike(em.one_sigma?.move ?? em.iv?.move ?? 0)} →{" "}
+              {formatStrike(em.one_sigma?.lower ?? em.iv?.lower ?? 0)} /{" "}
+              {formatStrike(em.one_sigma?.upper ?? em.iv?.upper ?? 0)}
             </div>
           ) : null}
         </div>
@@ -387,6 +398,7 @@ function MaxPainPanel({ data }: { data: OptionsChainResponse }) {
 function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
   const [direction, setDirection] = useState<StrikeDirection>("Bullish");
   const [hold, setHold] = useState<HoldMode>("1d");
+  const [targetMode, setTargetMode] = useState<TargetMode>("Auto");
   const [expiryMode, setExpiryMode] = useState<"current" | "next">("current");
   const [nextData, setNextData] = useState<OptionsChainResponse | null>(null);
   const [nextError, setNextError] = useState<string | null>(null);
@@ -417,17 +429,28 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
     return () => ac.abort();
   }, [expiryMode, nextExp]);
 
+  useEffect(() => {
+    // Reset target mode to Auto when flipping direction (R* vs S*)
+    setTargetMode("Auto");
+  }, [direction]);
+
   const activeData = expiryMode === "next" && nextData?.available ? nextData : data;
   const picker = activeData.strike_picker;
   const spot = activeData.spot ?? 0;
 
+  const targetButtons: TargetMode[] =
+    direction === "Bullish" ? ["Auto", "R1", "R2", "R3"] : ["Auto", "S1", "S2", "S3"];
+
   const side: StrikePickerSide | null = useMemo(() => {
     if (!picker) return null;
-    const base = direction === "Bullish" ? picker.Bullish : picker.Bearish;
+    const map = direction === "Bullish" ? picker.Bullish_targets : picker.Bearish_targets;
+    const base =
+      (map && map[targetMode]) ||
+      (direction === "Bullish" ? picker.Bullish : picker.Bearish);
     if (!base) return null;
     const tHold = picker.t_holds?.[hold] ?? base.t_hold;
     return repricePickerSide(base, spot, tHold, hold);
-  }, [picker, direction, hold, spot]);
+  }, [picker, direction, hold, spot, targetMode]);
 
   if (!data.strike_picker) {
     return <Placeholder title="Strike Picker" />;
@@ -464,6 +487,18 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
             {d}
           </button>
         ))}
+        {targetButtons.map((m) => (
+          <button
+            key={m}
+            type="button"
+            className={`rounded px-2 py-0.5 text-[10px] ${
+              targetMode === m ? "bg-amber-500/20 text-amber-100" : "text-white/45"
+            }`}
+            onClick={() => setTargetMode(m)}
+          >
+            {m}
+          </button>
+        ))}
         {(["intraday", "1d", "2d"] as HoldMode[]).map((m) => (
           <button
             key={m}
@@ -492,7 +527,8 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
         <>
           <div className="mb-1 font-mono text-[10px] text-white/55">
             Expiry {activeData.expiry} · Target{" "}
-            {side.target != null ? formatStrike(side.target) : "—"} · Stop{" "}
+            {side.target != null ? formatStrike(side.target) : "—"}
+            {side.auto_resolved_tag ? ` (${side.auto_resolved_tag})` : ""} · Stop{" "}
             {side.stop != null ? formatStrike(side.stop) : "—"}
             {side.stop_distance != null ? ` (${formatStrike(side.stop_distance)} pts)` : ""}
             {side.lot_size != null ? ` · lot ${side.lot_size}` : ""}
@@ -500,6 +536,11 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
           {side.stop_why ? (
             <p className="mb-2 text-[9px] leading-snug text-white/35" data-testid="strike-stop-why">
               Stop: {side.stop_why}
+            </p>
+          ) : null}
+          {side.auto_message ? (
+            <p className="mb-2 text-[10px] text-amber-200/85" data-testid="strike-auto-message">
+              {side.auto_message}
             </p>
           ) : null}
 
@@ -550,8 +591,7 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
                       {c.est_gain != null ? `${c.est_gain >= 0 ? "+" : ""}${c.est_gain.toFixed(2)}` : "—"}
                     </span>
                     <span>
-                      Loss{" "}
-                      {c.est_loss != null ? `${c.est_loss >= 0 ? "+" : ""}${c.est_loss.toFixed(2)}` : "—"}
+                      Loss {c.est_loss != null ? `−${Math.abs(c.est_loss).toFixed(2)}` : "—"}
                     </span>
                     <span>R:R {c.reward_risk != null ? c.reward_risk.toFixed(2) : "—"}</span>
                     <span>t_hold {side.t_hold.toFixed(2)}d</span>
