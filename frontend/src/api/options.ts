@@ -39,6 +39,16 @@ export interface OptionsMajorWalls {
   put: OptionsWall | null;
 }
 
+export interface OptionsPivot {
+  strike: number;
+  call_oi: number;
+  put_oi: number;
+  heavy_call: boolean;
+  heavy_put: boolean;
+  tag: "PIVOT";
+  read: string;
+}
+
 export interface OptionsRow {
   strike: number;
   call: OptionsLeg;
@@ -67,6 +77,7 @@ export interface OptionsChainResponse {
   total_put_oi?: number;
   resistance?: OptionsLevel[];
   support?: OptionsLevel[];
+  pivot?: OptionsPivot | null;
   major_walls?: OptionsMajorWalls;
   rows: OptionsRow[];
   max_oi?: number;

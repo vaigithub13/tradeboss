@@ -191,6 +191,53 @@ def test_sr_ignores_oi_outside_display_window_major_walls_use_full_chain() -> No
     assert out["total_put_oi"] == sum(r["put"]["oi"] for r in out["all_strikes"])
 
 
+def test_pivot_is_heavy_oi_within_two_strikes_of_spot() -> None:
+    """25000 is within ±100 of spot and holds the window's peak Call OI → PIVOT."""
+    rows = []
+    for strike in range(24800, 25300, 50):
+        call_oi = 112_000_000 if strike == 25000 else 1_000_000 + strike
+        put_oi = 5_000_000 if strike == 25000 else 500_000
+        rows.append(row(float(strike), leg(oi=call_oi), leg(oi=put_oi), spot=25030.0))
+    out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
+    pivot = out["pivot"]
+    assert pivot is not None
+    assert pivot["strike"] == 25000.0
+    assert pivot["tag"] == "PIVOT"
+    assert pivot["heavy_call"] is True
+    assert pivot["read"] == chain_view.PIVOT_READ_ABOVE_CALL
+    tagged = [r for r in out["rows"] if r["tag"] == "PIVOT"]
+    assert len(tagged) == 1 and tagged[0]["strike"] == 25000.0
+
+
+def test_pivot_absent_when_no_heavy_oi_near_spot() -> None:
+    rows = [
+        row(24900, leg(oi=10), leg(oi=10), spot=25030.0),
+        row(25000, leg(oi=10), leg(oi=10), spot=25030.0),
+        row(25050, leg(oi=10), leg(oi=10), spot=25030.0),
+        row(25500, leg(oi=9_000_000), leg(oi=10), spot=25030.0),  # heavy but outside ±100
+        row(24500, leg(oi=10), leg(oi=9_000_000), spot=25030.0),
+    ]
+    out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
+    assert out["pivot"] is None
+
+
+def test_pivot_below_spot_with_heavy_put() -> None:
+    rows = [
+        # Call peak far below the ±100 band so near strikes aren't all "heavy call"
+        row(24800, leg(oi=10_000_000), leg(oi=100), spot=25000.0),
+        row(24950, leg(oi=100), leg(oi=100), spot=25000.0),
+        row(25000, leg(oi=100), leg(oi=100), spot=25000.0),
+        row(25050, leg(oi=100), leg(oi=8_000_000), spot=25000.0),  # above spot, heavy put
+        row(25100, leg(oi=100), leg(oi=100), spot=25000.0),
+    ]
+    out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
+    assert out["pivot"] is not None
+    assert out["pivot"]["strike"] == 25050.0
+    assert out["pivot"]["heavy_put"] is True
+    assert out["pivot"]["heavy_call"] is False
+    assert out["pivot"]["read"] == chain_view.PIVOT_READ_BELOW_PUT
+
+
 def test_leg_derived_fields() -> None:
     out = chain_view.build_chain_view(
         [row(25000, leg(oi=110, prev_oi=100, ltp=105, close=100, bid=104, ask=106), leg(oi=50, prev_oi=60))],

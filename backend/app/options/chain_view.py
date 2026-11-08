@@ -14,7 +14,14 @@ from app.options.time import IST
 OPEN = time(9, 15)
 CLOSE = time(15, 30)
 DEFAULT_WINDOW = 15
+#: Nifty strike step is 50 → ±2 strikes = ±100 pts around spot
+PIVOT_BAND_PTS = 100.0
+PIVOT_STRONG = 0.80
 UNAVAILABLE = "option chain empty"
+
+PIVOT_READ_ABOVE_CALL = "Above = bullish, short covering risk for call writers"
+PIVOT_READ_BELOW_PUT = "Below = bearish, put writers under pressure"
+PIVOT_READ_BATTLE = "Battle zone"
 
 
 def format_ist(t: int) -> str:
@@ -158,6 +165,51 @@ def _major_walls(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def _pivot_read(spot: float, strike: float, *, heavy_call: bool, heavy_put: bool) -> str:
+    if spot > strike and heavy_call:
+        return PIVOT_READ_ABOVE_CALL
+    if spot < strike and heavy_put:
+        return PIVOT_READ_BELOW_PUT
+    return PIVOT_READ_BATTLE
+
+
+def _pivot(rows: list[dict[str, Any]], spot: float) -> dict[str, Any] | None:
+    """Nearest heavy-OI strike within ±2 strikes (±100 pts) of spot, or None.
+
+    Qualifies when Call OI ≥ 80% of the window's peak Call OI, or Put OI ≥ 80% of peak Put OI.
+    If several qualify, pick the nearest to spot (then highest max(call, put) OI).
+    """
+    if not rows:
+        return None
+    call_peak = max((r["call"]["oi"] for r in rows), default=0.0)
+    put_peak = max((r["put"]["oi"] for r in rows), default=0.0)
+    candidates: list[dict[str, Any]] = []
+    for r in rows:
+        if abs(r["strike"] - spot) > PIVOT_BAND_PTS:
+            continue
+        call_oi = r["call"]["oi"]
+        put_oi = r["put"]["oi"]
+        heavy_call = call_peak > 0 and call_oi >= PIVOT_STRONG * call_peak
+        heavy_put = put_peak > 0 and put_oi >= PIVOT_STRONG * put_peak
+        if not (heavy_call or heavy_put):
+            continue
+        candidates.append(
+            {
+                "strike": r["strike"],
+                "call_oi": call_oi,
+                "put_oi": put_oi,
+                "heavy_call": heavy_call,
+                "heavy_put": heavy_put,
+                "tag": "PIVOT",
+                "read": _pivot_read(spot, r["strike"], heavy_call=heavy_call, heavy_put=heavy_put),
+            }
+        )
+    if not candidates:
+        return None
+    candidates.sort(key=lambda c: (abs(c["strike"] - spot), -max(c["call_oi"], c["put_oi"]), c["strike"]))
+    return candidates[0]
+
+
 def build_chain_view(
     raw_rows: list[dict[str, Any]],
     *,
@@ -181,6 +233,7 @@ def build_chain_view(
             "rows": [],
             "resistance": [],
             "support": [],
+            "pivot": None,
             "major_walls": {"call": None, "put": None},
         }
 
@@ -209,6 +262,7 @@ def build_chain_view(
             "rows": [],
             "resistance": [],
             "support": [],
+            "pivot": None,
             "major_walls": {"call": None, "put": None},
         }
 
@@ -226,21 +280,37 @@ def build_chain_view(
     window_rows = parsed[lo:hi]
     # R/S only from the visible ±window so every tag matches a table row
     resistance, support = _levels(window_rows, spot)
+    pivot = _pivot(window_rows, spot)
     level_by_strike = {r["strike"]: r for r in resistance}
     level_by_strike.update({s["strike"]: s for s in support})
+    pivot_strike = pivot["strike"] if pivot else None
 
     display = []
     for r in window_rows:
         lvl = level_by_strike.get(r["strike"])
+        is_pivot = pivot_strike is not None and r["strike"] == pivot_strike
+        # Prefer PIVOT on the table when both apply; R/S remain in Key Levels lists
+        if is_pivot:
+            tag = "PIVOT"
+            strength = None
+            edge = False
+        elif lvl:
+            tag = lvl["tag"]
+            strength = lvl.get("strength")
+            edge = bool(lvl.get("edge"))
+        else:
+            tag = None
+            strength = None
+            edge = False
         display.append(
             {
                 "strike": r["strike"],
                 "call": r["call"],
                 "put": r["put"],
                 "atm": r["strike"] == atm,
-                "tag": lvl["tag"] if lvl else None,
-                "strength": lvl.get("strength") if lvl else None,
-                "edge": bool(lvl.get("edge")) if lvl else False,
+                "tag": tag,
+                "strength": strength,
+                "edge": edge,
                 "call_itm": r["strike"] < spot,
                 "put_itm": r["strike"] > spot,
             }
@@ -266,6 +336,7 @@ def build_chain_view(
         "total_put_oi": total_put,
         "resistance": resistance,
         "support": support,
+        "pivot": pivot,
         "major_walls": major_walls,
         "rows": display,
         # full chain kept for snapshots / later phases (not shown in the ±window table)

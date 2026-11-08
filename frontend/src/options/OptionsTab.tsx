@@ -103,11 +103,12 @@ function levelByTag(data: OptionsChainResponse, tag: string): OptionsLevel | und
 
 function KeyLevels({ data }: { data: OptionsChainResponse }) {
   const spot = data.spot ?? 0;
-  // OI-ranked tags (R1 = strongest call OI…); ladder itself is sorted by strike
+  // R1 nearest resistance sits last when sorted high→low; PIVOT then Spot then S1…
   const resistance = [...(data.resistance ?? [])].sort((a, b) => b.strike - a.strike);
   const support = [...(data.support ?? [])].sort((a, b) => b.strike - a.strike);
-  const ladder: Array<{ key: string; kind: "R" | "S" | "SPOT"; lvl?: OptionsLevel }> = [
+  const ladder: Array<{ key: string; kind: "R" | "S" | "SPOT" | "PIVOT"; lvl?: OptionsLevel }> = [
     ...resistance.map((lvl) => ({ key: lvl.tag, kind: "R" as const, lvl })),
+    ...(data.pivot ? [{ key: "PIVOT", kind: "PIVOT" as const }] : []),
     { key: "SPOT", kind: "SPOT" as const },
     ...support.map((lvl) => ({ key: lvl.tag, kind: "S" as const, lvl })),
   ];
@@ -126,6 +127,32 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
                   <span>Spot</span>
                   <span>{formatSpot(data.spot)}</span>
                 </div>
+              </li>
+            );
+          }
+          if (item.kind === "PIVOT" && data.pivot) {
+            const p = data.pivot;
+            const dist = p.strike - spot;
+            return (
+              <li
+                key="PIVOT"
+                className="rounded border border-sky-400/40 bg-sky-400/10 px-2 py-1.5"
+                data-testid="options-pivot"
+              >
+                <div className="flex justify-between font-mono text-sky-100">
+                  <span>PIVOT</span>
+                  <span>{formatStrike(p.strike)}</span>
+                </div>
+                <div className="mt-0.5 flex justify-between text-[10px] text-white/45">
+                  <span>
+                    C {formatOiLakhs(p.call_oi)} · P {formatOiLakhs(p.put_oi)}
+                  </span>
+                  <span>
+                    {dist > 0 ? "+" : ""}
+                    {formatStrike(dist)} pts
+                  </span>
+                </div>
+                <p className="mt-1 text-[10px] leading-snug text-sky-100/70">{p.read}</p>
               </li>
             );
           }
@@ -275,7 +302,11 @@ function ChainRow({ row, maxOi, spot }: { row: OptionsRow; maxOi: number; spot: 
           {row.tag ? (
             <span
               className={`rounded px-1 text-[9px] ${
-                row.tag.startsWith("R") ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"
+                row.tag === "PIVOT"
+                  ? "bg-sky-500/20 text-sky-200"
+                  : row.tag.startsWith("R")
+                    ? "bg-red-500/20 text-red-300"
+                    : "bg-emerald-500/20 text-emerald-300"
               }`}
               title={row.strength ? `${row.tag} · ${row.strength}` : row.tag}
             >
