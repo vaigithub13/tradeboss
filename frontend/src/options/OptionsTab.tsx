@@ -13,6 +13,7 @@ import {
   formatSpot,
   formatStrike,
 } from "./format";
+import { buildKeyLevelsLadder } from "./levels";
 
 const POLL_MS = 60_000;
 
@@ -103,15 +104,7 @@ function levelByTag(data: OptionsChainResponse, tag: string): OptionsLevel | und
 
 function KeyLevels({ data }: { data: OptionsChainResponse }) {
   const spot = data.spot ?? 0;
-  // R1 nearest resistance sits last when sorted high→low; PIVOT then Spot then S1…
-  const resistance = [...(data.resistance ?? [])].sort((a, b) => b.strike - a.strike);
-  const support = [...(data.support ?? [])].sort((a, b) => b.strike - a.strike);
-  const ladder: Array<{ key: string; kind: "R" | "S" | "SPOT" | "PIVOT"; lvl?: OptionsLevel }> = [
-    ...resistance.map((lvl) => ({ key: lvl.tag, kind: "R" as const, lvl })),
-    ...(data.pivot ? [{ key: "PIVOT", kind: "PIVOT" as const }] : []),
-    { key: "SPOT", kind: "SPOT" as const },
-    ...support.map((lvl) => ({ key: lvl.tag, kind: "S" as const, lvl })),
-  ];
+  const ladder = buildKeyLevelsLadder(data);
   return (
     <aside className="flex w-52 shrink-0 flex-col gap-2 border-l border-white/10 bg-[#0b0f14] p-3 text-xs">
       <h2 className="text-sm font-semibold text-white">Key Levels</h2>
@@ -130,8 +123,8 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
               </li>
             );
           }
-          if (item.kind === "PIVOT" && data.pivot) {
-            const p = data.pivot;
+          if (item.kind === "PIVOT" && item.pivot) {
+            const p = item.pivot;
             const dist = p.strike - spot;
             return (
               <li
