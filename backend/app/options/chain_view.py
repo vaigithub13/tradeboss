@@ -281,9 +281,19 @@ def build_chain_view(
     # R/S only from the visible ±window so every tag matches a table row
     resistance, support = _levels(window_rows, spot)
     pivot = _pivot(window_rows, spot)
+    from app.options.chain_analytics import enrich_chain
+
+    phase2 = enrich_chain(
+        all_strikes=parsed,
+        window_rows=window_rows,
+        atm=atm,
+        spot=spot,
+        full_pcr=pcr,
+    )
     level_by_strike = {r["strike"]: r for r in resistance}
     level_by_strike.update({s["strike"]: s for s in support})
     pivot_strike = pivot["strike"] if pivot else None
+    max_pain_strike = (phase2.get("max_pain") or {}).get("strike")
 
     display = []
     for r in window_rows:
@@ -311,6 +321,7 @@ def build_chain_view(
                 "tag": tag,
                 "strength": strength,
                 "edge": edge,
+                "max_pain": max_pain_strike is not None and r["strike"] == max_pain_strike,
                 "call_itm": r["strike"] < spot,
                 "put_itm": r["strike"] > spot,
             }
@@ -338,8 +349,16 @@ def build_chain_view(
         "support": support,
         "pivot": pivot,
         "major_walls": major_walls,
+        "pcrs": phase2["pcrs"],
+        "max_pain": phase2["max_pain"],
+        "buildup_analysis": phase2["buildup_analysis"],
+        "near_atm_strikes": phase2["near_atm_strikes"],
         "rows": display,
         # full chain kept for snapshots / later phases (not shown in the ±window table)
         "all_strikes": parsed,
         "max_oi": max((max(r["call"]["oi"], r["put"]["oi"]) for r in window_rows), default=0.0),
+        "max_oi_chg": max(
+            (max(abs(r["call"].get("oi_chg") or 0.0), abs(r["put"].get("oi_chg") or 0.0)) for r in window_rows),
+            default=0.0,
+        ),
     }

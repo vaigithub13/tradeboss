@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.ai.chain import NIFTY_CHAIN_KEY, weekly_expiry
 from app.backtest.expiry import load_default_calendar
 from app.config import settings
-from app.options.chain_history import latest_snapshot, view_from_snapshot
+from app.options.chain_history import latest_snapshot, trend_points, view_from_snapshot
 from app.options.chain_view import build_chain_view, market_status
 from app.options.time import IST
 from app.upstox.client import UpstoxAuthError, UpstoxError, UpstoxRateLimited
@@ -123,6 +123,22 @@ def _list_expiries(client: OptionsSource, now: float) -> list[str]:
         cur = next_expiry_after(cur)
         out.append(cur)
     return out
+
+
+@router.get("/trends")
+def option_trends(
+    clock: Annotated[Callable[[], float], Depends(get_options_clock)],
+    options_dir: Annotated[Path, Depends(get_options_dir)],
+    day: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+    expiry: Annotated[str | None, Query(pattern=r"^\d{4}-\d{2}-\d{2}$")] = None,
+) -> dict[str, Any]:
+    """Intraday Full PCR / Near-ATM PCR / Spot from saved options snapshots (IST day)."""
+    now = float(clock())
+    if day is None:
+        target = datetime.fromtimestamp(now, IST).date()
+    else:
+        target = date.fromisoformat(day)
+    return trend_points(options_dir, target, expiry=expiry)
 
 
 @router.get("/expiries")

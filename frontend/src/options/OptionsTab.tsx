@@ -1,6 +1,13 @@
 import { useEffect, useRef } from "react";
 
-import type { OptionsChainResponse, OptionsLeg, OptionsLevel, OptionsRow } from "../api/options";
+import type {
+  BuildupLabel,
+  OptionsChainResponse,
+  OptionsLeg,
+  OptionsLevel,
+  OptionsRow,
+  PcrValue,
+} from "../api/options";
 import { useOptionsStore } from "../store/optionsStore";
 import {
   chgClass,
@@ -14,6 +21,16 @@ import {
   formatStrike,
 } from "./format";
 import { buildKeyLevelsLadder } from "./levels";
+import { OiBarChart } from "./OiBarChart";
+import { TrendsPanel } from "./TrendsPanel";
+
+const BUILDUP_SHORT: Record<BuildupLabel, string> = {
+  "Long Build-up": "LBu",
+  "Short Build-up": "SBu",
+  "Short Covering": "SC",
+  "Long Unwinding": "LU",
+  Neutral: "·",
+};
 
 const POLL_MS = 60_000;
 
@@ -74,9 +91,20 @@ function LegCells({
       {formatSpot(leg.ltp)}
     </td>
   );
+  const buildupColor =
+    leg.buildup_nifty === "Bullish"
+      ? "text-emerald-300"
+      : leg.buildup_nifty === "Bearish"
+        ? "text-red-300"
+        : "text-white/35";
   const chg = (
     <td key="chg" className={`px-1.5 py-1 text-right font-mono ${shade} ${chgClass(leg.price_chg)}`}>
       {formatChg(leg.price_chg)}
+      {leg.buildup ? (
+        <div className={`text-[8px] leading-tight ${buildupColor}`} title={`${leg.buildup}${leg.buildup_nifty ? ` · ${leg.buildup_nifty}` : ""}`}>
+          {BUILDUP_SHORT[leg.buildup]}
+        </div>
+      ) : null}
     </td>
   );
   const bid = (
@@ -106,7 +134,7 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
   const spot = data.spot ?? 0;
   const ladder = buildKeyLevelsLadder(data);
   return (
-    <aside className="flex w-52 shrink-0 flex-col gap-2 border-l border-white/10 bg-[#0b0f14] p-3 text-xs">
+    <aside className="flex w-60 shrink-0 flex-col gap-2 overflow-y-auto border-l border-white/10 bg-[#0b0f14] p-3 text-xs">
       <h2 className="text-sm font-semibold text-white">Key Levels</h2>
       <ul className="flex flex-col gap-1">
         {ladder.map((item) => {
@@ -146,6 +174,26 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
                   </span>
                 </div>
                 <p className="mt-1 text-[10px] leading-snug text-sky-100/70">{p.read}</p>
+              </li>
+            );
+          }
+          if (item.kind === "MAX_PAIN" && item.maxPain) {
+            const mp = item.maxPain;
+            const dist = mp.distance ?? mp.strike - spot;
+            return (
+              <li
+                key="MAX PAIN"
+                className="rounded border border-violet-400/40 bg-violet-400/10 px-2 py-1.5"
+                data-testid="options-max-pain"
+              >
+                <div className="flex justify-between font-mono text-violet-100">
+                  <span>MAX PAIN</span>
+                  <span>{formatStrike(mp.strike)}</span>
+                </div>
+                <div className="mt-0.5 text-[10px] text-white/45">
+                  {dist > 0 ? "+" : ""}
+                  {formatStrike(dist)} pts from spot
+                </div>
               </li>
             );
           }
@@ -190,12 +238,88 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
         <MajorWallLine kind="Put" wall={data.major_walls?.put} spot={spot} />
       </div>
 
-      <Placeholder title="Build-up Analysis" />
-      <Placeholder title="Max Pain & Expected Move" />
+      <BuildupPanel data={data} />
+      <MaxPainPanel data={data} />
       <Placeholder title="Strike Picker" />
       <Placeholder title="Market Bias" />
       <Placeholder title="Pre-market Overview" />
     </aside>
+  );
+}
+
+function BuildupPanel({ data }: { data: OptionsChainResponse }) {
+  const a = data.buildup_analysis;
+  if (!a) {
+    return <Placeholder title="Build-up Analysis" />;
+  }
+  return (
+    <div className="rounded border border-white/10 px-2 py-2 text-[11px]" data-testid="options-buildup">
+      <div className="mb-1 text-[10px] uppercase tracking-wide text-white/40">Build-up Analysis</div>
+      <p className="font-medium text-white/80">{a.summary}</p>
+      <div className="mt-1 font-mono text-[10px] text-white/50">
+        Near-ATM ΔOI · C {formatOiLakhs(a.call_doi)} · P {formatOiLakhs(a.put_doi)}
+      </div>
+      <div className="mt-1 text-[10px] text-white/40">
+        Top Call +: {a.top_call_additions.map((x) => formatStrike(x.strike)).join(", ")}
+      </div>
+      <div className="text-[10px] text-white/40">
+        Top Put +: {a.top_put_additions.map((x) => formatStrike(x.strike)).join(", ")}
+      </div>
+    </div>
+  );
+}
+
+function MaxPainPanel({ data }: { data: OptionsChainResponse }) {
+  const mp = data.max_pain;
+  return (
+    <div className="rounded border border-white/10 px-2 py-2 text-[11px]" data-testid="options-maxpain-panel">
+      <div className="mb-1 text-[10px] uppercase tracking-wide text-white/40">Max Pain & Expected Move</div>
+      {mp ? (
+        <p className="font-mono text-white/80">
+          Max Pain {formatStrike(mp.strike)}{" "}
+          <span className="text-white/45">
+            ({(mp.distance ?? mp.strike - (data.spot ?? 0)) > 0 ? "+" : ""}
+            {formatStrike(mp.distance ?? mp.strike - (data.spot ?? 0))} pts)
+          </span>
+        </p>
+      ) : (
+        <p className="text-white/40">Max Pain unavailable</p>
+      )}
+      <p className="mt-1 text-[10px] text-white/30">Expected move — coming soon</p>
+    </div>
+  );
+}
+
+function PcrCard({ label, pcr }: { label: string; pcr?: PcrValue }) {
+  const value =
+    pcr == null
+      ? "—"
+      : pcr.value == null
+        ? "n/a"
+        : typeof pcr.display === "number"
+          ? pcr.display.toFixed(2)
+          : String(pcr.display);
+  const read = pcr?.read;
+  const sub =
+    pcr?.value == null
+      ? pcr?.reason ?? undefined
+      : read
+        ? read
+        : undefined;
+  return (
+    <div className="min-w-[7.5rem] rounded border border-white/10 bg-white/[0.03] px-3 py-2">
+      <div className="text-[10px] uppercase tracking-wide text-white/40">{label}</div>
+      <div className="font-mono text-sm text-white/90">{value}</div>
+      {sub ? (
+        <div
+          className={`text-[10px] ${
+            read === "Bullish" ? "text-emerald-300" : read === "Bearish" ? "text-red-300" : "text-white/35"
+          }`}
+        >
+          {sub}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
@@ -308,6 +432,9 @@ function ChainRow({ row, maxOi, spot }: { row: OptionsRow; maxOi: number; spot: 
             </span>
           ) : null}
           <span>{formatStrike(row.strike)}</span>
+          {row.max_pain ? (
+            <span className="rounded bg-violet-500/20 px-1 text-[9px] text-violet-200">MP</span>
+          ) : null}
         </div>
         {atm ? <div className="text-[9px] text-amber-300/70">ATM · spot {formatSpot(spot)}</div> : null}
       </td>
@@ -349,7 +476,9 @@ export function OptionsTab() {
       <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-white/10 px-3 py-2">
         <Card label="Spot" value={formatSpot(data?.spot)} />
         <Card label="ATM" value={data?.atm != null ? formatStrike(data.atm) : "—"} />
-        <Card label="PCR" value={data?.pcr != null ? data.pcr.toFixed(2) : "—"} />
+        <PcrCard label="PCR full" pcr={data?.pcrs?.full} />
+        <PcrCard label="PCR near" pcr={data?.pcrs?.near_atm} />
+        <PcrCard label="PCR ΔOI" pcr={data?.pcrs?.change_oi} />
         <Card label="Call OI" value={formatOiLakhs(data?.total_call_oi)} />
         <Card label="Put OI" value={formatOiLakhs(data?.total_put_oi)} />
         <Card label="R1" value={r1 ? formatStrike(r1.strike) : "—"} sub={r1 ? formatOiLakhs(r1.oi) : undefined} />
@@ -408,7 +537,11 @@ export function OptionsTab() {
 
       {data?.available ? (
         <div className="flex min-h-0 flex-1">
-          <ChainTable data={data} />
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+            <ChainTable data={data} />
+            <OiBarChart data={data} />
+            <TrendsPanel expiry={expiry ?? data.expiry} />
+          </div>
           <KeyLevels data={data} />
         </div>
       ) : null}

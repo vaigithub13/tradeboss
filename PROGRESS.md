@@ -1493,6 +1493,15 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
   Muhurat one.
 
+## 8 Nov 2026: Options tab Phase 2 (build-up, PCR set, max pain, OI chart)
+
+- Per-leg build-up tags (Long/Short build-up, covering, unwinding, Neutral <2% ΔOI) + Nifty bias.
+- Near-ATM (±5) build-up panel; PCR full / near-ATM / ΔOI with Bullish–Neutral–Bearish reads.
+- Max Pain over full chain + Key Levels marker; Expected move placeholder “coming soon”.
+- SVG OI bar chart (±15, OI | ΔOI toggle) with Spot / Pivot / Max Pain guides.
+- Intraday trends from `data/options/` snapshots (`GET /api/options/trends`); empty → collecting message.
+- Tests: `tests/test_options_phase2.py`.
+
 ## 8 Nov 2026: Options S/R from ±15 window; major walls from full chain
 
 - R1–R3 / S1–S3 use only the displayed ±15 strikes around ATM (every tag is on a visible row).

@@ -1,6 +1,14 @@
 import { ApiError, getJson } from "./client";
 
 export type OptionsStatus = "LIVE" | "MARKET_CLOSED";
+export type BuildupLabel =
+  | "Long Build-up"
+  | "Short Build-up"
+  | "Short Covering"
+  | "Long Unwinding"
+  | "Neutral";
+export type NiftyBias = "Bullish" | "Bearish";
+export type PcrRead = "Bullish" | "Neutral" | "Bearish";
 
 export interface OptionsLeg {
   oi: number;
@@ -15,6 +23,8 @@ export interface OptionsLeg {
   bid: number;
   ask: number;
   spread_pct: number | null;
+  buildup?: BuildupLabel;
+  buildup_nifty?: NiftyBias | null;
 }
 
 export type OptionsStrength = "Strong" | "Medium" | "Weak";
@@ -25,7 +35,6 @@ export interface OptionsLevel {
   tag: string;
   strength?: OptionsStrength;
   oi_pct?: number;
-  /** true when the level sits on the first/last strike of the ±15 window */
   edge?: boolean;
 }
 
@@ -49,6 +58,36 @@ export interface OptionsPivot {
   read: string;
 }
 
+export interface OptionsMaxPain {
+  strike: number;
+  pain?: number;
+  distance?: number;
+  tag: string;
+}
+
+export interface PcrValue {
+  value: number | null;
+  display: number | string;
+  reason?: string | null;
+  read?: PcrRead | null;
+}
+
+export interface OptionsPcrs {
+  full: PcrValue;
+  near_atm: PcrValue;
+  change_oi: PcrValue;
+}
+
+export interface BuildupAnalysis {
+  zone_strikes: number[];
+  call_doi: number;
+  put_doi: number;
+  top_call_additions: { strike: number; oi_chg: number }[];
+  top_put_additions: { strike: number; oi_chg: number }[];
+  summary: string;
+  bias: "Bullish" | "Bearish" | "Mixed";
+}
+
 export interface OptionsRow {
   strike: number;
   call: OptionsLeg;
@@ -57,6 +96,7 @@ export interface OptionsRow {
   tag?: string | null;
   strength?: OptionsStrength | null;
   edge?: boolean;
+  max_pain?: boolean;
   call_itm: boolean;
   put_itm: boolean;
 }
@@ -78,14 +118,40 @@ export interface OptionsChainResponse {
   resistance?: OptionsLevel[];
   support?: OptionsLevel[];
   pivot?: OptionsPivot | null;
+  max_pain?: OptionsMaxPain | null;
   major_walls?: OptionsMajorWalls;
+  pcrs?: OptionsPcrs;
+  buildup_analysis?: BuildupAnalysis;
+  near_atm_strikes?: number[];
   rows: OptionsRow[];
   max_oi?: number;
+  max_oi_chg?: number;
+}
+
+export interface OptionsTrendPoint {
+  t: number;
+  as_of_ist?: string;
+  spot?: number | null;
+  pcr_full?: number | null;
+  pcr_near_atm?: number | null;
+  expiry?: string;
+}
+
+export interface OptionsTrendsResponse {
+  day: string;
+  available: boolean;
+  message?: string | null;
+  points: OptionsTrendPoint[];
 }
 
 export function fetchOptionsChain(signal?: AbortSignal, expiry?: string): Promise<OptionsChainResponse> {
   const q = expiry ? `?expiry=${encodeURIComponent(expiry)}` : "";
   return getJson<OptionsChainResponse>(`/api/options/chain${q}`, signal);
+}
+
+export function fetchOptionsTrends(signal?: AbortSignal, expiry?: string): Promise<OptionsTrendsResponse> {
+  const q = expiry ? `?expiry=${encodeURIComponent(expiry)}` : "";
+  return getJson<OptionsTrendsResponse>(`/api/options/trends${q}`, signal);
 }
 
 export function optionsErrorMessage(err: unknown): string {

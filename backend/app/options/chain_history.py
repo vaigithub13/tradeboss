@@ -32,11 +32,13 @@ def snapshot_row(view: dict[str, Any]) -> dict[str, Any]:
         "spot": view.get("spot"),
         "atm": view.get("atm"),
         "pcr": view.get("pcr"),
+        "pcrs": view.get("pcrs"),
         "total_call_oi": view.get("total_call_oi"),
         "total_put_oi": view.get("total_put_oi"),
         "resistance": view.get("resistance") or [],
         "support": view.get("support") or [],
         "pivot": view.get("pivot"),
+        "max_pain": view.get("max_pain"),
         "major_walls": view.get("major_walls") or {"call": None, "put": None},
         "strikes": [
             {
@@ -105,6 +107,55 @@ def latest_snapshot(options_dir: Path, *, expiry: str | None = None) -> dict[str
             if best is None or int(row["t"]) > int(best["t"]):
                 best = row
     return best
+
+
+def trend_points(options_dir: Path, day: date, *, expiry: str | None = None) -> dict[str, Any]:
+    """Intraday series from that day's JSONL for the Options trends panel."""
+    from app.options.chain_analytics import near_atm_slice, oi_pcr
+    from app.options.chain_view import atm_strike
+
+    snaps = load_day(options_dir, day)
+    if expiry is not None:
+        snaps = [s for s in snaps if s.get("expiry") == expiry]
+    points: list[dict[str, Any]] = []
+    for s in snaps:
+        spot = s.get("spot")
+        full = s.get("pcr")
+        near = None
+        pcrs = s.get("pcrs") or {}
+        if isinstance(pcrs, dict) and isinstance(pcrs.get("near_atm"), dict):
+            near = pcrs["near_atm"].get("value")
+        elif s.get("strikes") and spot is not None:
+            rows = [
+                {
+                    "strike": float(x["strike"]),
+                    "call": {"oi": float((x.get("call") or {}).get("oi") or 0)},
+                    "put": {"oi": float((x.get("put") or {}).get("oi") or 0)},
+                }
+                for x in s["strikes"]
+                if x.get("strike") is not None
+            ]
+            if rows:
+                atm = atm_strike(float(spot), [r["strike"] for r in rows])
+                near = oi_pcr(near_atm_slice(rows, atm)).get("value")
+        points.append(
+            {
+                "t": int(s["t"]),
+                "as_of_ist": s.get("as_of_ist"),
+                "spot": spot,
+                "pcr_full": full,
+                "pcr_near_atm": near,
+                "expiry": s.get("expiry"),
+            }
+        )
+    return {
+        "day": day.isoformat(),
+        "available": bool(points),
+        "message": None
+        if points
+        else "Collecting data — first point at 09:15",
+        "points": points,
+    }
 
 
 def view_from_snapshot(snap: dict[str, Any], *, window: int = 15, status: str = "MARKET_CLOSED") -> dict[str, Any]:
