@@ -32,7 +32,6 @@ import { jumpWindow } from "../backtest/present";
 import { historyForZoom, zoomLogical } from "../draw/model";
 import {
   indexOfTime,
-  initialRange,
   loadLegendCollapsed,
   needsNewer,
   needsOlder,
@@ -57,13 +56,20 @@ import { isPositionTool } from "../draw/position";
 import { useDrawStore } from "../draw/store";
 import { usePaperTradesStore } from "../store/paperTradesStore";
 import { useChartStore } from "../store/chartStore";
+import {
+  DEFAULT_BAR_SPACING,
+  DEFAULT_RIGHT_OFFSET,
+  autoReset,
+  defaultVisibleRange,
+  isAwayFromLive,
+} from "./controls";
+import { candleCountdown } from "./countdown";
 
 const UP = "#26a69a";
 const DOWN = "#ef5350";
 const BG = "#0b0e14";
 const GRID = "#1a1f2b";
 const BORDER = "#2a2e39";
-const INITIAL_VISIBLE_BARS = 150;
 
 const TICK_KIND: Record<TickMarkType, TickKind> = {
   [TickMarkType.Year]: "year",
@@ -137,10 +143,17 @@ export function ChartView({
   /** start time of the candle under the crosshair (null = latest candle) */
   const [hoverTime, setHoverTime] = useState<number | null>(null);
   const [collapsed, setCollapsed] = useState(() => loadLegendCollapsed(browserStorage()));
+  const [autoScaleOn, setAutoScaleOn] = useState(true);
+  const [awayFromLive, setAwayFromLive] = useState(false);
+  const [countdownText, setCountdownText] = useState("Closed");
+  const [countdownY, setCountdownY] = useState<number | null>(null);
+  const [priceScaleWidth, setPriceScaleWidth] = useState(56);
 
   const items = useIndicatorStore((s) => s.items);
   const cached = useIndicatorStore((s) => s.data[scope]);
   const sessions = useChartStore((s) => s.loaded?.sessions);
+  const hasMoreNewer = useChartStore((s) => s.hasMoreNewer);
+  const goLive = useChartStore((s) => s.goLive);
   const holidays = useDrawStore((s) => s.holidays);
   const weekendSessions = useDrawStore((s) => s.weekendSessions);
   const drawDrawings = useDrawStore((s) => s.drawings);
@@ -184,6 +197,43 @@ export function ChartView({
     });
   };
 
+  const syncChrome = (): void => {
+    const chart = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+    const range = chart.timeScale().getVisibleLogicalRange();
+    setAwayFromLive(isAwayFromLive(range, candlesRef.current.length, useChartStore.getState().hasMoreNewer));
+    setAutoScaleOn(series.priceScale().options().autoScale);
+    setPriceScaleWidth(Math.max(48, chart.priceScale("right").width()));
+    const last = candlesRef.current[candlesRef.current.length - 1];
+    if (last) {
+      const y = series.priceToCoordinate(last.close);
+      setCountdownY(y == null ? null : y);
+    } else {
+      setCountdownY(null);
+    }
+  };
+
+  const applyAutoResetRef = useRef<() => Promise<void>>(async () => {});
+  applyAutoResetRef.current = async () => {
+    const chart = chartRef.current;
+    const series = candleSeriesRef.current;
+    if (!chart || !series) return;
+    series.priceScale().applyOptions({ autoScale: true });
+    chart.timeScale().applyOptions({ barSpacing: DEFAULT_BAR_SPACING, rightOffset: DEFAULT_RIGHT_OFFSET });
+    setAutoScaleOn(true);
+    // Historical window: reload the live tip; the data effect applies defaultVisibleRange.
+    if (useChartStore.getState().hasMoreNewer) {
+      await goLive();
+      return;
+    }
+    const n = candlesRef.current.length;
+    if (n > 0) chart.timeScale().setVisibleLogicalRange(autoReset(n).range);
+    chart.timeScale().scrollToRealTime();
+    setAwayFromLive(false);
+    syncChrome();
+  };
+
   // ---- create the chart once
   useEffect(() => {
     const el = containerRef.current;
@@ -204,14 +254,21 @@ export function ChartView({
         borderColor: BORDER,
         timeVisible: true,
         secondsVisible: false,
-        rightOffset: 5,
+        rightOffset: DEFAULT_RIGHT_OFFSET,
+        barSpacing: DEFAULT_BAR_SPACING,
         tickMarkFormatter,
       },
       localization: {
         timeFormatter: (time: Time) => formatCrosshairTime(Number(time), timeframeRef.current),
       },
       handleScroll: { mouseWheel: true, pressedMouseMove: true, horzTouchDrag: true, vertTouchDrag: false },
-      handleScale: { mouseWheel: true, pinch: true, axisPressedMouseMove: true },
+      // Price-axis dblclick is handled below (full Auto reset, not scale-only).
+      handleScale: {
+        mouseWheel: true,
+        pinch: true,
+        axisPressedMouseMove: true,
+        axisDoubleClickReset: { time: true, price: false },
+      },
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
@@ -229,6 +286,12 @@ export function ChartView({
       if (param.time !== undefined) onPickTimeRef.current?.(Number(param.time));
     });
 
+    chart.subscribeDblClick((param) => {
+      if (!param.point) return;
+      const scaleW = chart.priceScale("right").width();
+      if (param.point.x >= el.clientWidth - scaleW) void applyAutoResetRef.current();
+    });
+
     chart.subscribeCrosshairMove((param) => {
       const t = param.time;
       const idx = t === undefined || !param.point ? undefined : indexOfTime(candlesRef.current, Number(t));
@@ -240,7 +303,15 @@ export function ChartView({
       if (!range) return;
       if (needsOlder(range)) onNeedOlderRef.current();
       if (needsNewer(range, candlesRef.current.length)) onNeedNewerRef.current();
+      setAwayFromLive(isAwayFromLive(range, candlesRef.current.length, useChartStore.getState().hasMoreNewer));
+      setAutoScaleOn(candleSeries.priceScale().options().autoScale);
     });
+
+    const onPointerUp = (): void => {
+      setAutoScaleOn(candleSeries.priceScale().options().autoScale);
+      setPriceScaleWidth(Math.max(48, chart.priceScale("right").width()));
+    };
+    el.addEventListener("pointerup", onPointerUp);
 
     if (import.meta.env.DEV) (window as unknown as { __chart?: unknown }).__chart = { chart, candleSeries };
 
@@ -267,6 +338,7 @@ export function ChartView({
     gexPrimitiveRef.current = gexBarsPrimitive;
     layerRef.current = new IndicatorLayer(chart);
     return () => {
+      el.removeEventListener("pointerup", onPointerUp);
       unbind();
       layerRef.current?.dispose();
       markersRef.current = null;
@@ -389,9 +461,16 @@ export function ChartView({
     if (savedRange && shift !== null) {
       chart.timeScale().setVisibleLogicalRange(shiftRange(savedRange, shift));
     } else if (candles.length > 0) {
-      chart.timeScale().setVisibleLogicalRange(initialRange(candles.length, INITIAL_VISIBLE_BARS));
+      // First load or symbol/timeframe change: default zoom, pinned to the latest candle.
+      chart.timeScale().applyOptions({ barSpacing: DEFAULT_BAR_SPACING, rightOffset: DEFAULT_RIGHT_OFFSET });
+      candleSeries.priceScale().applyOptions({ autoScale: true });
+      chart.timeScale().setVisibleLogicalRange(defaultVisibleRange(candles.length));
+      chart.timeScale().scrollToRealTime();
+      setAutoScaleOn(true);
+      setAwayFromLive(false);
       performance.mark("chart:data-set");
     }
+    syncChrome();
   }, [candles, timeframe, scope, volumeVisible]);
 
   const appliedFocus = useRef(0);
@@ -557,6 +636,8 @@ export function ChartView({
   const lastIndex = candles.length - 1;
   const shownIndex = (hoverTime === null ? undefined : indexOfTime(candles, hoverTime)) ?? lastIndex;
   const shown = candles[shownIndex];
+  const lastCandle = candles[lastIndex];
+  const priceLabelColor = lastCandle && lastCandle.close >= lastCandle.open ? UP : DOWN;
   const legend = useMemo(
     () => (shown ? legendValues(shown, shownIndex > 0 ? (candles[shownIndex - 1]?.close ?? null) : null, volumeVisible) : null),
     [shown, shownIndex, candles, volumeVisible],
@@ -573,6 +654,33 @@ export function ChartView({
       }),
     [items, cached, candles, timeframe, symbol, shown, cursor],
   );
+
+  // Candle close countdown under the last-price axis label (NSE session / holidays).
+  useEffect(() => {
+    const tick = (): void => {
+      const nowSec = Math.floor(Date.now() / 1000);
+      const next = candleCountdown(nowSec, timeframe, { holidays, weekendSessions });
+      setCountdownText(next.text);
+      syncChrome();
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [timeframe, holidays, weekendSessions, candles, hasMoreNewer]);
+
+  const onScrollToLive = async (): Promise<void> => {
+    if (hasMoreNewer) {
+      await goLive();
+      return;
+    }
+    const chart = chartRef.current;
+    if (!chart) return;
+    const n = candlesRef.current.length;
+    if (n > 0) chart.timeScale().setVisibleLogicalRange(defaultVisibleRange(n));
+    chart.timeScale().scrollToRealTime();
+    setAwayFromLive(false);
+    syncChrome();
+  };
 
   return (
     <div className="relative h-full w-full">
@@ -637,6 +745,48 @@ export function ChartView({
           </div>
         )}
       </div>
+      {countdownY != null && (
+        <div
+          className="pointer-events-none absolute z-10 select-none text-center font-mono text-[10px] leading-none"
+          style={{
+            top: countdownY + 14,
+            right: 0,
+            width: priceScaleWidth,
+            color: priceLabelColor,
+          }}
+          data-testid="candle-countdown"
+        >
+          {countdownText}
+        </div>
+      )}
+      <button
+        type="button"
+        title="Auto scale price and reset to latest"
+        aria-label="Auto scale"
+        aria-pressed={autoScaleOn}
+        data-testid="auto-scale-btn"
+        onClick={() => void applyAutoResetRef.current()}
+        className={`absolute z-10 flex h-5 w-5 items-center justify-center rounded-sm border text-[11px] font-semibold ${
+          autoScaleOn
+            ? "border-sky-400/70 bg-sky-400/20 text-sky-200"
+            : "border-white/20 bg-[#0b0e14]/90 text-white/55 hover:text-white/80"
+        }`}
+        style={{ right: Math.max(4, priceScaleWidth / 2 - 10), bottom: 28 }}
+      >
+        A
+      </button>
+      {awayFromLive && (
+        <button
+          type="button"
+          title="Scroll to latest candle"
+          aria-label="Scroll to latest"
+          data-testid="scroll-to-latest"
+          onClick={() => void onScrollToLive()}
+          className="absolute bottom-3 right-3 z-10 rounded border border-white/20 bg-[#0b0e14]/90 px-2 py-0.5 text-sm text-white/70 hover:text-white"
+        >
+          »
+        </button>
+      )}
       {tradeCard}
     </div>
   );

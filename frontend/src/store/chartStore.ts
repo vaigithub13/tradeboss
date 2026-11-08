@@ -159,6 +159,11 @@ interface ChartState {
   /** Replace the loaded window with every bar from `from` through `to` (a drawing zoom). */
   showRange: (from: number, to: number) => Promise<void>;
   /**
+   * Drop a historical window (showAround / showRange) and reload the newest bars.
+   * No-op when the chart already ends at the live tip.
+   */
+  goLive: () => Promise<void>;
+  /**
    * Fold live candles (the newest 1-2 of a timeframe) into the loaded window. Ignored unless that
    * symbol / timeframe is on screen AND the window ends at the newest bar (nothing newer was
    * dropped): a window scrolled back in time must not grow a bar at its edge. Returns whether
@@ -412,6 +417,13 @@ export const useChartStore = create<ChartState>((set, get) => ({
     const info = symbols.find((s) => s.symbol === symbol);
     if (!timeframeState(info, tf).enabled) return;
     set({ timeframe: tf });
+    await get().load();
+  },
+
+  goLive: async () => {
+    const { symbol, timeframe, sessions, hasMoreNewer } = get();
+    if (!symbol || !hasMoreNewer) return;
+    scopeCache.delete(scopeKey(symbol, timeframe, sessions));
     await get().load();
   },
 

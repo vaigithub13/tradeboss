@@ -37,8 +37,7 @@ import { MarketViewBox, MarketViewPanel } from "./panels/MarketViewPanel";
 import { viewLevels } from "./marketView/present";
 import { gexLevels, gexSummary } from "./chart/gex";
 import { OptionsTab } from "./options/OptionsTab";
-
-type MainView = "chart" | "options";
+import { chartHidden, type MainView } from "./chart/controls";
 
 const POLL_INTERVAL_MS = 3000;
 const NO_PAPER_SIGNALS: PaperSignal[] = [];
@@ -381,11 +380,16 @@ export default function App() {
         </div>
       </header>
 
-      {mainView === "options" ? (
-        <div className="min-h-0 flex-1">
-          <OptionsTab />
-        </div>
-      ) : (
+      {/*
+        Chart stays mounted when Options is active (CSS-hide only). Unmounting
+        destroyed the LWC visible range and remounted into a past window.
+      */}
+      <div className="relative min-h-0 flex-1">
+      <div
+        className={`absolute inset-0 flex ${chartHidden(mainView) ? "invisible pointer-events-none" : ""}`}
+        aria-hidden={chartHidden(mainView)}
+        data-testid="chart-pane"
+      >
       <div className="flex min-h-0 flex-1">
       {pineOpen && (
         <div className="h-full shrink-0">
@@ -485,7 +489,13 @@ export default function App() {
         open={analysisOpen}
       />
       </div>
+      </div>
+      {mainView === "options" && (
+        <div className="absolute inset-0" data-testid="options-pane">
+          <OptionsTab />
+        </div>
       )}
+      </div>
     </div>
   );
 }
