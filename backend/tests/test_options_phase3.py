@@ -360,6 +360,29 @@ def test_loss_check_by_premium_fraction() -> None:
     assert next(ch for ch in c2["checks"] if ch["id"] == "loss")["status"] == "fail"
 
 
+def test_win_breakeven_ev_friday_fixture() -> None:
+    """Friday 6 Nov close Bullish Auto R2: win / BE / EV math on the live fixture numbers."""
+    # Spot 25030.35, target R2 25300, vol-stop 24939.35 → stop_dist 91, target_dist 269.65
+    stop_dist = 91.0
+    target_dist = 25300.0 - 25030.35
+    win = p3.driftless_win_chance(stop_dist, target_dist)
+    assert win == pytest.approx(stop_dist / (stop_dist + target_dist))
+    assert win == pytest.approx(0.2523, abs=1e-3)
+
+    # ITM from Friday report: gain 192.34, loss 75.60, R:R 2.54, lot 65
+    gain, loss, rr, lot = 192.34, 75.60, 2.54, 65
+    be = p3.breakeven_win_pct(rr)
+    assert be == pytest.approx(1.0 / (1.0 + rr))
+    ev = p3.ev_per_lot(win=win, gain=gain, loss=loss, lot_size=lot, charges=60.0)
+    # (0.2523*192.34 - 0.7477*75.60)*65 - 60 ≈ −2774 (negative under driftless)
+    assert ev < 0
+    assert ev == pytest.approx((win * gain - (1 - win) * loss) * lot - 60.0)
+
+    # Raising signal confidence above breakeven flips EV positive
+    ev_hi = p3.ev_per_lot(win=0.45, gain=gain, loss=loss, lot_size=lot, charges=60.0)
+    assert ev_hi > 0
+
+
 def test_no_setup_does_not_highlight() -> None:
     """When every candidate fails a gate, no ★ — closest is labelled instead."""
     cands = [
@@ -402,13 +425,134 @@ def test_no_setup_does_not_highlight() -> None:
             t_hold=1.0,
         ),
     ]
-    hi = p3.apply_picker_highlight(cands)
+    with_ev, _ = p3.attach_ev_metrics(
+        cands, stop_dist=100.0, target_dist=200.0, lot_size=65, charges=60.0
+    )
+    hi = p3.apply_picker_highlight(with_ev)
     assert hi["has_setup"] is False
     assert hi["highlight"] is None
-    assert hi["setup_message"] == p3.NO_SETUP_MSG
+    # Negative EV under driftless → no-edge (even though checks also fail)
+    assert hi["setup_message"] == p3.NO_EDGE_MSG
     assert hi["closest"] in ("ITM", "ATM")
     assert any(c["closest_failed"] for c in hi["candidates"])
     assert not any(c["highlighted"] for c in hi["candidates"])
+
+
+def test_no_setup_when_ev_positive_but_checks_fail() -> None:
+    """Positive EV alone is not enough — ❌ checks still block ★."""
+    c = p3.score_candidate(
+        {
+            "bucket": "ATM",
+            "strike": 25000.0,
+            "side": "call",
+            "ltp": 100.0,
+            "delta": 0.5,
+            "gamma": 0.0,
+            "theta": -25.0,  # θ drag fails
+            "theta_pct_premium": 25.0,
+            "iv": 15.0,
+            "spread_pct": 0.5,
+            "lot_size": 65,
+            "cost_per_lot": 6500.0,
+            "est_at_target": 250.0,  # gain 150
+            "est_at_stop": 70.0,  # loss 30 → R:R 5
+        },
+        t_hold=1.0,
+    )
+    assert c["passed"] is False
+    with_ev, _ = p3.attach_ev_metrics(
+        [c], stop_dist=200.0, target_dist=100.0, lot_size=65, charges=60.0  # win=2/3
+    )
+    assert with_ev[0]["ev_per_lot"] is not None and with_ev[0]["ev_per_lot"] > 0
+    hi = p3.apply_picker_highlight(with_ev)
+    assert hi["has_setup"] is False
+    assert hi["setup_message"] == p3.NO_SETUP_MSG
+
+
+def test_highlight_by_ev_not_rr() -> None:
+    """★ goes to highest EV > 0 with no ❌, even if another has higher R:R."""
+    # Same distances → same win; bigger (gain,loss) with lower R:R can still win on EV
+    stop_dist, target_dist = 100.0, 100.0  # win = 50%
+    a = p3.score_candidate(
+        {
+            "bucket": "ITM",
+            "strike": 24900.0,
+            "side": "call",
+            "ltp": 100.0,
+            "delta": 0.65,
+            "gamma": 0.0,
+            "theta": -1.0,
+            "theta_pct_premium": 1.0,
+            "iv": 15.0,
+            "spread_pct": 0.5,
+            "lot_size": 65,
+            "cost_per_lot": 6500.0,
+            "est_at_target": 220.0,  # gain 120, loss 30 → R:R 4, but smaller $ EV
+            "est_at_stop": 70.0,
+        },
+        t_hold=1.0,
+    )
+    b = p3.score_candidate(
+        {
+            "bucket": "OTM",
+            "strike": 25100.0,
+            "side": "call",
+            "ltp": 50.0,
+            "delta": 0.30,
+            "gamma": 0.0,
+            "theta": -1.0,
+            "theta_pct_premium": 2.0,
+            "iv": 15.0,
+            "spread_pct": 0.5,
+            "lot_size": 65,
+            "cost_per_lot": 3250.0,
+            "est_at_target": 170.0,  # gain 120, loss 20 → R:R 6
+            "est_at_stop": 30.0,
+        },
+        t_hold=1.0,
+    )
+    # Force both to pass θ drag: t_hold small already; loss ≤40%
+    with_ev, _ = p3.attach_ev_metrics(
+        [a, b], stop_dist=stop_dist, target_dist=target_dist, lot_size=65, charges=60.0
+    )
+    assert all(c["passed"] for c in with_ev)
+    assert all(c["ev_per_lot"] is not None and c["ev_per_lot"] > 0 for c in with_ev)
+    hi = p3.apply_picker_highlight(with_ev)
+    assert hi["has_setup"] is True
+    # OTM has higher EV at 50% win: (0.5*120 - 0.5*20)*65 - 60 = 3190
+    # ITM: (0.5*120 - 0.5*30)*65 - 60 = 2865
+    assert hi["highlight"] == "OTM"
+
+
+def test_no_edge_when_all_ev_nonpositive() -> None:
+    c = p3.score_candidate(
+        {
+            "bucket": "ATM",
+            "strike": 25000.0,
+            "side": "call",
+            "ltp": 100.0,
+            "delta": 0.5,
+            "gamma": 0.0,
+            "theta": -1.0,
+            "theta_pct_premium": 1.0,
+            "iv": 15.0,
+            "spread_pct": 0.5,
+            "lot_size": 65,
+            "cost_per_lot": 6500.0,
+            "est_at_target": 300.0,  # gain 200
+            "est_at_stop": 70.0,  # loss 30 → R:R≈6.67, passes checks
+        },
+        t_hold=1.0,
+    )
+    # Far target → tiny win chance → negative EV
+    with_ev, _ = p3.attach_ev_metrics(
+        [c], stop_dist=50.0, target_dist=500.0, lot_size=65, charges=60.0
+    )
+    assert with_ev[0]["passed"]
+    assert with_ev[0]["ev_per_lot"] is not None and with_ev[0]["ev_per_lot"] <= 0
+    hi = p3.apply_picker_highlight(with_ev)
+    assert hi["has_setup"] is False
+    assert hi["setup_message"] == p3.NO_EDGE_MSG
 
 
 def test_enrich_phase3_attaches_blocks(tmp_path: Path) -> None:

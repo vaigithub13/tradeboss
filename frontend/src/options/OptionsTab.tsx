@@ -17,6 +17,8 @@ import {
 import { useOptionsStore } from "../store/optionsStore";
 import {
   checkGlyph,
+  DEFAULT_ROUND_TRIP_CHARGES,
+  formatInr,
   formatProb,
   nextExpiryAfter,
   NO_SETUP_MSG,
@@ -403,6 +405,9 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
   const [nextData, setNextData] = useState<OptionsChainResponse | null>(null);
   const [nextError, setNextError] = useState<string | null>(null);
   const [nextLoading, setNextLoading] = useState(false);
+  /** null = use driftless win chance */
+  const [signalConfidencePct, setSignalConfidencePct] = useState<number | null>(null);
+  const [charges, setCharges] = useState(DEFAULT_ROUND_TRIP_CHARGES);
 
   const expiries = data.expiries ?? [data.expiry];
   const nextExp = nextExpiryAfter(data.expiry, expiries);
@@ -434,6 +439,11 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
     setTargetMode("Auto");
   }, [direction]);
 
+  useEffect(() => {
+    // New setup → reset confidence to driftless default
+    setSignalConfidencePct(null);
+  }, [direction, targetMode, expiryMode, hold]);
+
   const activeData = expiryMode === "next" && nextData?.available ? nextData : data;
   const picker = activeData.strike_picker;
   const spot = activeData.spot ?? 0;
@@ -449,12 +459,24 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
       (direction === "Bullish" ? picker.Bullish : picker.Bearish);
     if (!base) return null;
     const tHold = picker.t_holds?.[hold] ?? base.t_hold;
-    return repricePickerSide(base, spot, tHold, hold);
-  }, [picker, direction, hold, spot, targetMode]);
+    const signalWin =
+      signalConfidencePct != null && Number.isFinite(signalConfidencePct)
+        ? signalConfidencePct / 100
+        : null;
+    return repricePickerSide(base, spot, tHold, hold, {
+      signalWin,
+      charges,
+    });
+  }, [picker, direction, hold, spot, targetMode, signalConfidencePct, charges]);
 
   if (!data.strike_picker) {
     return <Placeholder title="Strike Picker" />;
   }
+
+  const driftlessPct =
+    side?.win_chance_driftless != null ? side.win_chance_driftless * 100 : null;
+  const confidenceDisplay =
+    signalConfidencePct != null ? signalConfidencePct : driftlessPct;
 
   return (
     <div className="rounded border border-white/10 px-2 py-2 text-[11px]" data-testid="options-strike-picker">
@@ -538,6 +560,58 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
               Stop: {side.stop_why}
             </p>
           ) : null}
+
+          <div
+            className="mb-2 flex flex-wrap items-end gap-x-3 gap-y-1 text-[9px] text-white/50"
+            data-testid="strike-ev-controls"
+          >
+            <label className="flex flex-col gap-0.5">
+              <span className="uppercase tracking-wide text-white/35">Win chance (driftless)</span>
+              <span className="font-mono text-white/70" data-testid="strike-win-chance">
+                {formatProb(side.win_chance_driftless)}
+              </span>
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="uppercase tracking-wide text-white/35">My signal confidence %</span>
+              <input
+                type="number"
+                min={1}
+                max={99}
+                step={1}
+                className="w-16 rounded border border-white/15 bg-black/40 px-1 py-0.5 font-mono text-white/80"
+                value={confidenceDisplay != null ? Math.round(confidenceDisplay) : ""}
+                placeholder={driftlessPct != null ? String(Math.round(driftlessPct)) : "—"}
+                onChange={(e) => {
+                  const v = e.target.value;
+                  if (v === "") {
+                    setSignalConfidencePct(null);
+                    return;
+                  }
+                  const n = Number(v);
+                  if (!Number.isFinite(n)) return;
+                  setSignalConfidencePct(Math.min(99, Math.max(1, n)));
+                }}
+                data-testid="strike-signal-confidence"
+              />
+            </label>
+            <label className="flex flex-col gap-0.5">
+              <span className="uppercase tracking-wide text-white/35">Charges ₹/lot RT</span>
+              <input
+                type="number"
+                min={0}
+                step={5}
+                className="w-16 rounded border border-white/15 bg-black/40 px-1 py-0.5 font-mono text-white/80"
+                value={charges}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (!Number.isFinite(n) || n < 0) return;
+                  setCharges(n);
+                }}
+                data-testid="strike-charges"
+              />
+            </label>
+          </div>
+
           {side.auto_message ? (
             <p className="mb-2 text-[10px] text-amber-200/85" data-testid="strike-auto-message">
               {side.auto_message}
@@ -594,6 +668,12 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
                       Loss {c.est_loss != null ? `−${Math.abs(c.est_loss).toFixed(2)}` : "—"}
                     </span>
                     <span>R:R {c.reward_risk != null ? c.reward_risk.toFixed(2) : "—"}</span>
+                    <span>
+                      Win {formatProb(c.win_chance)} / BE {formatProb(c.breakeven_win)}
+                    </span>
+                    <span className={c.ev_per_lot != null && c.ev_per_lot > 0 ? "text-emerald-300/80" : ""}>
+                      EV/lot {formatInr(c.ev_per_lot)}
+                    </span>
                     <span>t_hold {side.t_hold.toFixed(2)}d</span>
                   </div>
                   {c.checks?.length ? (

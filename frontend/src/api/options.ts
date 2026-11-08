@@ -188,6 +188,11 @@ export interface StrikeCandidate {
   est_gain?: number | null;
   est_loss?: number | null;
   reward_risk?: number | null;
+  win_chance?: number | null;
+  win_chance_driftless?: number | null;
+  breakeven_win?: number | null;
+  ev_per_lot?: number | null;
+  round_trip_charges?: number | null;
   checks?: StrikeCheck[];
   passed?: boolean;
   failed_checks?: string[];
@@ -199,6 +204,7 @@ export interface StrikePickerSide {
   direction: StrikeDirection;
   side: "call" | "put";
   target: number | null;
+  target_distance?: number | null;
   target_mode?: TargetMode | string | null;
   target_tag?: string | null;
   auto_resolved_tag?: string | null;
@@ -212,6 +218,9 @@ export interface StrikePickerSide {
   stop_buffer?: number | null;
   min_stop_distance?: number | null;
   volatility_stop?: boolean;
+  win_chance?: number | null;
+  win_chance_driftless?: number | null;
+  round_trip_charges?: number | null;
   lot_size: number | null;
   t_hold: number;
   hold_mode: HoldMode;
@@ -229,6 +238,7 @@ export interface StrikePicker {
   hold_mode: HoldMode;
   hold_modes?: HoldMode[];
   target_mode?: TargetMode | string;
+  round_trip_charges?: number;
   t_holds?: Partial<Record<HoldMode, number>>;
   Bullish: StrikePickerSide;
   Bearish: StrikePickerSide;

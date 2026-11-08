@@ -16,7 +16,6 @@ from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Literal
 
-from app.options.bs import ncdf
 from collections.abc import Callable
 
 from app.options.bs import ncdf
@@ -64,7 +63,9 @@ THETA_DRAG_WARN = 0.15
 LOSS_PASS_PCT = 0.40  # |est_loss| / premium
 LOSS_WARN_PCT = 0.70
 NO_SETUP_MSG = "No good buy setup now"
+NO_EDGE_MSG = "No edge without a directional signal — R:R alone isn't enough"
 AUTO_RR = 2.0
+DEFAULT_ROUND_TRIP_CHARGES = 60.0  # ₹ per lot round-trip (brokerage + taxes approx)
 
 
 def years_to_expiry_trading(
@@ -577,6 +578,7 @@ def score_candidate(c: dict[str, Any], *, t_hold: float) -> dict[str, Any]:
         "est_gain": est_gain,
         "est_loss": est_loss,
         "reward_risk": rr,
+        "breakeven_win": breakeven_win_pct(rr),
         "checks": checks,
         "passed": len(failed) == 0,
         "failed_checks": failed,
@@ -584,29 +586,123 @@ def score_candidate(c: dict[str, Any], *, t_hold: float) -> dict[str, Any]:
     return out
 
 
+def driftless_win_chance(stop_dist: float | None, target_dist: float | None) -> float | None:
+    """P(hit target before stop) ≈ stop_dist / (stop_dist + target_dist), driftless."""
+    if stop_dist is None or target_dist is None:
+        return None
+    sd, td = float(stop_dist), float(target_dist)
+    if sd <= 0 or td <= 0:
+        return None
+    return sd / (sd + td)
+
+
+def breakeven_win_pct(rr: float | None) -> float | None:
+    """Win rate needed for zero EV before charges: 1 / (1 + R:R)."""
+    if rr is None or math.isnan(rr) or rr < 0:
+        return None
+    return 1.0 / (1.0 + float(rr))
+
+
+def ev_per_lot(
+    *,
+    win: float,
+    gain: float,
+    loss: float,
+    lot_size: int,
+    charges: float = DEFAULT_ROUND_TRIP_CHARGES,
+) -> float:
+    """(win×gain − (1−win)×loss) × lot_size − charges, in ₹."""
+    return (float(win) * float(gain) - (1.0 - float(win)) * float(loss)) * int(lot_size) - float(charges)
+
+
+def attach_ev_metrics(
+    candidates: list[dict[str, Any]],
+    *,
+    stop_dist: float | None,
+    target_dist: float | None,
+    lot_size: int | None,
+    charges: float = DEFAULT_ROUND_TRIP_CHARGES,
+    win: float | None = None,
+) -> tuple[list[dict[str, Any]], float | None]:
+    """Attach win_chance / breakeven / EV; `win` overrides driftless when set."""
+    driftless = driftless_win_chance(stop_dist, target_dist)
+    use_win = float(win) if win is not None else driftless
+    out: list[dict[str, Any]] = []
+    for c in candidates:
+        gain = c.get("est_gain")
+        loss = c.get("est_loss")
+        rr = c.get("reward_risk")
+        be = c.get("breakeven_win")
+        if be is None:
+            be = breakeven_win_pct(float(rr) if rr is not None else None)
+        ev = None
+        if (
+            use_win is not None
+            and gain is not None
+            and loss is not None
+            and float(loss) > 0
+            and lot_size
+        ):
+            ev = ev_per_lot(
+                win=use_win,
+                gain=float(gain),
+                loss=float(loss),
+                lot_size=int(lot_size),
+                charges=charges,
+            )
+        out.append(
+            {
+                **c,
+                "win_chance": use_win,
+                "win_chance_driftless": driftless,
+                "breakeven_win": be,
+                "ev_per_lot": ev,
+                "round_trip_charges": float(charges),
+            }
+        )
+    return out, driftless
+
+
 def apply_picker_highlight(candidates: list[dict[str, Any]]) -> dict[str, Any]:
-    """Highlight best passing R:R; otherwise no highlight + closest with fail list."""
-    scored = list(candidates)
-    passing = [c for c in scored if c.get("passed")]
+    """★ best EV > 0 with no ❌ checks; else no-edge / no-setup message."""
+    scored = sorted(
+        list(candidates),
+        key=lambda c: (
+            float(c["ev_per_lot"]) if c.get("ev_per_lot") is not None else float("-inf"),
+            float(c["reward_risk"]) if c.get("reward_risk") is not None else float("-inf"),
+        ),
+        reverse=True,
+    )
     highlight: str | None = None
     closest: str | None = None
     closest_fails: list[str] = []
     message: str | None = None
 
-    def rr_key(c: dict[str, Any]) -> float:
-        rr = c.get("reward_risk")
-        return float(rr) if rr is not None else float("-inf")
+    def ev_key(c: dict[str, Any]) -> float:
+        ev = c.get("ev_per_lot")
+        return float(ev) if ev is not None else float("-inf")
 
-    if passing:
-        best = max(passing, key=rr_key)
+    eligible = [
+        c
+        for c in scored
+        if c.get("passed") and c.get("ev_per_lot") is not None and float(c["ev_per_lot"]) > 0
+    ]
+    if eligible:
+        best = max(eligible, key=ev_key)
         highlight = str(best["bucket"])
         for c in scored:
             c["highlighted"] = c["bucket"] == highlight
             c["closest_failed"] = False
     else:
-        message = NO_SETUP_MSG
+        evs = [c.get("ev_per_lot") for c in scored if c.get("ev_per_lot") is not None]
+        if evs and all(float(ev) <= 0 for ev in evs):
+            message = NO_EDGE_MSG
+        elif any(c.get("passed") for c in scored):
+            message = NO_EDGE_MSG
+        else:
+            message = NO_SETUP_MSG
         if scored:
-            closest_c = max(scored, key=rr_key)
+            closest_c = max(scored, key=ev_key)
             closest = str(closest_c["bucket"])
             closest_fails = list(closest_c.get("failed_checks") or [])
             for c in scored:
@@ -637,12 +733,15 @@ def build_strike_picker(
     lot_size: int | None,
     t_hold: float,
     hold_mode: HoldMode,
+    round_trip_charges: float = DEFAULT_ROUND_TRIP_CHARGES,
+    signal_win: float | None = None,
 ) -> dict[str, Any]:
     side: Literal["call", "put"] = "call" if direction == "Bullish" else "put"
     stop = stop_info.get("stop")
     stop_distance = stop_info.get("distance")
     if stop_distance is None and stop is not None:
         stop_distance = abs(float(spot) - float(stop))
+    target_distance = abs(float(target) - float(spot)) if target is not None else None
     pool: list[dict[str, Any]] = []
     for r in rows:
         leg = r.get(side) or {}
@@ -663,8 +762,8 @@ def build_strike_picker(
         )
 
     raw_candidates = []
-    for label, (lo, hi) in DELTA_BANDS.items():
-        pick = _pick_by_delta(pool, lo, hi)
+    for label, (lo, hi_band) in DELTA_BANDS.items():
+        pick = _pick_by_delta(pool, lo, hi_band)
         if pick is None:
             continue
         ltp = pick["ltp"]
@@ -703,11 +802,20 @@ def build_strike_picker(
         )
         raw_candidates.append(scored)
 
-    hi = apply_picker_highlight(raw_candidates)
+    with_ev, driftless = attach_ev_metrics(
+        raw_candidates,
+        stop_dist=float(stop_distance) if stop_distance is not None else None,
+        target_dist=target_distance,
+        lot_size=int(lot_size) if lot_size else None,
+        charges=round_trip_charges,
+        win=signal_win,
+    )
+    hi = apply_picker_highlight(with_ev)
     return {
         "direction": direction,
         "side": side,
         "target": target,
+        "target_distance": target_distance,
         "stop": stop,
         "stop_distance": stop_distance,
         "stop_level": stop_info.get("level"),
@@ -716,6 +824,9 @@ def build_strike_picker(
         "stop_buffer": stop_info.get("buffer"),
         "min_stop_distance": stop_info.get("min_distance"),
         "volatility_stop": bool(stop_info.get("volatility_stop")),
+        "win_chance": signal_win if signal_win is not None else driftless,
+        "win_chance_driftless": driftless,
+        "round_trip_charges": float(round_trip_charges),
         "lot_size": lot_size,
         "t_hold": t_hold,
         "hold_mode": hold_mode,
@@ -1106,6 +1217,7 @@ def enrich_phase3(
         "hold_mode": hold_mode,
         "hold_modes": list(HOLD_LABELS.keys()),
         "target_mode": "Auto",
+        "round_trip_charges": DEFAULT_ROUND_TRIP_CHARGES,
         "Bullish": bull_auto,
         "Bearish": bear_auto,
         "Bullish_targets": bull_targets,

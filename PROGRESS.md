@@ -1501,6 +1501,15 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   close off-hours), no history file required.
 - Tests: `test_no_setup_does_not_highlight`, frontend estimate scoring.
 
+## 8 Nov 2026: Strike Picker win chance + EV ranking
+
+- Driftless win = `stop_dist / (stop_dist + target_dist)`; breakeven win = `1/(1+R:R)`.
+- EV/lot ₹ = `(win×gain − (1−win)×loss) × lot − charges` (default ₹60 RT/lot, editable).
+- ★ by highest EV > 0 with no ❌ checks (not by R:R). All EV ≤ 0 →
+  "No edge without a directional signal — R:R alone isn't enough".
+- UI: "My signal confidence %" (default = driftless) recomputes EV.
+- Tests: Friday fixture win/BE/EV in `test_options_phase3.py` + `estimate.test.ts`.
+
 ## 8 Nov 2026: Options Phase 3 Friday-output fixes (stop / Auto / EM / loss)
 
 - Stop: `min(level−buffer, spot−min_distance)` (bearish mirrored); walk next level only if

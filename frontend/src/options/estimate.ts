@@ -16,6 +16,9 @@ const THETA_DRAG_WARN = 0.15;
 const LOSS_PASS_PCT = 0.4;
 const LOSS_WARN_PCT = 0.7;
 export const NO_SETUP_MSG = "No good buy setup now";
+export const NO_EDGE_MSG =
+  "No edge without a directional signal — R:R alone isn't enough";
+export const DEFAULT_ROUND_TRIP_CHARGES = 60;
 
 /** ΔP ≈ δ·ΔS + ½γ·(ΔS)² + θ·t_hold; floored at 0. θ is premium/day (Upstox). */
 export function taylorPrice(
@@ -44,6 +47,33 @@ function checkStatus(
   if (value <= passAt) return "pass";
   if (value <= warnAt) return "warn";
   return "fail";
+}
+
+/** P(hit target before stop) ≈ stop_dist / (stop_dist + target_dist). */
+export function driftlessWinChance(
+  stopDist: number | null | undefined,
+  targetDist: number | null | undefined,
+): number | null {
+  if (stopDist == null || targetDist == null) return null;
+  if (stopDist <= 0 || targetDist <= 0) return null;
+  return stopDist / (stopDist + targetDist);
+}
+
+/** Win rate for zero EV before charges: 1 / (1 + R:R). */
+export function breakevenWinPct(rr: number | null | undefined): number | null {
+  if (rr == null || Number.isNaN(rr) || rr < 0) return null;
+  return 1 / (1 + rr);
+}
+
+/** (win×gain − (1−win)×loss) × lot − charges, in ₹. */
+export function evPerLot(
+  win: number,
+  gain: number,
+  loss: number,
+  lotSize: number,
+  charges = DEFAULT_ROUND_TRIP_CHARGES,
+): number {
+  return (win * gain - (1 - win) * loss) * lotSize - charges;
 }
 
 export function scoreCandidate(c: StrikeCandidate, tHold: number): StrikeCandidate {
@@ -92,10 +122,49 @@ export function scoreCandidate(c: StrikeCandidate, tHold: number): StrikeCandida
     est_gain: estGain,
     est_loss: estLoss,
     reward_risk: rr,
+    breakeven_win: breakevenWinPct(rr),
     checks,
     passed: failed.length === 0,
     failed_checks: failed,
   };
+}
+
+export function attachEvMetrics(
+  candidates: StrikeCandidate[],
+  opts: {
+    stopDist: number | null | undefined;
+    targetDist: number | null | undefined;
+    lotSize: number | null | undefined;
+    charges?: number;
+    win?: number | null;
+  },
+): { candidates: StrikeCandidate[]; driftless: number | null } {
+  const driftless = driftlessWinChance(opts.stopDist, opts.targetDist);
+  const useWin = opts.win != null ? opts.win : driftless;
+  const charges = opts.charges ?? DEFAULT_ROUND_TRIP_CHARGES;
+  const lot = opts.lotSize != null ? opts.lotSize : null;
+  const out = candidates.map((c) => {
+    let ev: number | null = null;
+    if (
+      useWin != null &&
+      c.est_gain != null &&
+      c.est_loss != null &&
+      c.est_loss > 0 &&
+      lot != null &&
+      lot > 0
+    ) {
+      ev = evPerLot(useWin, c.est_gain, c.est_loss, lot, charges);
+    }
+    return {
+      ...c,
+      win_chance: useWin,
+      win_chance_driftless: driftless,
+      breakeven_win: c.breakeven_win ?? breakevenWinPct(c.reward_risk),
+      ev_per_lot: ev,
+      round_trip_charges: charges,
+    };
+  });
+  return { candidates: out, driftless };
 }
 
 export function applyPickerHighlight(candidates: StrikeCandidate[]): {
@@ -106,12 +175,19 @@ export function applyPickerHighlight(candidates: StrikeCandidate[]): {
   setup_message: string | null;
   has_setup: boolean;
 } {
-  const scored = candidates.map((c) => (c.checks ? c : scoreCandidate(c, 0)));
-  const passing = scored.filter((c) => c.passed);
-  const rrKey = (c: StrikeCandidate) => c.reward_risk ?? Number.NEGATIVE_INFINITY;
+  const scored = [...candidates].sort((a, b) => {
+    const evA = a.ev_per_lot ?? Number.NEGATIVE_INFINITY;
+    const evB = b.ev_per_lot ?? Number.NEGATIVE_INFINITY;
+    if (evB !== evA) return evB - evA;
+    return (b.reward_risk ?? Number.NEGATIVE_INFINITY) - (a.reward_risk ?? Number.NEGATIVE_INFINITY);
+  });
+  const evKey = (c: StrikeCandidate) => c.ev_per_lot ?? Number.NEGATIVE_INFINITY;
+  const eligible = scored.filter(
+    (c) => c.passed && c.ev_per_lot != null && c.ev_per_lot > 0,
+  );
 
-  if (passing.length) {
-    const best = [...passing].sort((a, b) => rrKey(b) - rrKey(a))[0]!;
+  if (eligible.length) {
+    const best = [...eligible].sort((a, b) => evKey(b) - evKey(a))[0]!;
     const highlight = best.bucket;
     return {
       candidates: scored.map((c) => ({
@@ -127,17 +203,29 @@ export function applyPickerHighlight(candidates: StrikeCandidate[]): {
     };
   }
 
+  const evs = scored
+    .map((c) => c.ev_per_lot)
+    .filter((ev): ev is number => ev != null && !Number.isNaN(ev));
+  const message =
+    scored.length === 0
+      ? NO_SETUP_MSG
+      : evs.length && evs.every((ev) => ev <= 0)
+        ? NO_EDGE_MSG
+        : scored.some((c) => c.passed)
+          ? NO_EDGE_MSG
+          : NO_SETUP_MSG;
+
   if (!scored.length) {
     return {
       candidates: scored,
       highlight: null,
       closest: null,
       closest_fails: [],
-      setup_message: NO_SETUP_MSG,
+      setup_message: message,
       has_setup: false,
     };
   }
-  const closestC = [...scored].sort((a, b) => rrKey(b) - rrKey(a))[0]!;
+  const closestC = [...scored].sort((a, b) => evKey(b) - evKey(a))[0]!;
   return {
     candidates: scored.map((c) => ({
       ...c,
@@ -147,7 +235,7 @@ export function applyPickerHighlight(candidates: StrikeCandidate[]): {
     highlight: null,
     closest: closestC.bucket,
     closest_fails: closestC.failed_checks ?? [],
-    setup_message: NO_SETUP_MSG,
+    setup_message: message,
     has_setup: false,
   };
 }
@@ -174,17 +262,38 @@ export function repricePickerSide(
   spot: number,
   tHold: number,
   holdMode: HoldMode,
+  opts?: {
+    signalWin?: number | null;
+    charges?: number;
+  },
 ): StrikePickerSide {
   const scored = side.candidates.map((c) =>
     repriceCandidate(c, spot, side.target, side.stop, tHold),
   );
-  const hi = applyPickerHighlight(scored);
+  const stopDist =
+    side.stop_distance ?? (side.stop != null ? Math.abs(spot - side.stop) : null);
+  const targetDist =
+    side.target_distance ?? (side.target != null ? Math.abs(side.target - spot) : null);
+  const charges = opts?.charges ?? side.round_trip_charges ?? DEFAULT_ROUND_TRIP_CHARGES;
+  const { candidates: withEv, driftless } = attachEvMetrics(scored, {
+    stopDist,
+    targetDist,
+    lotSize: side.lot_size,
+    charges,
+    win: opts?.signalWin ?? null,
+  });
+  const hi = applyPickerHighlight(withEv);
   // Auto "needs move" keeps no-setup even if fallback target scores pass after reprice
   const blocked = Boolean(side.auto_message);
   return {
     ...side,
     t_hold: tHold,
     hold_mode: holdMode,
+    target_distance: targetDist,
+    stop_distance: stopDist,
+    win_chance: opts?.signalWin ?? driftless,
+    win_chance_driftless: driftless,
+    round_trip_charges: charges,
     candidates: blocked
       ? hi.candidates.map((c) => ({ ...c, highlighted: false, closest_failed: c.closest_failed }))
       : hi.candidates,
@@ -199,6 +308,12 @@ export function repricePickerSide(
 export function formatProb(p: number | null | undefined): string {
   if (p == null || Number.isNaN(p)) return "—";
   return `${(p * 100).toFixed(0)}%`;
+}
+
+export function formatInr(n: number | null | undefined): string {
+  if (n == null || Number.isNaN(n)) return "—";
+  const sign = n > 0 ? "+" : n < 0 ? "−" : "";
+  return `₹${sign}${Math.abs(n).toFixed(0)}`;
 }
 
 export function checkGlyph(status: StrikeCheck["status"]): string {
