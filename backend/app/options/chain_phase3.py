@@ -64,6 +64,7 @@ LOSS_PASS_PCT = 0.40  # |est_loss| / premium
 LOSS_WARN_PCT = 0.70
 NO_SETUP_MSG = "No good buy setup now"
 NO_EDGE_MSG = "No edge without a directional signal — R:R alone isn't enough"
+AUTO_NO_RANGE_MSG = "No 1:2 setup within today's expected range"
 AUTO_RR = 2.0
 DEFAULT_ROUND_TRIP_CHARGES = 60.0  # ₹ per lot round-trip (brokerage + taxes approx)
 
@@ -982,11 +983,18 @@ def select_auto_target(
     lot_size: int | None,
     t_hold: float,
     hold_mode: HoldMode,
+    one_sigma_move: float | None = None,
 ) -> dict[str, Any]:
-    """Nearest R/S where the best candidate hits R:R ≥ 2; else a needs-move message."""
+    """Nearest R/S inside 1×1σ IV where best candidate hits R:R ≥ 2."""
     ladder = target_ladder(direction, resistance, support)
+    em_cap = float(one_sigma_move) if one_sigma_move is not None and one_sigma_move > 0 else None
+    in_range = [
+        (tag, strike)
+        for tag, strike in ladder
+        if em_cap is None or abs(float(strike) - float(spot)) <= em_cap + 1e-9
+    ]
     chosen: dict[str, Any] | None = None
-    for tag, strike in ladder:
+    for tag, strike in in_range:
         built = build_strike_picker(
             rows,
             spot=spot,
@@ -1009,40 +1017,24 @@ def select_auto_target(
         chosen["auto_message"] = None
         return chosen
 
-    # No level works — build against nearest target for display + needs-move hint
-    fallback_tag, fallback_strike = ladder[0] if ladder else ("R1", spot)
+    # No in-range level hits R:R ≥ 2 — show nearest in-range (else nearest overall) for display
+    fallback_pool = in_range if in_range else ladder
+    fallback_tag, fallback_strike = fallback_pool[0] if fallback_pool else ("R1", spot)
     built = build_strike_picker(
         rows,
         spot=spot,
         direction=direction,
-        target=fallback_strike if ladder else None,
+        target=fallback_strike if fallback_pool else None,
         stop_info=stop_info,
         lot_size=lot_size,
         t_hold=t_hold,
         hold_mode=hold_mode,
     )
-    # pick candidate with best R:R for the solve
-    cands = [c for c in built["candidates"] if c.get("reward_risk") is not None]
-    cands.sort(key=lambda c: float(c["reward_risk"]), reverse=True)
-    need_lvl = None
-    if cands:
-        need_lvl = needed_move_for_rr2(
-            spot=spot,
-            direction=direction,
-            candidate=cands[0],
-            stop=stop_info.get("stop"),
-            t_hold=t_hold,
-        )
-    if need_lvl is not None:
-        msg = f"1:2 not possible with current levels — needs move to {need_lvl:.0f}"
-    else:
-        msg = "1:2 not possible with current levels"
     built["target_mode"] = "Auto"
     built["target_tag"] = None
     built["auto_resolved_tag"] = None
-    built["auto_message"] = msg
-    built["needs_move_to"] = need_lvl
-    # Auto with no R:R≥2 is not a setup
+    built["auto_message"] = AUTO_NO_RANGE_MSG
+    built["needs_move_to"] = None
     built["has_setup"] = False
     built["highlight"] = None
     built["setup_message"] = built.get("setup_message") or NO_SETUP_MSG
@@ -1066,6 +1058,7 @@ def _picker_for(
     hold_mode: HoldMode,
     is_trading_day: Callable[[date], bool] | None = None,
     target_mode: TargetMode = "Auto",
+    one_sigma_move: float | None = None,
 ) -> dict[str, Any]:
     levels = _protective_levels(direction=direction, resistance=resistance, support=support, pivot=pivot)
     stop_info = choose_stop(spot=spot, direction=direction, levels=levels, expected_move=expected_move)
@@ -1082,6 +1075,7 @@ def _picker_for(
             lot_size=lot_size,
             t_hold=th,
             hold_mode=hold_mode,
+            one_sigma_move=one_sigma_move,
         )
 
     pool = resistance if direction == "Bullish" else support
@@ -1181,6 +1175,12 @@ def enrich_phase3(
     resistance = view.get("resistance") or []
     support = view.get("support") or []
     pivot = view.get("pivot")
+    one_sigma = None
+    osig = em.get("one_sigma") or {}
+    if osig.get("available") is not False and osig.get("move") is not None:
+        one_sigma = float(osig["move"])
+    elif em.get("iv") and em["iv"].get("move") is not None:
+        one_sigma = float(em["iv"]["move"])
     common = dict(
         rows=all_rows,
         spot=spot,
@@ -1193,6 +1193,7 @@ def enrich_phase3(
         expiry=expiry,
         hold_mode=hold_mode,
         is_trading_day=is_trading_day,
+        one_sigma_move=one_sigma,
     )
     bull_auto = _picker_for(direction="Bullish", target_mode="Auto", **common)  # type: ignore[arg-type]
     bear_auto = _picker_for(direction="Bearish", target_mode="Auto", **common)  # type: ignore[arg-type]
@@ -1245,7 +1246,12 @@ def rebuild_strike_picker(
     all_rows = view.get("all_strikes") or [
         {"strike": r["strike"], "call": r["call"], "put": r["put"]} for r in view.get("rows", [])
     ]
-    em = (view.get("expected_move") or {}).get("move")
+    em_block = view.get("expected_move") or {}
+    em = em_block.get("move")
+    osig = em_block.get("one_sigma") or {}
+    one_sigma = None
+    if osig.get("available") is not False and osig.get("move") is not None:
+        one_sigma = float(osig["move"])
     lot = (view.get("strike_picker") or {}).get("lot_size")
     return _picker_for(
         all_rows,
@@ -1261,6 +1267,7 @@ def rebuild_strike_picker(
         hold_mode=hold_mode,
         is_trading_day=is_trading_day,
         target_mode=target_mode,
+        one_sigma_move=one_sigma,
     )
 
 

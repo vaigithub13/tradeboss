@@ -1501,6 +1501,20 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   close off-hours), no history file required.
 - Tests: `test_no_setup_does_not_highlight`, frontend estimate scoring.
 
+## 8 Nov 2026: Options Phase 4 — Overview + Bias
+
+- Spot always from the same chain response (`chain_spot_from_rows` / consistency guard).
+- Auto target capped to levels within 1×1σ IV; else
+  "No 1:2 setup within today's expected range".
+- Bias −10..+10 from weighted components (build-up, pivot, PCR ΔOI, near PCR, IV trend,
+  pre-market checks, Max Pain); expiry-day Max Pain weight 15%.
+- Overview at top of Options tab (auto-scroll before 09:15): headline, 3-line summary,
+  what changed vs prior EOD, pre-market 5 checks read-only + "GIFT Nifty: not connected",
+  component bars.
+- Picker defaults to bias direction; optional "Use bias as confidence" (+0..12 pts,
+  UNCALIBRATED). Morning/EOD bias saved under `data/options/bias/<day>.json`.
+- Tests: `tests/test_options_phase4.py`.
+
 ## 8 Nov 2026: Strike Picker win chance + EV ranking
 
 - Driftless win = `stop_dist / (stop_dist + target_dist)`; breakeven win = `1/(1+R:R)`.

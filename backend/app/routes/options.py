@@ -14,7 +14,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from app.ai.chain import NIFTY_CHAIN_KEY, weekly_expiry
 from app.backtest.expiry import load_default_calendar
 from app.config import settings
-from app.options.chain_history import latest_snapshot, trend_points, view_from_snapshot
+from app.options.bias import build_bias, overview_summary
+from app.options.bias_history import maybe_save_from_view
+from app.options.chain_history import latest_snapshot, previous_eod_snapshot, trend_points, view_from_snapshot
 from app.options.chain_phase3 import enrich_phase3, india_vix_at, t_hold_days
 from app.options.chain_view import build_chain_view, market_status
 from app.options.time import IST
@@ -72,6 +74,10 @@ def get_candles_dir() -> Path:
     return settings.data_dir / "candles"
 
 
+def get_data_dir() -> Path:
+    return settings.data_dir
+
+
 def get_options_cache() -> ChainCache:
     return _CACHE
 
@@ -116,6 +122,7 @@ def _attach_phase3(
     candles_dir: Path,
     now: float,
     expiry: str,
+    data_dir: Path | None = None,
 ) -> dict[str, Any]:
     if not view.get("available"):
         return view
@@ -137,6 +144,36 @@ def _attach_phase3(
             mode: t_hold_days(as_of, expiry, mode, is_trading_day=_is_session)  # type: ignore[arg-type]
             for mode in ("intraday", "1d", "2d")
         }
+    _attach_phase4(view, options_dir=options_dir, data_dir=data_dir or settings.data_dir, now=now, expiry=expiry)
+    return view
+
+
+def _attach_phase4(
+    view: dict[str, Any],
+    *,
+    options_dir: Path,
+    data_dir: Path,
+    now: float,
+    expiry: str,
+) -> dict[str, Any]:
+    """Bias + overview; market-view is read-only (never rebuilt here)."""
+    if not view.get("available"):
+        view["bias"] = None
+        view["overview"] = None
+        return view
+    local = datetime.fromtimestamp(now, IST)
+    from app.market_view.service import load_view as load_market_view
+
+    mv = load_market_view(data_dir, local.date())
+    prev = previous_eod_snapshot(
+        options_dir, before=local.date(), expiry=expiry, is_trading_day=_is_session
+    )
+    expiry_day = date.fromisoformat(expiry) == local.date()
+    bias = build_bias(view, market_view=mv, previous_eod=prev, expiry_day=expiry_day)
+    view["bias"] = bias
+    view["overview"] = overview_summary(view, bias)
+    # Persist morning/EOD when the clock is in a save window (idempotent)
+    maybe_save_from_view(options_dir, view, now=local)
     return view
 
 

@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   applyPickerHighlight,
   attachEvMetrics,
+  biasWinBump,
   breakevenWinPct,
   driftlessWinChance,
   evPerLot,
@@ -119,6 +120,14 @@ describe("scoreCandidate + highlight", () => {
     const hi = applyPickerHighlight(candidates);
     expect(hi.has_setup).toBe(false);
     expect(hi.setup_message).toBe(NO_EDGE_MSG);
+  });
+});
+
+describe("biasWinBump", () => {
+  it("maps |score| to up to +12 pts", () => {
+    expect(biasWinBump(0)).toBe(0);
+    expect(biasWinBump(10)).toBeCloseTo(0.12);
+    expect(biasWinBump(-5)).toBeCloseTo(0.06);
   });
 });
 

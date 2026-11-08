@@ -13,7 +13,7 @@ from collections.abc import Callable
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
 
-from app.options.time import IST
+from app.options.time import IST  # noqa: F401 — used by build_scheduler via datetime+IST
 
 log = logging.getLogger(__name__)
 
@@ -95,28 +95,55 @@ def build_scheduler() -> ChainScheduler:
     from app.ai.chain import NIFTY_CHAIN_KEY
     from app.backtest.expiry import load_default_calendar
     from app.config import settings
-    from app.options.chain_history import append_snapshot, snapshot_row
+    from app.options.bias import build_bias, overview_summary
+    from app.options.bias_history import maybe_save_from_view
+    from app.options.chain_history import append_snapshot, previous_eod_snapshot, snapshot_row
+    from app.options.chain_phase3 import enrich_phase3, india_vix_at
     from app.options.chain_view import build_chain_view
+    from app.market_view.service import load_view as load_market_view
     from app.routes.options import default_expiry, next_expiry_after
     from app.upstox.deps import get_client
 
     options_dir: Path = settings.data_dir / "options"
+    candles_dir: Path = settings.data_dir / "candles"
+    data_dir: Path = settings.data_dir
+    is_session = load_default_calendar().is_trading_day
 
     def record() -> bool:
         client = get_client()
         if client is None:
             return False
         now = _time.time()
+        local = datetime.fromtimestamp(now, IST)
         nearest = default_expiry(now)
         targets = [nearest, next_expiry_after(nearest)]
         saved = False
+        mv = load_market_view(data_dir, local.date())
         for exp in targets:
             rows = client.option_chain(NIFTY_CHAIN_KEY, exp)
             view = build_chain_view(rows, now=int(now), expiry=exp, status="LIVE")
             if not view["available"]:
                 continue
             append_snapshot(options_dir, snapshot_row(view))
+            # Bias on nearest expiry only (Overview drives off current chain)
+            if exp == nearest:
+                vix = india_vix_at(int(now), candles_dir=candles_dir)
+                enrich_phase3(
+                    view, vix=vix, options_dir=options_dir, hold_mode="1d", is_trading_day=is_session
+                )
+                prev = previous_eod_snapshot(
+                    options_dir, before=local.date(), expiry=exp, is_trading_day=is_session
+                )
+                bias = build_bias(
+                    view,
+                    market_view=mv,
+                    previous_eod=prev,
+                    expiry_day=date.fromisoformat(exp) == local.date(),
+                )
+                view["bias"] = bias
+                view["overview"] = overview_summary(view, bias)
+                maybe_save_from_view(options_dir, view, now=local)
             saved = True
         return saved
 
-    return ChainScheduler(record=record, is_session=load_default_calendar().is_trading_day)
+    return ChainScheduler(record=record, is_session=is_session)

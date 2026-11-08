@@ -16,6 +16,8 @@ import {
 } from "../api/options";
 import { useOptionsStore } from "../store/optionsStore";
 import {
+  BIAS_CONFIDENCE_WARNING,
+  biasWinBump,
   checkGlyph,
   DEFAULT_ROUND_TRIP_CHARGES,
   formatInr,
@@ -37,6 +39,7 @@ import {
 } from "./format";
 import { buildKeyLevelsLadder } from "./levels";
 import { OiBarChart } from "./OiBarChart";
+import { OverviewPanel } from "./OverviewPanel";
 import { TrendsPanel } from "./TrendsPanel";
 
 const BUILDUP_SHORT: Record<BuildupLabel, string> = {
@@ -324,8 +327,6 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
       <BuildupPanel data={data} />
       <MaxPainPanel data={data} />
       <StrikePickerPanel data={data} />
-      <Placeholder title="Market Bias" />
-      <Placeholder title="Pre-market Overview" />
     </aside>
   );
 }
@@ -398,7 +399,11 @@ function MaxPainPanel({ data }: { data: OptionsChainResponse }) {
 }
 
 function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
-  const [direction, setDirection] = useState<StrikeDirection>("Bullish");
+  const biasDir = data.bias?.direction;
+  const biasScore = data.bias?.score ?? 0;
+  const [direction, setDirection] = useState<StrikeDirection>(
+    biasDir === "Bearish" ? "Bearish" : "Bullish",
+  );
   const [hold, setHold] = useState<HoldMode>("1d");
   const [targetMode, setTargetMode] = useState<TargetMode>("Auto");
   const [expiryMode, setExpiryMode] = useState<"current" | "next">("current");
@@ -408,9 +413,19 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
   /** null = use driftless win chance */
   const [signalConfidencePct, setSignalConfidencePct] = useState<number | null>(null);
   const [charges, setCharges] = useState(DEFAULT_ROUND_TRIP_CHARGES);
+  const [useBiasConfidence, setUseBiasConfidence] = useState(false);
+  const [dirTouched, setDirTouched] = useState(false);
 
   const expiries = data.expiries ?? [data.expiry];
   const nextExp = nextExpiryAfter(data.expiry, expiries);
+  const noTradeBias = !biasDir;
+
+  useEffect(() => {
+    if (dirTouched) return;
+    if (biasDir === "Bullish" || biasDir === "Bearish") {
+      setDirection(biasDir);
+    }
+  }, [biasDir, dirTouched]);
 
   useEffect(() => {
     if (expiryMode !== "next" || !nextExp) {
@@ -440,9 +455,9 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
   }, [direction]);
 
   useEffect(() => {
-    // New setup → reset confidence to driftless default
-    setSignalConfidencePct(null);
-  }, [direction, targetMode, expiryMode, hold]);
+    // New setup → reset confidence to driftless default (unless bias-confidence is on)
+    if (!useBiasConfidence) setSignalConfidencePct(null);
+  }, [direction, targetMode, expiryMode, hold, useBiasConfidence]);
 
   const activeData = expiryMode === "next" && nextData?.available ? nextData : data;
   const picker = activeData.strike_picker;
@@ -459,15 +474,29 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
       (direction === "Bullish" ? picker.Bullish : picker.Bearish);
     if (!base) return null;
     const tHold = picker.t_holds?.[hold] ?? base.t_hold;
-    const signalWin =
+    const driftless = base.win_chance_driftless ?? null;
+    let signalWin: number | null =
       signalConfidencePct != null && Number.isFinite(signalConfidencePct)
         ? signalConfidencePct / 100
         : null;
+    if (useBiasConfidence && signalWin == null && driftless != null) {
+      signalWin = Math.min(0.99, Math.max(0.01, driftless + biasWinBump(biasScore)));
+    }
     return repricePickerSide(base, spot, tHold, hold, {
       signalWin,
       charges,
     });
-  }, [picker, direction, hold, spot, targetMode, signalConfidencePct, charges]);
+  }, [
+    picker,
+    direction,
+    hold,
+    spot,
+    targetMode,
+    signalConfidencePct,
+    charges,
+    useBiasConfidence,
+    biasScore,
+  ]);
 
   if (!data.strike_picker) {
     return <Placeholder title="Strike Picker" />;
@@ -504,7 +533,10 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
             className={`rounded px-2 py-0.5 text-[10px] ${
               direction === d ? "bg-white/15 text-white" : "text-white/45"
             }`}
-            onClick={() => setDirection(d)}
+            onClick={() => {
+              setDirTouched(true);
+              setDirection(d);
+            }}
           >
             {d}
           </button>
@@ -561,6 +593,12 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
             </p>
           ) : null}
 
+          {noTradeBias ? (
+            <p className="mb-2 text-[10px] text-white/40" data-testid="strike-no-trade-bias">
+              No trade bias
+            </p>
+          ) : null}
+
           <div
             className="mb-2 flex flex-wrap items-end gap-x-3 gap-y-1 text-[9px] text-white/50"
             data-testid="strike-ev-controls"
@@ -579,8 +617,20 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
                 max={99}
                 step={1}
                 className="w-16 rounded border border-white/15 bg-black/40 px-1 py-0.5 font-mono text-white/80"
-                value={confidenceDisplay != null ? Math.round(confidenceDisplay) : ""}
+                value={
+                  useBiasConfidence && driftlessPct != null
+                    ? Math.round(
+                        Math.min(
+                          99,
+                          Math.max(1, driftlessPct + biasWinBump(biasScore) * 100),
+                        ),
+                      )
+                    : confidenceDisplay != null
+                      ? Math.round(confidenceDisplay)
+                      : ""
+                }
                 placeholder={driftlessPct != null ? String(Math.round(driftlessPct)) : "—"}
+                disabled={useBiasConfidence}
                 onChange={(e) => {
                   const v = e.target.value;
                   if (v === "") {
@@ -589,6 +639,7 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
                   }
                   const n = Number(v);
                   if (!Number.isFinite(n)) return;
+                  setUseBiasConfidence(false);
                   setSignalConfidencePct(Math.min(99, Math.max(1, n)));
                 }}
                 data-testid="strike-signal-confidence"
@@ -610,7 +661,24 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
                 data-testid="strike-charges"
               />
             </label>
+            <label className="flex items-center gap-1 self-end pb-0.5" title={BIAS_CONFIDENCE_WARNING}>
+              <input
+                type="checkbox"
+                checked={useBiasConfidence}
+                onChange={(e) => {
+                  setUseBiasConfidence(e.target.checked);
+                  if (e.target.checked) setSignalConfidencePct(null);
+                }}
+                data-testid="strike-use-bias-confidence"
+              />
+              <span className="text-white/45">Use bias as confidence</span>
+            </label>
           </div>
+          {useBiasConfidence ? (
+            <p className="mb-2 text-[9px] text-amber-200/70" data-testid="bias-confidence-warning">
+              {BIAS_CONFIDENCE_WARNING}
+            </p>
+          ) : null}
 
           {side.auto_message ? (
             <p className="mb-2 text-[10px] text-amber-200/85" data-testid="strike-auto-message">
@@ -1075,13 +1143,16 @@ export function OptionsTab() {
       ) : null}
 
       {data?.available ? (
-        <div className="flex min-h-0 flex-1">
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-            <ChainTable data={data} greeks={greeks} />
-            <OiBarChart data={data} />
-            <TrendsPanel expiry={expiry ?? data.expiry} />
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
+          <OverviewPanel data={data} />
+          <div className="flex min-h-0 flex-1">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+              <ChainTable data={data} greeks={greeks} />
+              <OiBarChart data={data} />
+              <TrendsPanel expiry={expiry ?? data.expiry} />
+            </div>
+            <KeyLevels data={data} />
           </div>
-          <KeyLevels data={data} />
         </div>
       ) : null}
     </div>

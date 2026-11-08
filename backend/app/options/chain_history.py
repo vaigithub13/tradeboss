@@ -7,6 +7,7 @@ strike's fields so later phases can backtest whether OI levels held.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -85,6 +86,30 @@ def load_day(options_dir: Path, day: date) -> list[dict[str, Any]]:
             rows.append(row)
     rows.sort(key=lambda r: (r["t"], r.get("expiry") or ""))
     return rows
+
+
+def previous_eod_snapshot(
+    options_dir: Path,
+    *,
+    before: date,
+    expiry: str | None = None,
+    is_trading_day: Callable[[date], bool] | None = None,
+) -> dict[str, Any] | None:
+    """Last snapshot of the most recent session day strictly before `before`."""
+    from datetime import timedelta
+
+    if not options_dir.is_dir():
+        return None
+    day = before - timedelta(days=1)
+    for _ in range(14):
+        if is_trading_day is None or is_trading_day(day):
+            rows = load_day(options_dir, day)
+            if expiry is not None:
+                rows = [r for r in rows if r.get("expiry") == expiry]
+            if rows:
+                return max(rows, key=lambda r: int(r["t"]))
+        day = day - timedelta(days=1)
+    return None
 
 
 def latest_snapshot(options_dir: Path, *, expiry: str | None = None) -> dict[str, Any] | None:

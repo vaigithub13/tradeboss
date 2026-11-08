@@ -45,6 +45,46 @@ def atm_strike(spot: float, strikes: list[float]) -> float:
     return min(strikes, key=lambda k: (abs(k - spot), k))
 
 
+SPOT_TOL = 0.05  # pts — rows in one chain response must agree on underlying
+
+
+def chain_spot_from_rows(raw_rows: list[dict[str, Any]]) -> float | None:
+    """Underlying spot from the same Upstox chain response as the quotes (mode of values)."""
+    vals: list[float] = []
+    for raw in raw_rows:
+        v = raw.get("underlying_spot_price")
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f > 0:
+            vals.append(f)
+    if not vals:
+        return None
+    # Mode (rounded to 0.05) so a single bad row cannot pin yesterday's spot
+    buckets: dict[float, int] = {}
+    for v in vals:
+        key = round(v / SPOT_TOL) * SPOT_TOL
+        buckets[key] = buckets.get(key, 0) + 1
+    return max(buckets.items(), key=lambda kv: (kv[1], -abs(kv[0] - vals[0])))[0]
+
+
+def assert_spot_consistent(raw_rows: list[dict[str, Any]], spot: float) -> float:
+    """Return the chain's own spot; reject an externally pinned older spot.
+
+    If `spot` disagrees with the chain response by more than SPOT_TOL, replace it
+    with the mode of `underlying_spot_price` from the same rows.
+    """
+    chain = chain_spot_from_rows(raw_rows)
+    if chain is None:
+        return float(spot)
+    if abs(float(spot) - chain) > SPOT_TOL:
+        return chain
+    return float(spot)
+
+
 def _f(value: Any, default: float = 0.0) -> float:
     try:
         if value is None:
@@ -238,17 +278,18 @@ def build_chain_view(
         }
 
     parsed: list[dict[str, Any]] = []
-    spot = _f(raw_rows[0].get("underlying_spot_price"))
+    spot = chain_spot_from_rows(raw_rows) or _f(raw_rows[0].get("underlying_spot_price"))
     for raw in raw_rows:
         strike = _f(raw.get("strike_price"))
         if not strike:
             continue
-        spot = _f(raw.get("underlying_spot_price"), spot)
         parsed.append(
             {
                 "strike": strike,
                 "call": _leg(raw.get("call_options") if isinstance(raw.get("call_options"), dict) else None),
                 "put": _leg(raw.get("put_options") if isinstance(raw.get("put_options"), dict) else None),
+                # Keep the response spot on each row for consistency checks downstream
+                "_spot": _f(raw.get("underlying_spot_price"), spot),
             }
         )
     if not parsed:

@@ -247,6 +247,60 @@ export interface StrikePicker {
   active: StrikePickerSide;
 }
 
+export interface BiasComponent {
+  key: string;
+  label: string;
+  weight: number;
+  score: number;
+  contribution: number;
+  available?: boolean;
+}
+
+export interface BiasChanged {
+  r1?: number | null;
+  s1?: number | null;
+  pivot?: number | null;
+  max_pain?: number | null;
+  pcr_full?: number | null;
+  atm_iv?: number | null;
+  prev_as_of_ist?: string | null;
+  prev_spot?: number | null;
+}
+
+export interface OptionsBias {
+  score: number;
+  label: string;
+  direction?: "Bullish" | "Bearish" | null;
+  components: BiasComponent[];
+  premarket_available: boolean;
+  gift_nifty: string;
+  changed_since_yesterday?: BiasChanged | null;
+  expiry_day?: boolean;
+  win_bump?: number;
+  as_of?: number;
+  as_of_ist?: string;
+  spot?: number;
+}
+
+export interface OptionsOverview {
+  headline: string;
+  levels: {
+    r1?: number | null;
+    r1_dist?: number | null;
+    pivot?: number | null;
+    pivot_dist?: number | null;
+    s1?: number | null;
+    s1_dist?: number | null;
+    max_pain?: number | null;
+    max_pain_dist?: number | null;
+  };
+  expected_range: {
+    one_sigma?: (ExpectedMoveBand & { label?: string; available?: boolean }) | null;
+    market_priced?: (ExpectedMoveBand & { label?: string }) | null;
+  };
+  picker: string;
+}
+
 export interface OptionsChainResponse {
   available: boolean;
   reason?: string | null;
@@ -277,6 +331,8 @@ export interface OptionsChainResponse {
   iv_panel?: IvPanel | null;
   expected_move?: ExpectedMove | null;
   strike_picker?: StrikePicker | null;
+  bias?: OptionsBias | null;
+  overview?: OptionsOverview | null;
 }
 
 export interface OptionsTrendPoint {

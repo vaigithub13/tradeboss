@@ -19,6 +19,13 @@ export const NO_SETUP_MSG = "No good buy setup now";
 export const NO_EDGE_MSG =
   "No edge without a directional signal — R:R alone isn't enough";
 export const DEFAULT_ROUND_TRIP_CHARGES = 60;
+export const BIAS_WIN_BUMP_AT_10 = 0.12;
+export const BIAS_CONFIDENCE_WARNING = "UNCALIBRATED — validate in Phase 5 backtest";
+
+/** Fractional win-chance bump: 0 at score 0 → +0.12 at |10|. */
+export function biasWinBump(score: number): number {
+  return (BIAS_WIN_BUMP_AT_10 * Math.min(10, Math.abs(score))) / 10;
+}
 
 /** ΔP ≈ δ·ΔS + ½γ·(ΔS)² + θ·t_hold; floored at 0. θ is premium/day (Upstox). */
 export function taylorPrice(
