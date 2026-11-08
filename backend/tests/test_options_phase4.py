@@ -58,13 +58,18 @@ def test_component_scoring_edges() -> None:
     from app.options.chain_view import PIVOT_READ_ABOVE_CALL, PIVOT_READ_BELOW_CALL, PIVOT_READ_BATTLE
 
     assert bz.score_pivot(
-        25100, {"strike": 25000, "read": PIVOT_READ_ABOVE_CALL}, one_sigma=200
+        25100, {"strike": 25000, "read": PIVOT_READ_ABOVE_CALL, "strength": "Strong"}, one_sigma=200
     ) == pytest.approx(1.0)
     assert bz.score_pivot(
-        24900, {"strike": 25000, "read": PIVOT_READ_BELOW_CALL}, one_sigma=200
+        24900, {"strike": 25000, "read": PIVOT_READ_BELOW_CALL, "strength": "Strong"}, one_sigma=200
     ) == pytest.approx(-1.0)
     assert bz.score_pivot(
-        25100, {"strike": 25000, "read": PIVOT_READ_BATTLE}, one_sigma=200
+        25100,
+        {"strike": 25000, "read": PIVOT_READ_ABOVE_CALL, "strength": "Medium", "strength_scale": 0.6},
+        one_sigma=200,
+    ) == pytest.approx(0.6)
+    assert bz.score_pivot(
+        25100, {"strike": 25000, "read": PIVOT_READ_BATTLE, "strength": "Strong"}, one_sigma=200
     ) == pytest.approx(0.0)
 
     assert bz.score_pcr({"read": "Strong Bullish"}) == 1.0

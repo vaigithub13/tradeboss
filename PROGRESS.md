@@ -1536,6 +1536,15 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   → 78.3% < 80% → no pivot. Friday 112 L vs 26,000 115 L still → R1 / PIVOT because
   26,000 is outside the window (regression `test_friday_112l_vs_26000_115l_is_r1_pivot`).
 
+## 8 Nov 2026: Pivot = max combined OI near spot (Strong / Medium)
+
+- Candidate: highest Call+Put within ±2 strikes of spot.
+- Strength vs max combined in ±15 window: ≥80% Strong · 60–80% Medium · else none.
+- Read from which leg is heavier at that strike (4-case rules); Spot vs Pivot ×
+  strength_scale (Medium 0.6).
+- Tonight: R1 / PIVOT 25,000 Strong, “Resistance overhead…”. Tests: Friday + tonight
+  fixtures.
+
 
 ## 8 Nov 2026: Strike Picker win chance + EV ranking
 

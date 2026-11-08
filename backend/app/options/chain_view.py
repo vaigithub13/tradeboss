@@ -16,7 +16,10 @@ CLOSE = time(15, 30)
 DEFAULT_WINDOW = 15
 #: Nifty strike step is 50 → ±2 strikes = ±100 pts around spot
 PIVOT_BAND_PTS = 100.0
+#: Combined-OI / window-max-combined → Strong / Medium / else no pivot
 PIVOT_STRONG = 0.80
+PIVOT_MEDIUM = 0.60
+PIVOT_STRENGTH_SCALE = {"Strong": 1.0, "Medium": 0.6}
 UNAVAILABLE = "option chain empty"
 
 PIVOT_READ_ABOVE_CALL = "Above = bullish, short covering risk for call writers"
@@ -242,64 +245,87 @@ def format_level_tag(rs_tag: str | None, *, is_pivot: bool) -> str | None:
     return rs_tag
 
 
-def _peak_leg(rows: list[dict[str, Any]], side: str) -> tuple[float, float | None]:
-    """Peak OI and its strike for call|put over `rows` (empty → 0, None)."""
+def _combined_oi(r: dict[str, Any]) -> float:
+    return float(r["call"]["oi"]) + float(r["put"]["oi"])
+
+
+def _peak_combined(rows: list[dict[str, Any]]) -> tuple[float, float | None]:
+    """Max Call+Put OI and its strike over `rows` (empty → 0, None)."""
     if not rows:
         return 0.0, None
-    best = max(rows, key=lambda r: (r[side]["oi"], -r["strike"]))
-    return float(best[side]["oi"]), float(best["strike"])
+    best = max(rows, key=lambda r: (_combined_oi(r), -r["strike"]))
+    return _combined_oi(best), float(best["strike"])
+
+
+def pivot_strength_label(ratio: float) -> str | None:
+    """≥80% Strong · 60–80% Medium · else no pivot."""
+    if ratio >= PIVOT_STRONG:
+        return "Strong"
+    if ratio >= PIVOT_MEDIUM:
+        return "Medium"
+    return None
 
 
 def pivot_window_ref(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Peaks used for the 80% pivot threshold — must be the ±window slice, never major_walls."""
-    call_oi, call_k = _peak_leg(rows, "call")
-    put_oi, put_k = _peak_leg(rows, "put")
+    """Combined-OI peak for the pivot strength ratio — ±window slice only, never major_walls."""
+    combined_oi, combined_k = _peak_combined(rows)
     return {
-        "call_peak_oi": call_oi,
-        "call_peak_strike": call_k,
-        "put_peak_oi": put_oi,
-        "put_peak_strike": put_k,
-        "threshold": PIVOT_STRONG,
+        "combined_peak_oi": combined_oi,
+        "combined_peak_strike": combined_k,
+        "strong_threshold": PIVOT_STRONG,
+        "medium_threshold": PIVOT_MEDIUM,
         "band_pts": PIVOT_BAND_PTS,
     }
 
 
 def _pivot(rows: list[dict[str, Any]], spot: float) -> dict[str, Any] | None:
-    """Nearest heavy-OI strike within ±2 strikes (±100 pts) of spot, or None.
+    """Pivot = highest Call+Put OI within ±2 strikes of spot, if strong enough vs window.
 
-    Qualifies when Call OI ≥ 80% of the **±window** peak Call OI, or Put OI ≥ 80% of
-    that window's peak Put OI. Caller must pass the same window_rows used for R/S —
-    never the full chain / major_walls (e.g. 26000 can sit outside ±15 of ATM).
+    Strength = combined / max combined in the ±window (same rows as R/S):
+      ≥80% Strong · 60–80% Medium · <60% → no pivot.
+    Read uses which leg is heavier *at that strike* (4-case above/below × call/put).
+    Caller must pass window_rows — never the full chain / major_walls.
     """
     if not rows:
         return None
-    call_peak, _ = _peak_leg(rows, "call")
-    put_peak, _ = _peak_leg(rows, "put")
-    candidates: list[dict[str, Any]] = []
-    for r in rows:
-        if abs(r["strike"] - spot) > PIVOT_BAND_PTS:
-            continue
-        call_oi = r["call"]["oi"]
-        put_oi = r["put"]["oi"]
-        heavy_call = call_peak > 0 and call_oi >= PIVOT_STRONG * call_peak
-        heavy_put = put_peak > 0 and put_oi >= PIVOT_STRONG * put_peak
-        if not (heavy_call or heavy_put):
-            continue
-        candidates.append(
-            {
-                "strike": r["strike"],
-                "call_oi": call_oi,
-                "put_oi": put_oi,
-                "heavy_call": heavy_call,
-                "heavy_put": heavy_put,
-                "tag": "PIVOT",
-                "read": _pivot_read(spot, r["strike"], heavy_call=heavy_call, heavy_put=heavy_put),
-            }
-        )
-    if not candidates:
+    window_peak, _ = _peak_combined(rows)
+    if window_peak <= 0:
         return None
-    candidates.sort(key=lambda c: (abs(c["strike"] - spot), -max(c["call_oi"], c["put_oi"]), c["strike"]))
-    return candidates[0]
+    band = [r for r in rows if abs(r["strike"] - spot) <= PIVOT_BAND_PTS]
+    if not band:
+        return None
+    # Highest combined OI in the ±2-strike band (tie → nearer to spot, then lower strike)
+    best = max(
+        band,
+        key=lambda r: (_combined_oi(r), -abs(r["strike"] - spot), -r["strike"]),
+    )
+    call_oi = float(best["call"]["oi"])
+    put_oi = float(best["put"]["oi"])
+    combined = call_oi + put_oi
+    ratio = combined / window_peak
+    strength = pivot_strength_label(ratio)
+    if strength is None:
+        return None
+    # Which side is heavier at the pivot strike (equal → battle)
+    heavy_call = call_oi >= put_oi
+    heavy_put = put_oi >= call_oi
+    if call_oi > put_oi:
+        heavy_put = False
+    elif put_oi > call_oi:
+        heavy_call = False
+    return {
+        "strike": best["strike"],
+        "call_oi": call_oi,
+        "put_oi": put_oi,
+        "combined_oi": combined,
+        "combined_pct": ratio * 100.0,
+        "strength": strength,
+        "strength_scale": PIVOT_STRENGTH_SCALE[strength],
+        "heavy_call": heavy_call,
+        "heavy_put": heavy_put,
+        "tag": "PIVOT",
+        "read": _pivot_read(spot, best["strike"], heavy_call=heavy_call, heavy_put=heavy_put),
+    }
 
 
 def build_chain_view(

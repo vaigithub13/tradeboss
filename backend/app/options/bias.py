@@ -86,10 +86,10 @@ def score_buildup(analysis: dict[str, Any] | None) -> float:
 
 
 def score_pivot(spot: float, pivot: dict[str, Any] | None, *, one_sigma: float | None) -> float:
-    """Sign from pivot read (bullish/bearish/battle); magnitude from |spot−pivot| / scale."""
+    """Sign from pivot read; magnitude from |spot−pivot| / scale, × strength (Medium 0.6)."""
     if not pivot or pivot.get("strike") is None:
         return 0.0
-    from app.options.chain_view import pivot_bias_sign
+    from app.options.chain_view import PIVOT_STRENGTH_SCALE, pivot_bias_sign
 
     sign = pivot_bias_sign(pivot.get("read"))
     if sign == 0.0:
@@ -99,7 +99,12 @@ def score_pivot(spot: float, pivot: dict[str, Any] | None, *, one_sigma: float |
     if dist < 1e-9:
         return 0.0
     scale = max(50.0, 0.5 * float(one_sigma)) if one_sigma and one_sigma > 0 else 50.0
-    return _clip(sign * dist / scale)
+    strength_scale = float(
+        pivot.get("strength_scale")
+        if pivot.get("strength_scale") is not None
+        else PIVOT_STRENGTH_SCALE.get(str(pivot.get("strength") or "Strong"), 1.0)
+    )
+    return _clip(sign * dist / scale * strength_scale)
 
 
 def _pcr_read_score(read: str | None) -> float:

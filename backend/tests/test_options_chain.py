@@ -192,11 +192,10 @@ def test_sr_ignores_oi_outside_display_window_major_walls_use_full_chain() -> No
 
 
 def test_pivot_is_heavy_oi_within_two_strikes_of_spot() -> None:
-    """25000 is within ±100 of spot and holds the window's peak Call OI → PIVOT."""
+    """25000 is within ±100 of spot and has the highest combined OI → PIVOT."""
     rows = []
     for strike in range(24800, 25300, 50):
         call_oi = 112_000_000 if strike == 25000 else 1_000_000 + strike
-        # Put peak far below the band so pivot is call-only (not battle)
         put_oi = 50_000_000 if strike == 24800 else 500_000
         rows.append(row(float(strike), leg(oi=call_oi), leg(oi=put_oi), spot=25030.0))
     out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
@@ -204,6 +203,7 @@ def test_pivot_is_heavy_oi_within_two_strikes_of_spot() -> None:
     assert pivot is not None
     assert pivot["strike"] == 25000.0
     assert pivot["tag"] == "PIVOT"
+    assert pivot["strength"] == "Strong"
     assert pivot["heavy_call"] is True
     assert pivot["heavy_put"] is False
     assert pivot["read"] == chain_view.PIVOT_READ_ABOVE_CALL
@@ -211,25 +211,26 @@ def test_pivot_is_heavy_oi_within_two_strikes_of_spot() -> None:
     assert len(tagged) == 1 and tagged[0]["strike"] == 25000.0
 
 
-def test_pivot_absent_when_no_heavy_oi_near_spot() -> None:
+def test_pivot_absent_when_combined_below_medium() -> None:
+    """Near-spot combined OI < 60% of window max combined → no pivot."""
     rows = [
         row(24900, leg(oi=10), leg(oi=10), spot=25030.0),
         row(25000, leg(oi=10), leg(oi=10), spot=25030.0),
         row(25050, leg(oi=10), leg(oi=10), spot=25030.0),
-        row(25500, leg(oi=9_000_000), leg(oi=10), spot=25030.0),  # heavy but outside ±100
+        row(25500, leg(oi=9_000_000), leg(oi=10), spot=25030.0),  # window peak, outside ±100
         row(24500, leg(oi=10), leg(oi=9_000_000), spot=25030.0),
     ]
     out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
     assert out["pivot"] is None
+    assert out["pivot_ref"]["combined_peak_strike"] in (25500.0, 24500.0)
 
 
-def test_pivot_below_spot_with_heavy_put() -> None:
+def test_pivot_below_spot_with_heavier_put() -> None:
     rows = [
-        # Call peak far below the ±100 band so near strikes aren't all "heavy call"
         row(24800, leg(oi=10_000_000), leg(oi=100), spot=25000.0),
         row(24950, leg(oi=100), leg(oi=100), spot=25000.0),
         row(25000, leg(oi=100), leg(oi=100), spot=25000.0),
-        row(25050, leg(oi=100), leg(oi=8_000_000), spot=25000.0),  # above spot, heavy put
+        row(25050, leg(oi=100), leg(oi=8_000_000), spot=25000.0),  # highest combined in band; Put heavier
         row(25100, leg(oi=100), leg(oi=100), spot=25000.0),
     ]
     out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
@@ -237,7 +238,6 @@ def test_pivot_below_spot_with_heavy_put() -> None:
     assert out["pivot"]["strike"] == 25050.0
     assert out["pivot"]["heavy_put"] is True
     assert out["pivot"]["heavy_call"] is False
-    # Spot below pivot + heavy put → bearish-under-pressure
     assert out["pivot"]["read"] == chain_view.PIVOT_READ_BELOW_PUT
 
 
@@ -265,10 +265,9 @@ def test_pivot_all_four_reads_and_battle() -> None:
 
 
 def test_friday_112l_vs_26000_115l_is_r1_pivot() -> None:
-    """Friday-style: 25,000 Call 112 L, full-chain peak Call 26,000 at 115 L, spot 24,986.
+    """Friday-style: 25,000 Call 112 L + Put 40 L, full-chain Call wall 26,000 at 115 L.
 
-    26,000 is outside the ±15 window around ATM 25,000 (window ends 25,750), so the
-    80% threshold must use the in-window peak — here 25,000 itself → R1 / PIVOT.
+    26,000 is outside ±15; combined peak in-window is 25,000 → R1 / PIVOT.
     """
     spot = 24986.4
     atm = 25000
@@ -282,7 +281,7 @@ def test_friday_112l_vs_26000_115l_is_r1_pivot() -> None:
         elif strike == 24000.0:
             call_oi, put_oi = 10_00_000.0, 120_00_000.0
         elif strike == 24500.0:
-            call_oi, put_oi = 15_00_000.0, 80_00_000.0  # in-window put peak (not at 25000)
+            call_oi, put_oi = 15_00_000.0, 80_00_000.0
         else:
             call_oi, put_oi = 20_00_000.0, 15_00_000.0
         rows.append(row(strike, leg(oi=call_oi), leg(oi=put_oi), spot=spot))
@@ -291,22 +290,60 @@ def test_friday_112l_vs_26000_115l_is_r1_pivot() -> None:
     assert out["rows"][0]["strike"] == 24250.0
     assert out["rows"][-1]["strike"] == 25750.0
     assert out["major_walls"]["call"]["strike"] == 26000.0
-    assert out["major_walls"]["call"]["oi"] == 115_00_000.0
-    # Threshold peaks are window-only — NOT the 26,000 major wall
-    assert out["pivot_ref"]["call_peak_strike"] == 25000.0
-    assert out["pivot_ref"]["call_peak_oi"] == 112_00_000.0
-    assert out["pivot_ref"]["put_peak_strike"] == 24500.0
+    # Combined peak is window-only — NOT the 26,000 major wall
+    assert out["pivot_ref"]["combined_peak_strike"] == 25000.0
+    assert out["pivot_ref"]["combined_peak_oi"] == 152_00_000.0
     assert out["pivot"] is not None
     assert out["pivot"]["strike"] == 25000.0
+    assert out["pivot"]["strength"] == "Strong"
     assert out["pivot"]["heavy_call"] is True
     r1 = next(r for r in out["resistance"] if r["tag"] == "R1")
     assert r1["strike"] == 25000.0
     assert r1.get("also_pivot") is True
     assert r1.get("display_tag") == "R1 / PIVOT"
     assert next(r for r in out["rows"] if r["strike"] == 25000.0)["tag"] == "R1 / PIVOT"
-    # Sanity: against the full-chain wall 25000 would also clear 80% (97%), but the
-    # code path must not need that — window peak alone is enough.
-    assert 112_00_000 / 115_00_000 >= chain_view.PIVOT_STRONG
+
+
+def test_tonight_25000_combined_is_medium_or_strong_pivot() -> None:
+    """Tonight's live OI: 25,000 Call 97.3 L + Put 69.9 L, spot 24,986.4.
+
+    Highest combined in ±100; Call heavier + spot below → Resistance overhead.
+    Strength Medium or Strong vs window max combined (25500/24500 walls in-window).
+    """
+    spot = 24986.4
+    # Known tonight near-ATM / wall OI; pad every 50 pts so ±15 ends at 25,750 (26000 outside)
+    known = {
+        24500: (2_000_000, 12_217_660),
+        24850: (1_118_390, 2_602_860),
+        24900: (2_849_665, 4_904_835),
+        24950: (1_493_765, 2_256_150),
+        25000: (9_726_860, 6_991_140),  # 97.3 L + 69.9 L
+        25050: (3_597_230, 1_396_265),
+        25100: (8_537_230, 2_349_945),
+        25200: (7_607_860, 2_000_000),
+        25300: (6_184_750, 1_800_000),
+        25400: (7_036_835, 1_500_000),
+        25500: (12_429_235, 1_200_000),
+        25600: (6_161_350, 1_000_000),
+        25700: (7_775_040, 900_000),
+        26000: (16_116_295, 500_000),
+    }
+    rows = []
+    for strike in range(24000, 26050, 50):
+        c, p = known.get(strike, (1_500_000, 1_500_000))
+        rows.append(row(float(strike), leg(oi=c), leg(oi=p), spot=spot))
+    out = chain_view.build_chain_view(rows, now=ts(2026, 11, 8, 19, 0), expiry="2026-11-09", window=15)
+    assert out["rows"][0]["strike"] == 24250.0
+    assert out["rows"][-1]["strike"] == 25750.0
+    assert out["pivot_ref"]["combined_peak_strike"] != 26000.0
+    assert out["pivot"] is not None
+    assert out["pivot"]["strike"] == 25000.0
+    assert out["pivot"]["strength"] in ("Medium", "Strong")
+    assert out["pivot"]["heavy_call"] is True
+    assert out["pivot"]["read"] == chain_view.PIVOT_READ_BELOW_CALL
+    r1 = next(r for r in out["resistance"] if r["tag"] == "R1")
+    assert r1["strike"] == 25000.0
+    assert r1.get("display_tag") == "R1 / PIVOT"
 
 
 def test_pivot_keeps_r1_tag_when_coincident() -> None:

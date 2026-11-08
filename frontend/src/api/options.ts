@@ -60,6 +60,10 @@ export interface OptionsPivot {
   strike: number;
   call_oi: number;
   put_oi: number;
+  combined_oi?: number;
+  combined_pct?: number;
+  strength?: "Strong" | "Medium" | string;
+  strength_scale?: number;
   heavy_call: boolean;
   heavy_put: boolean;
   tag: "PIVOT";
