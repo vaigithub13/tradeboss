@@ -113,7 +113,7 @@ def test_totals_and_pcr_use_full_chain_not_upstox_pcr() -> None:
     assert [r["strike"] for r in out["rows"]] == [24900.0, 24950.0, 25000.0, 25050.0, 25100.0]
 
 
-def test_resistance_and_support_top3() -> None:
+def test_resistance_and_support_top3_within_window() -> None:
     # Hand-built: call OI highest above spot at 25100, 25200, 25050; put OI below at 24900, 24800, 25000
     rows = [
         row(24800, leg(oi=10), leg(oi=800)),
@@ -128,6 +128,39 @@ def test_resistance_and_support_top3() -> None:
     assert [r["tag"] for r in out["resistance"]] == ["R1", "R2", "R3"]
     assert [r["strike"] for r in out["support"]] == [24900.0, 24800.0, 25000.0]
     assert [r["tag"] for r in out["support"]] == ["S1", "S2", "S3"]
+    visible = {r["strike"] for r in out["rows"]}
+    assert all(r["strike"] in visible for r in out["resistance"] + out["support"])
+
+
+def test_sr_ignores_oi_outside_display_window_major_walls_use_full_chain() -> None:
+    """Far strikes with huge OI must not become R1/S1; they only appear as major walls."""
+    rows = []
+    # Far put wall well below ATM window
+    rows.append(row(24000, leg(oi=1), leg(oi=9_000_000), spot=25010))
+    # Far call wall well above ATM window
+    rows.append(row(26000, leg(oi=8_000_000), leg(oi=1), spot=25010))
+    # Near strikes (± a few of ATM 25000) — modest OI that should win R/S
+    for strike, call_oi, put_oi in (
+        (24900, 10, 900),
+        (24950, 20, 800),
+        (25000, 30, 700),
+        (25050, 500, 40),
+        (25100, 900, 30),
+        (25150, 800, 20),
+    ):
+        rows.append(row(float(strike), leg(oi=call_oi), leg(oi=put_oi), spot=25010))
+    out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=2)
+    visible = {r["strike"] for r in out["rows"]}
+    assert visible == {24900.0, 24950.0, 25000.0, 25050.0, 25100.0}
+    assert 24000.0 not in visible and 26000.0 not in visible
+    assert [r["strike"] for r in out["resistance"]] == [25100.0, 25050.0]
+    assert [r["strike"] for r in out["support"]] == [24900.0, 24950.0, 25000.0]
+    assert all(r["strike"] in visible for r in out["resistance"] + out["support"])
+    assert out["major_walls"]["call"] == {"strike": 26000.0, "oi": 8_000_000.0}
+    assert out["major_walls"]["put"] == {"strike": 24000.0, "oi": 9_000_000.0}
+    # PCR still from the full chain (includes the far walls)
+    assert out["total_call_oi"] == sum(r["call"]["oi"] for r in out["all_strikes"])
+    assert out["total_put_oi"] == sum(r["put"]["oi"] for r in out["all_strikes"])
 
 
 def test_leg_derived_fields() -> None:

@@ -84,7 +84,10 @@ def _leg(raw: dict[str, Any] | None) -> dict[str, Any]:
 
 
 def _levels(rows: list[dict[str, Any]], spot: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Top 3 call-OI strikes at/above spot (R1..), top 3 put-OI strikes at/below spot (S1..)."""
+    """Top 3 call-OI at/above spot (R1..) and put-OI at/below spot (S1..) — from `rows` only.
+
+    Callers must pass the ±window display slice so every R/S tag lands on a visible table row.
+    """
     above = sorted(
         (r for r in rows if r["strike"] >= spot),
         key=lambda r: (-r["call"]["oi"], r["strike"]),
@@ -96,6 +99,18 @@ def _levels(rows: list[dict[str, Any]], spot: float) -> tuple[list[dict[str, Any
     resistance = [{"strike": r["strike"], "oi": r["call"]["oi"], "tag": f"R{i}"} for i, r in enumerate(above, 1)]
     support = [{"strike": r["strike"], "oi": r["put"]["oi"], "tag": f"S{i}"} for i, r in enumerate(below, 1)]
     return resistance, support
+
+
+def _major_walls(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Single highest Call OI and Put OI strikes across the full chain (may be far from ATM)."""
+    if not rows:
+        return {"call": None, "put": None}
+    call_row = max(rows, key=lambda r: (r["call"]["oi"], -r["strike"]))
+    put_row = max(rows, key=lambda r: (r["put"]["oi"], -r["strike"]))
+    return {
+        "call": {"strike": call_row["strike"], "oi": call_row["call"]["oi"]},
+        "put": {"strike": put_row["strike"], "oi": put_row["put"]["oi"]},
+    }
 
 
 def build_chain_view(
@@ -121,6 +136,7 @@ def build_chain_view(
             "rows": [],
             "resistance": [],
             "support": [],
+            "major_walls": {"call": None, "put": None},
         }
 
     parsed: list[dict[str, Any]] = []
@@ -148,6 +164,7 @@ def build_chain_view(
             "rows": [],
             "resistance": [],
             "support": [],
+            "major_walls": {"call": None, "put": None},
         }
 
     parsed.sort(key=lambda r: r["strike"])
@@ -156,16 +173,20 @@ def build_chain_view(
     total_call = sum(r["call"]["oi"] for r in parsed)
     total_put = sum(r["put"]["oi"] for r in parsed)
     pcr = (total_put / total_call) if total_call else None
-    resistance, support = _levels(parsed, spot)
-    tags = {r["strike"]: r["tag"] for r in resistance}
-    for s in support:
-        tags[s["strike"]] = s["tag"]
+    major_walls = _major_walls(parsed)
 
     atm_idx = strikes.index(atm)
     lo = max(0, atm_idx - window)
     hi = min(len(parsed), atm_idx + window + 1)
+    window_rows = parsed[lo:hi]
+    # R/S only from the visible ±window so every tag matches a table row
+    resistance, support = _levels(window_rows, spot)
+    tags = {r["strike"]: r["tag"] for r in resistance}
+    for s in support:
+        tags[s["strike"]] = s["tag"]
+
     display = []
-    for r in parsed[lo:hi]:
+    for r in window_rows:
         display.append(
             {
                 "strike": r["strike"],
@@ -198,8 +219,9 @@ def build_chain_view(
         "total_put_oi": total_put,
         "resistance": resistance,
         "support": support,
+        "major_walls": major_walls,
         "rows": display,
         # full chain kept for snapshots / later phases (not shown in the ±window table)
         "all_strikes": parsed,
-        "max_oi": max((max(r["call"]["oi"], r["put"]["oi"]) for r in parsed), default=0.0),
+        "max_oi": max((max(r["call"]["oi"], r["put"]["oi"]) for r in window_rows), default=0.0),
     }

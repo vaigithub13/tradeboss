@@ -23,6 +23,16 @@ export interface OptionsLevel {
   tag: string;
 }
 
+export interface OptionsWall {
+  strike: number;
+  oi: number;
+}
+
+export interface OptionsMajorWalls {
+  call: OptionsWall | null;
+  put: OptionsWall | null;
+}
+
 export interface OptionsRow {
   strike: number;
   call: OptionsLeg;
@@ -49,6 +59,7 @@ export interface OptionsChainResponse {
   total_put_oi?: number;
   resistance?: OptionsLevel[];
   support?: OptionsLevel[];
+  major_walls?: OptionsMajorWalls;
   rows: OptionsRow[];
   max_oi?: number;
 }

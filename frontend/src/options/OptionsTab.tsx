@@ -146,12 +146,50 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
         })}
       </ul>
 
+      <div className="rounded border border-white/10 px-2 py-2">
+        <div className="mb-1 text-[10px] uppercase tracking-wide text-white/40">Major walls</div>
+        <MajorWallLine kind="Call" wall={data.major_walls?.call} spot={spot} />
+        <MajorWallLine kind="Put" wall={data.major_walls?.put} spot={spot} />
+      </div>
+
       <Placeholder title="Build-up Analysis" />
       <Placeholder title="Max Pain & Expected Move" />
       <Placeholder title="Strike Picker" />
       <Placeholder title="Market Bias" />
       <Placeholder title="Pre-market Overview" />
     </aside>
+  );
+}
+
+function MajorWallLine({
+  kind,
+  wall,
+  spot,
+}: {
+  kind: "Call" | "Put";
+  wall?: { strike: number; oi: number } | null;
+  spot: number;
+}) {
+  if (!wall) {
+    return (
+      <div className="flex justify-between py-0.5 font-mono text-[11px] text-white/35">
+        <span>{kind}</span>
+        <span>—</span>
+      </div>
+    );
+  }
+  const dist = wall.strike - spot;
+  return (
+    <div className="flex justify-between gap-2 py-0.5 font-mono text-[11px] text-white/75">
+      <span className={kind === "Call" ? "text-red-300/90" : "text-emerald-300/90"}>{kind}</span>
+      <span className="text-right">
+        {formatStrike(wall.strike)}
+        <span className="ml-1 text-white/35">
+          {formatOiLakhs(wall.oi)} · {dist > 0 ? "+" : ""}
+          {formatStrike(dist)} pts
+        </span>
+      </span>
+    </div>
   );
 }
 

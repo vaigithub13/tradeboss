@@ -36,6 +36,7 @@ def snapshot_row(view: dict[str, Any]) -> dict[str, Any]:
         "total_put_oi": view.get("total_put_oi"),
         "resistance": view.get("resistance") or [],
         "support": view.get("support") or [],
+        "major_walls": view.get("major_walls") or {"call": None, "put": None},
         "strikes": [
             {
                 "strike": s["strike"],

@@ -1493,6 +1493,12 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
   Muhurat one.
 
+## 8 Nov 2026: Options S/R from ±15 window; major walls from full chain
+
+- R1–R3 / S1–S3 use only the displayed ±15 strikes around ATM (every tag is on a visible row).
+- Key Levels adds **Major walls**: highest Call OI and Put OI strikes on the full chain.
+- PCR / total OI still full-chain. Tests updated in `test_options_chain.py`.
+
 ## 8 Nov 2026: Options tab Phase 1 (chain view + snapshots)
 
 - New top-level **Options** tab (Chart | Options). Chart tab, GEX, paper and pre-market View untouched.
