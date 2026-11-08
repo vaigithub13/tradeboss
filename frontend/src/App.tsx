@@ -36,6 +36,9 @@ import { useMarketViewStore } from "./store/marketViewStore";
 import { MarketViewBox, MarketViewPanel } from "./panels/MarketViewPanel";
 import { viewLevels } from "./marketView/present";
 import { gexLevels, gexSummary } from "./chart/gex";
+import { OptionsTab } from "./options/OptionsTab";
+
+type MainView = "chart" | "options";
 
 const POLL_INTERVAL_MS = 3000;
 const NO_PAPER_SIGNALS: PaperSignal[] = [];
@@ -53,6 +56,7 @@ const STATUS_UI: Record<BackendStatus, { label: string; dot: string; text: strin
 };
 
 export default function App() {
+  const [mainView, setMainView] = useState<MainView>("chart");
   const backendStatus = useBackendStore((s) => s.status);
   const poll = useBackendStore((s) => s.poll);
 
@@ -273,7 +277,31 @@ export default function App() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex min-h-11 shrink-0 flex-wrap items-center gap-4 border-b border-white/10 px-3 py-1">
-        <span className="text-sm font-semibold tracking-tight">Chart Analyser</span>
+        <span className="text-sm font-semibold tracking-tight">TradeBoss</span>
+        <div className="flex items-center gap-1 rounded border border-white/10 p-0.5" data-testid="main-view-tabs">
+          <button
+            type="button"
+            className={`rounded px-2.5 py-1 text-xs ${
+              mainView === "chart" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
+            }`}
+            onClick={() => setMainView("chart")}
+            data-testid="tab-chart"
+          >
+            Chart
+          </button>
+          <button
+            type="button"
+            className={`rounded px-2.5 py-1 text-xs ${
+              mainView === "options" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
+            }`}
+            onClick={() => setMainView("options")}
+            data-testid="tab-options"
+          >
+            Options
+          </button>
+        </div>
+        {mainView === "chart" ? (
+          <>
         <SymbolSelector />
         <TimeframeBar info={info} selected={timeframe} onSelect={(tf) => void setTimeframe(tf)} />
         <SessionsMenu />
@@ -338,6 +366,10 @@ export default function App() {
           View
         </button>
         {status === "loading" && <span className="text-xs text-white/40">loading…</span>}
+          </>
+        ) : (
+          <span className="text-xs text-white/45">Nifty option chain</span>
+        )}
         <div className="ml-auto flex items-center gap-2">
           <LiveBadge />
           <DataTokenBadge />
@@ -349,6 +381,11 @@ export default function App() {
         </div>
       </header>
 
+      {mainView === "options" ? (
+        <div className="min-h-0 flex-1">
+          <OptionsTab />
+        </div>
+      ) : (
       <div className="flex min-h-0 flex-1">
       {pineOpen && (
         <div className="h-full shrink-0">
@@ -448,6 +485,7 @@ export default function App() {
         open={analysisOpen}
       />
       </div>
+      )}
     </div>
   );
 }

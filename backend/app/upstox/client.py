@@ -230,6 +230,27 @@ class UpstoxClient:
         return [x for x in data if isinstance(x, dict)]
 
 
+    def option_contracts(self, instrument_key: str) -> list[date]:
+        """GET /v2/option/contract: live option contracts for an underlying → unique expiry dates ASC."""
+        body = self._get("/v2/option/contract", {"instrument_key": instrument_key})
+        data = body.get("data")
+        if data is None:
+            return []
+        if not isinstance(data, list):
+            raise UpstoxApiError("unexpected response shape (no data list)", status=200)
+        expiries: set[date] = set()
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            raw = item.get("expiry") or item.get("expiry_date")
+            if raw is None:
+                continue
+            try:
+                expiries.add(date.fromisoformat(str(raw)[:10]))
+            except ValueError:
+                continue
+        return sorted(expiries)
+
     def option_chain(self, instrument_key: str, expiry: date | str) -> list[dict[str, Any]]:
         """GET /v2/option/chain: one row per strike with call_options / put_options
         (market_data: oi in units, ltp, ...; option_greeks: delta, gamma, iv in %, ...)."""

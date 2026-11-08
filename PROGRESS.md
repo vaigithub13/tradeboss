@@ -1493,6 +1493,18 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
   Muhurat one.
 
+## 8 Nov 2026: Options tab Phase 1 (chain view + snapshots)
+
+- New top-level **Options** tab (Chart | Options). Chart tab, GEX, paper and pre-market View untouched.
+- Backend: `UpstoxClient.option_contracts` (GET /v2/option/contract), `app/options/chain_view.py` (ATM, ΔOI,
+  S/R, PCR from **full** chain), `chain_history.py` → `data/options/<YYYY-MM-DD>.jsonl`,
+  `chain_scheduler.py` (nearest **and** next expiry every 5 min, regular sessions), routes
+  `GET /api/options/expiries` and `GET /api/options/chain`.
+- Off-hours: prefer last snapshot; if none yet, one live Upstox fetch with MARKET CLOSED badge.
+- Timestamps stored/shown as IST (`as_of_ist`). Tests: `tests/test_options_chain.py`.
+- **GEX `data/gex/` missing (not fixed):** recorder landed after Fri 6 Nov close; no regular Mon–Fri
+  session has run with that code yet. Flag default on, token present. Live `/api/gex` works.
+
 ## 7 Nov 2026: automatic market-day session (launchd)
 
 - `backend/scripts/launchd/install-session.sh`: agents `com.tradeboss.session-start` (08:40 IST Mon-Fri) and

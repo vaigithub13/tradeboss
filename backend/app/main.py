@@ -22,6 +22,7 @@ from app.routes.gex import router as gex_router
 from app.routes.indicators import router as indicators_router
 from app.routes.live import router as live_router
 from app.routes.market_view import router as market_view_router
+from app.routes.options import router as options_router
 from app.routes.paper import router as paper_router
 from app.routes.pine import router as pine_router
 from app.routes.upstox import router as upstox_router
@@ -63,7 +64,15 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
         gex = build_scheduler()
         await gex.start()
+    options_rec = None
+    if settings.options_recorder_enabled and settings.upstox_token_value() is not None:
+        from app.options.chain_scheduler import build_scheduler as build_options_scheduler
+
+        options_rec = build_options_scheduler()
+        await options_rec.start()
     yield
+    if options_rec is not None:
+        await options_rec.stop()
     if gex is not None:
         await gex.stop()
     if live is not None:
@@ -79,6 +88,7 @@ app.include_router(indicators_router)
 app.include_router(drawings_router)
 app.include_router(fvg_router)
 app.include_router(gex_router)
+app.include_router(options_router)
 app.include_router(market_view_router)
 app.include_router(upstox_router)
 app.include_router(live_router)

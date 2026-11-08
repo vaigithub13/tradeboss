@@ -67,6 +67,7 @@ def _no_startup_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "upstox_analytics_token", None)
     monkeypatch.setattr(settings, "live_feed_enabled", False)
     monkeypatch.setattr(settings, "gex_recorder_enabled", False)
+    monkeypatch.setattr(settings, "options_recorder_enabled", False)
 
 
 @pytest.fixture

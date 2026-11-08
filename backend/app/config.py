@@ -67,6 +67,9 @@ class Settings(BaseSettings):
     # the close (data/gex/, data/validation/gex_<day>.md). Needs the data token.
     gex_recorder_enabled: bool = True
 
+    # Options tab: full chain snapshots every 5 minutes for nearest + next expiry (data/options/).
+    options_recorder_enabled: bool = True
+
     # Option book recorder. Stays off until it is turned on after the first live session.
     spread_recorder_enabled: bool = False
 
