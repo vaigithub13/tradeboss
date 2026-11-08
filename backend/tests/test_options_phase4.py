@@ -55,8 +55,17 @@ def test_component_scoring_edges() -> None:
     assert bz.score_buildup({"call_doi": 100, "put_doi": 0}) == pytest.approx(-1.0)
     assert bz.score_buildup({"call_doi": 50, "put_doi": 50}) == pytest.approx(0.0)
 
-    assert bz.score_pivot(25100, {"strike": 25000}, one_sigma=200) == pytest.approx(1.0)
-    assert bz.score_pivot(24900, {"strike": 25000}, one_sigma=200) == pytest.approx(-1.0)
+    from app.options.chain_view import PIVOT_READ_ABOVE_CALL, PIVOT_READ_BELOW_CALL, PIVOT_READ_BATTLE
+
+    assert bz.score_pivot(
+        25100, {"strike": 25000, "read": PIVOT_READ_ABOVE_CALL}, one_sigma=200
+    ) == pytest.approx(1.0)
+    assert bz.score_pivot(
+        24900, {"strike": 25000, "read": PIVOT_READ_BELOW_CALL}, one_sigma=200
+    ) == pytest.approx(-1.0)
+    assert bz.score_pivot(
+        25100, {"strike": 25000, "read": PIVOT_READ_BATTLE}, one_sigma=200
+    ) == pytest.approx(0.0)
 
     assert bz.score_pcr({"read": "Strong Bullish"}) == 1.0
     assert bz.score_pcr({"read": "Bearish"}) == -0.5
@@ -86,7 +95,7 @@ def test_build_bias_aggregate() -> None:
         },
         "iv_panel": {"atm_iv": 14.0, "skew": -1.0},
         "max_pain": {"strike": 25100.0},
-        "expected_move": {"one_sigma": {"move": 200.0, "available": True}},
+        "expected_move": {"range_move": 250.0, "move": 200.0},
         "resistance": [{"tag": "R1", "strike": 25200.0}],
         "support": [{"tag": "S1", "strike": 24800.0}],
     }

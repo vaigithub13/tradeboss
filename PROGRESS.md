@@ -1504,7 +1504,7 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 ## 8 Nov 2026: Options Phase 4 — Overview + Bias
 
 - Spot always from the same chain response (`chain_spot_from_rows` / consistency guard).
-- Auto target capped to levels within 1×1σ IV; else
+- Auto target capped to levels within straddle-implied range (straddle/0.8); else
   "No 1:2 setup within today's expected range".
 - Bias −10..+10 from weighted components (build-up, pivot, PCR ΔOI, near PCR, IV trend,
   pre-market checks, Max Pain); expiry-day Max Pain weight 15%.
@@ -1514,6 +1514,18 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - Picker defaults to bias direction; optional "Use bias as confidence" (+0..12 pts,
   UNCALIBRATED). Morning/EOD bias saved under `data/options/bias/<day>.json`.
 - Tests: `tests/test_options_phase4.py`.
+
+## 8 Nov 2026: Options Phase 4 fixes — pivot dual-tag + straddle σ√T
+
+- Pivot no longer dropped when it shares a strike with R1/S1: table/ladder/Overview show
+  `R1 / PIVOT` or `S1 / PIVOT`; Spot vs Pivot scoring kept.
+- Pivot reads cover all 4 above/below × call/put cases plus Battle zone; bias sign from
+  the read (bullish +, bearish −, battle 0), scaled by |spot−pivot| / (½·range_move).
+- Primary expected move = ATM straddle; σ√T_implied = straddle/(0.8×spot) drives level
+  probs, touch %, Auto target cap, and min stop distance. `1σ (IV)` stays info-only in
+  the IV panel with the trading-day T label.
+- Test: level probs invariant when only the IV time convention changes
+  (`test_level_probs_invariant_to_iv_time_convention`).
 
 ## 8 Nov 2026: Strike Picker win chance + EV ranking
 

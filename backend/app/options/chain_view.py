@@ -20,6 +20,8 @@ PIVOT_STRONG = 0.80
 UNAVAILABLE = "option chain empty"
 
 PIVOT_READ_ABOVE_CALL = "Above = bullish, short covering risk for call writers"
+PIVOT_READ_BELOW_CALL = "Resistance overhead — call writers in control (bearish while below)"
+PIVOT_READ_ABOVE_PUT = "Support below — put writers in control (bullish while above)"
 PIVOT_READ_BELOW_PUT = "Below = bearish, put writers under pressure"
 PIVOT_READ_BATTLE = "Battle zone"
 
@@ -206,11 +208,38 @@ def _major_walls(rows: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _pivot_read(spot: float, strike: float, *, heavy_call: bool, heavy_put: bool) -> str:
-    if spot > strike and heavy_call:
+    """All four above/below × call/put cases, plus battle when both sides are heavy."""
+    if heavy_call and heavy_put:
+        return PIVOT_READ_BATTLE
+    above = spot > strike
+    below = spot < strike
+    if above and heavy_call:
         return PIVOT_READ_ABOVE_CALL
-    if spot < strike and heavy_put:
+    if below and heavy_call:
+        return PIVOT_READ_BELOW_CALL
+    if above and heavy_put:
+        return PIVOT_READ_ABOVE_PUT
+    if below and heavy_put:
         return PIVOT_READ_BELOW_PUT
     return PIVOT_READ_BATTLE
+
+
+def pivot_bias_sign(read: str | None) -> float:
+    """+1 bullish reads, −1 bearish, 0 battle / unknown."""
+    if read in (PIVOT_READ_ABOVE_CALL, PIVOT_READ_ABOVE_PUT):
+        return 1.0
+    if read in (PIVOT_READ_BELOW_CALL, PIVOT_READ_BELOW_PUT):
+        return -1.0
+    return 0.0
+
+
+def format_level_tag(rs_tag: str | None, *, is_pivot: bool) -> str | None:
+    """Combine R1/S1 with PIVOT when they share a strike: 'R1 / PIVOT'."""
+    if is_pivot and rs_tag:
+        return f"{rs_tag} / PIVOT"
+    if is_pivot:
+        return "PIVOT"
+    return rs_tag
 
 
 def _pivot(rows: list[dict[str, Any]], spot: float) -> dict[str, Any] | None:
@@ -336,23 +365,22 @@ def build_chain_view(
     pivot_strike = pivot["strike"] if pivot else None
     max_pain_strike = (phase2.get("max_pain") or {}).get("strike")
 
+    # Mark R/S levels that coincide with the pivot (lists keep their R1/S1 tags)
+    if pivot is not None:
+        for pool in (resistance, support):
+            for lv in pool:
+                if float(lv["strike"]) == float(pivot["strike"]):
+                    lv["also_pivot"] = True
+                    lv["display_tag"] = format_level_tag(str(lv["tag"]), is_pivot=True)
+
     display = []
     for r in window_rows:
         lvl = level_by_strike.get(r["strike"])
         is_pivot = pivot_strike is not None and r["strike"] == pivot_strike
-        # Prefer PIVOT on the table when both apply; R/S remain in Key Levels lists
-        if is_pivot:
-            tag = "PIVOT"
-            strength = None
-            edge = False
-        elif lvl:
-            tag = lvl["tag"]
-            strength = lvl.get("strength")
-            edge = bool(lvl.get("edge"))
-        else:
-            tag = None
-            strength = None
-            edge = False
+        rs_tag = str(lvl["tag"]) if lvl else None
+        tag = format_level_tag(rs_tag, is_pivot=is_pivot)
+        strength = lvl.get("strength") if lvl else None
+        edge = bool(lvl.get("edge")) if lvl else False
         display.append(
             {
                 "strike": r["strike"],
@@ -362,6 +390,7 @@ def build_chain_view(
                 "tag": tag,
                 "strength": strength,
                 "edge": edge,
+                "is_pivot": is_pivot,
                 "max_pain": max_pain_strike is not None and r["strike"] == max_pain_strike,
                 "call_itm": r["strike"] < spot,
                 "put_itm": r["strike"] > spot,

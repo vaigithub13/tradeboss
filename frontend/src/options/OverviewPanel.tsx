@@ -135,7 +135,6 @@ export function OverviewPanel({ data }: { data: OptionsChainResponse }) {
 
   const lv = overview.levels;
   const em = overview.expected_range;
-  const os = em.one_sigma;
   const mp = em.market_priced;
   const ch = bias.changed_since_yesterday;
 
@@ -152,17 +151,22 @@ export function OverviewPanel({ data }: { data: OptionsChainResponse }) {
 
       <div className="mt-2 space-y-1 text-[11px] text-white/65">
         <p data-testid="overview-levels">
-          Levels: R1 {lv.r1 != null ? formatStrike(lv.r1) : "—"} ({fmtDist(lv.r1_dist)}) · Pivot{" "}
-          {lv.pivot != null ? formatStrike(lv.pivot) : "—"} ({fmtDist(lv.pivot_dist)}) · S1{" "}
-          {lv.s1 != null ? formatStrike(lv.s1) : "—"} ({fmtDist(lv.s1_dist)}) · Max Pain{" "}
-          {lv.max_pain != null ? formatStrike(lv.max_pain) : "—"} ({fmtDist(lv.max_pain_dist)})
+          Levels: R1 {lv.r1 != null ? formatStrike(lv.r1) : "—"} ({fmtDist(lv.r1_dist)}) ·{" "}
+          {lv.pivot_label ?? "Pivot"} {lv.pivot != null ? formatStrike(lv.pivot) : "—"} (
+          {fmtDist(lv.pivot_dist)}) · S1 {lv.s1 != null ? formatStrike(lv.s1) : "—"} ({fmtDist(lv.s1_dist)}) ·
+          Max Pain {lv.max_pain != null ? formatStrike(lv.max_pain) : "—"} ({fmtDist(lv.max_pain_dist)})
         </p>
+        {lv.pivot_read ? (
+          <p className="text-[10px] text-sky-100/60" data-testid="overview-pivot-read">
+            {lv.pivot_label ?? "PIVOT"}: {lv.pivot_read}
+          </p>
+        ) : null}
         <p data-testid="overview-em">
-          Today’s range: 1σ{" "}
-          {os?.move != null ? `±${formatStrike(os.move)} → ${formatStrike(os.lower)} / ${formatStrike(os.upper)}` : "—"}
-          {" · "}
-          Market-priced{" "}
+          Market-priced (ATM straddle){" "}
           {mp?.move != null ? `±${formatStrike(mp.move)} → ${formatStrike(mp.lower)} / ${formatStrike(mp.upper)}` : "—"}
+          {overview.expected_range.range_move != null ? (
+            <> · implied range ±{formatStrike(overview.expected_range.range_move)}</>
+          ) : null}
         </p>
         <p data-testid="overview-picker">Strike picker: {overview.picker}</p>
       </div>

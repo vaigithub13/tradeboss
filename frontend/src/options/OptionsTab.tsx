@@ -234,29 +234,36 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
               </li>
             );
           }
-          if (item.kind === "PIVOT" && item.pivot) {
+          if ((item.kind === "PIVOT" || item.kind === "RS_PIVOT") && item.pivot) {
             const p = item.pivot;
             const dist = p.strike - spot;
+            const title = item.label ?? (item.lvl ? `${item.lvl.tag} / PIVOT` : "PIVOT");
             return (
               <li
-                key="PIVOT"
+                key={item.key}
                 className="rounded border border-sky-400/40 bg-sky-400/10 px-2 py-1.5"
                 data-testid="options-pivot"
               >
                 <div className="flex justify-between font-mono text-sky-100">
-                  <span>PIVOT</span>
+                  <span>
+                    {title}
+                    {item.lvl?.edge ? (
+                      <span className="ml-1 text-[9px] text-amber-300/80">edge</span>
+                    ) : null}
+                  </span>
                   <span>{formatStrike(p.strike)}</span>
                 </div>
                 <div className="mt-0.5 flex justify-between text-[10px] text-white/45">
                   <span>
                     C {formatOiLakhs(p.call_oi)} · P {formatOiLakhs(p.put_oi)}
+                    {item.lvl ? ` · ${formatOiLakhs(item.lvl.oi)}` : ""}
                   </span>
                   <span>
                     {dist > 0 ? "+" : ""}
                     {formatStrike(dist)} pts
                   </span>
                 </div>
-                <ProbLine pClose={p.p_close} pTouch={p.p_touch} />
+                <ProbLine pClose={p.p_close ?? item.lvl?.p_close} pTouch={p.p_touch ?? item.lvl?.p_touch} />
                 <p className="mt-1 text-[10px] leading-snug text-sky-100/70">{p.read}</p>
               </li>
             );
@@ -288,7 +295,7 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
             <li key={item.key} className="rounded border border-white/10 px-2 py-1.5">
               <div className="flex justify-between font-mono">
                 <span className={item.kind === "R" ? "text-red-300" : "text-emerald-300"}>
-                  {lvl?.tag ?? item.key}
+                  {item.label ?? lvl?.tag ?? item.key}
                   {lvl?.edge ? <span className="ml-1 text-[9px] text-amber-300/80">edge</span> : null}
                 </span>
                 <span>{lvl ? formatStrike(lvl.strike) : "—"}</span>
@@ -380,16 +387,6 @@ function MaxPainPanel({ data }: { data: OptionsChainResponse }) {
             {formatStrike(em.market_priced?.lower ?? em.lower)} /{" "}
             {formatStrike(em.market_priced?.upper ?? em.upper)}
           </div>
-          {em.one_sigma?.available !== false && (em.one_sigma || em.iv) ? (
-            <div className="text-white/45">
-              <div className="text-[9px] uppercase tracking-wide text-white/35">
-                {em.one_sigma?.label ?? "1σ range (IV), ≈68% probability"}
-              </div>
-              ±{formatStrike(em.one_sigma?.move ?? em.iv?.move ?? 0)} →{" "}
-              {formatStrike(em.one_sigma?.lower ?? em.iv?.lower ?? 0)} /{" "}
-              {formatStrike(em.one_sigma?.upper ?? em.iv?.upper ?? 0)}
-            </div>
-          ) : null}
         </div>
       ) : (
         <p className="mt-1 text-[10px] text-white/30">Expected move unavailable</p>
@@ -794,6 +791,15 @@ function IvPanel({ data }: { data: OptionsChainResponse }) {
           <span className="text-white/30"> ({iv.percentile.days}/{iv.percentile.need}d)</span>
         ) : null}
       </div>
+      {iv.one_sigma_iv?.available !== false && iv.one_sigma_iv?.move != null ? (
+        <div className="mt-1 text-[9px] text-white/40" data-testid="options-iv-one-sigma">
+          <div className="uppercase tracking-wide text-white/30">
+            {iv.one_sigma_iv.label ?? `1σ (IV)${iv.t_convention ? `, ${iv.t_convention}` : ""}`}
+          </div>
+          ±{formatStrike(iv.one_sigma_iv.move)} → {formatStrike(iv.one_sigma_iv.lower)} /{" "}
+          {formatStrike(iv.one_sigma_iv.upper)}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1013,7 +1019,7 @@ function ChainRow({
           {row.tag ? (
             <span
               className={`rounded px-1 text-[9px] ${
-                row.tag === "PIVOT"
+                row.tag === "PIVOT" || (row.tag?.includes("PIVOT") ?? false)
                   ? "bg-sky-500/20 text-sky-200"
                   : row.tag.startsWith("R")
                     ? "bg-red-500/20 text-red-300"

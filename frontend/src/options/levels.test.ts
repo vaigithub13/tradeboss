@@ -41,4 +41,19 @@ describe("buildKeyLevelsLadder", () => {
     const prices = buildKeyLevelsLadder(fridayClose).map((item) => item.price);
     expect(prices).toEqual([25500, 25300, 25200, 25030.35, 25000, 24500, 24400, 24300]);
   });
+
+  it("merges R1 with PIVOT when they share a strike", () => {
+    const merged = buildKeyLevelsLadder({
+      ...fridayClose,
+      resistance: [
+        { strike: 25000, oi: 11_000_000, tag: "R1", strength: "Strong" },
+        { strike: 25200, oi: 5_000_000, tag: "R2", strength: "Medium" },
+      ],
+      pivot: { ...fridayClose.pivot!, strike: 25000 },
+    });
+    const labels = merged.map((i) => i.label ?? i.key);
+    expect(labels).toContain("R1 / PIVOT");
+    expect(labels.filter((l) => l === "PIVOT" || l === "R1")).toEqual([]);
+    expect(merged.filter((i) => Math.abs(i.price - 25000) < 1e-6)).toHaveLength(1);
+  });
 });

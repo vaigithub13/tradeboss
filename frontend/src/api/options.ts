@@ -127,6 +127,12 @@ export interface IvPercentile {
   need: number;
 }
 
+export interface ExpectedMoveBand {
+  move: number;
+  upper: number;
+  lower: number;
+}
+
 export interface IvPanel {
   atm_iv: number | null;
   call_iv?: number | null;
@@ -138,19 +144,20 @@ export interface IvPanel {
   percentile: IvPercentile;
   iv_unit?: string;
   theta_unit?: string;
-}
-
-export interface ExpectedMoveBand {
-  move: number;
-  upper: number;
-  lower: number;
+  /** Trading-day T convention used for the IV 1σ info line. */
+  t_convention?: string;
+  one_sigma_iv?: (ExpectedMoveBand & { label?: string; available?: boolean; info_only?: boolean }) | null;
 }
 
 export interface ExpectedMove {
   t_years: number;
   trading_days?: number;
+  t_convention?: string;
+  implied_vs?: number | null;
+  range_move?: number;
   market_priced?: ExpectedMoveBand & { label?: string };
-  one_sigma?: ExpectedMoveBand & { label?: string; available?: boolean };
+  straddle_range?: ExpectedMoveBand & { label?: string };
+  one_sigma?: ExpectedMoveBand & { label?: string; available?: boolean; info_only?: boolean };
   straddle: ExpectedMoveBand;
   iv: ExpectedMoveBand | null;
   primary: string;
@@ -289,14 +296,17 @@ export interface OptionsOverview {
     r1_dist?: number | null;
     pivot?: number | null;
     pivot_dist?: number | null;
+    pivot_label?: string | null;
+    pivot_read?: string | null;
     s1?: number | null;
     s1_dist?: number | null;
     max_pain?: number | null;
     max_pain_dist?: number | null;
   };
   expected_range: {
-    one_sigma?: (ExpectedMoveBand & { label?: string; available?: boolean }) | null;
     market_priced?: (ExpectedMoveBand & { label?: string }) | null;
+    range_move?: number | null;
+    one_sigma?: (ExpectedMoveBand & { label?: string; available?: boolean; info_only?: boolean }) | null;
   };
   picker: string;
 }

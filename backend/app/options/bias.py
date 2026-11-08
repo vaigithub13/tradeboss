@@ -86,14 +86,20 @@ def score_buildup(analysis: dict[str, Any] | None) -> float:
 
 
 def score_pivot(spot: float, pivot: dict[str, Any] | None, *, one_sigma: float | None) -> float:
+    """Sign from pivot read (bullish/bearish/battle); magnitude from |spot−pivot| / scale."""
     if not pivot or pivot.get("strike") is None:
         return 0.0
+    from app.options.chain_view import pivot_bias_sign
+
+    sign = pivot_bias_sign(pivot.get("read"))
+    if sign == 0.0:
+        return 0.0  # battle zone / at-strike
     p = float(pivot["strike"])
-    dist = float(spot) - p
-    if abs(dist) < 1e-9:
+    dist = abs(float(spot) - p)
+    if dist < 1e-9:
         return 0.0
     scale = max(50.0, 0.5 * float(one_sigma)) if one_sigma and one_sigma > 0 else 50.0
-    return _clip(dist / scale)
+    return _clip(sign * dist / scale)
 
 
 def _pcr_read_score(read: str | None) -> float:
@@ -247,12 +253,12 @@ def build_bias(
     """Attachable bias block for the Options chain response."""
     spot = float(view.get("spot") or 0.0)
     em = view.get("expected_move") or {}
+    # Scale pivot distance by straddle-implied range (straddle/0.8), not IV 1σ
     one_sigma = None
-    osig = em.get("one_sigma") or {}
-    if osig.get("move") is not None and osig.get("available") is not False:
-        one_sigma = float(osig["move"])
-    elif em.get("iv") and em["iv"].get("move") is not None:
-        one_sigma = float(em["iv"]["move"])
+    if em.get("range_move") is not None:
+        one_sigma = float(em["range_move"])
+    elif em.get("move") is not None:
+        one_sigma = float(em["move"])
 
     iv = view.get("iv_panel") or {}
     prev_iv = None
@@ -334,6 +340,12 @@ def overview_summary(view: dict[str, Any], bias: dict[str, Any]) -> dict[str, An
     s1 = level_strike(view.get("support"), "S1")
     pivot = view.get("pivot")
     pivot_k = float(pivot["strike"]) if pivot and pivot.get("strike") is not None else None
+    pivot_label = "PIVOT"
+    if pivot_k is not None:
+        if r1 is not None and abs(r1 - pivot_k) < 1e-6:
+            pivot_label = "R1 / PIVOT"
+        elif s1 is not None and abs(s1 - pivot_k) < 1e-6:
+            pivot_label = "S1 / PIVOT"
     mp = view.get("max_pain")
     mp_k = float(mp["strike"]) if mp and mp.get("strike") is not None else None
     em = view.get("expected_move") or {}
@@ -357,18 +369,20 @@ def overview_summary(view: dict[str, Any], bias: dict[str, Any]) -> dict[str, An
             "r1_dist": _dist(r1),
             "pivot": pivot_k,
             "pivot_dist": _dist(pivot_k),
+            "pivot_label": pivot_label,
+            "pivot_read": (pivot or {}).get("read") if pivot else None,
             "s1": s1,
             "s1_dist": _dist(s1),
             "max_pain": mp_k,
             "max_pain_dist": _dist(mp_k),
         },
         "expected_range": {
-            "one_sigma": em.get("one_sigma"),
             "market_priced": em.get("market_priced") or {
                 "move": em.get("move"),
                 "lower": em.get("lower"),
                 "upper": em.get("upper"),
             },
+            "range_move": em.get("range_move"),
         },
         "picker": pick_line,
     }

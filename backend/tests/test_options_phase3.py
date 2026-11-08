@@ -238,9 +238,54 @@ def test_prob_close_and_touch_lognormal() -> None:
 
 def test_attach_probs_ignores_pop_field() -> None:
     levels = [{"strike": 25100.0, "tag": "R1", "oi": 1, "pop": 0.99}]
-    out = p3.attach_level_probs(levels, spot=25000, atm_iv_pct=15.0, t_years=7 / 365)
+    vs = 0.15 * math.sqrt(7 / 365)
+    out = p3.attach_level_probs(levels, spot=25000, vs=vs)
     assert out[0]["p_close"] != 0.99
-    assert out[0]["p_close"] == p3.prob_close_beyond(25000, 25100, 0.15, 7 / 365)
+    assert out[0]["p_close"] == p3.prob_close_beyond_vs(25000, 25100, vs)
+
+
+def test_level_probs_invariant_to_iv_time_convention() -> None:
+    """Probs come from straddle-implied σ√T — changing only the IV T convention must not move them."""
+    spot, straddle, atm_iv = 25000.0, 200.0, 20.0
+    vs = p3.straddle_implied_vs(spot, straddle)
+    assert vs is not None
+    levels = [{"strike": 25200.0, "tag": "R1"}]
+    with_calendar_t = p3.attach_level_probs(levels, spot=spot, vs=vs)
+    with_trading_t = p3.attach_level_probs(levels, spot=spot, vs=vs)
+    assert with_calendar_t[0]["p_close"] == with_trading_t[0]["p_close"]
+    # Contrapositive: the old IV×√T path WOULD move if T convention changed
+    iv_vs_cal = p3.iv_to_sigma(atm_iv) * math.sqrt(5 / 365)
+    iv_vs_td = p3.iv_to_sigma(atm_iv) * math.sqrt(5 / 252)
+    assert iv_vs_cal != pytest.approx(iv_vs_td)
+    assert p3.prob_close_beyond_vs(spot, 25200, iv_vs_cal) != pytest.approx(
+        p3.prob_close_beyond_vs(spot, 25200, iv_vs_td)
+    )
+    # Primary path stays on straddle vs regardless
+    assert with_calendar_t[0]["p_close"] == p3.prob_close_beyond_vs(spot, 25200, vs)
+    em_a = p3.build_expected_move(
+        spot=spot,
+        call_ltp=100.0,
+        put_ltp=100.0,
+        atm_iv_pct=atm_iv,
+        now=ts(2026, 11, 7, 15, 30),
+        expiry="2026-11-17",
+        is_trading_day=lambda d: d.weekday() < 5,
+    )
+    em_b = p3.build_expected_move(
+        spot=spot,
+        call_ltp=100.0,
+        put_ltp=100.0,
+        atm_iv_pct=atm_iv,
+        now=ts(2026, 11, 7, 15, 30),
+        expiry="2026-11-17",
+        is_trading_day=lambda d: True,  # denser "trading" calendar → different IV T
+    )
+    # Straddle-implied vs identical; IV 1σ info line may differ
+    assert em_a["implied_vs"] == pytest.approx(em_b["implied_vs"])
+    assert em_a["range_move"] == pytest.approx(em_b["range_move"])
+    pa = p3.attach_level_probs(levels, spot=spot, vs=em_a["implied_vs"])
+    pb = p3.attach_level_probs(levels, spot=spot, vs=em_b["implied_vs"])
+    assert pa[0]["p_close"] == pb[0]["p_close"]
 
 
 # ------------------------------------------------------------------ Stop buffer

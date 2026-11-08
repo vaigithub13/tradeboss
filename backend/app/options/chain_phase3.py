@@ -26,7 +26,9 @@ SKEW_DELTA = 0.25
 IV_HISTORY_DAYS = 20
 IV_MIN_DTE_DAYS = 3  # skip nearest expiry on its last calendar days
 T_FLOOR_MINUTES = 15
-TRADING_DAYS_PER_YEAR = 252  # T = trading_days / 252 for EM + probs
+TRADING_DAYS_PER_YEAR = 252  # T = trading_days / 252 for IV info line only
+# Straddle → σ√T: empirical ATM straddle ≈ 0.8 × spot × σ√T
+STRADDLE_SIGMA_FACTOR = 0.8
 TOUCH_CAP = 0.95
 STOP_BUFFER_PTS = 20.0
 STOP_BUFFER_PCT = 0.001  # 0.1% of spot
@@ -400,19 +402,37 @@ def expected_move_iv(spot: float, atm_iv_pct: float, t_years: float) -> float:
     return float(spot) * iv_to_sigma(atm_iv_pct) * math.sqrt(t_years)
 
 
+def straddle_implied_vs(spot: float, straddle_move: float) -> float | None:
+    """σ√T implied by ATM straddle: straddle / (0.8 × spot)."""
+    if spot <= 0 or straddle_move <= 0:
+        return None
+    return float(straddle_move) / (STRADDLE_SIGMA_FACTOR * float(spot))
+
+
+def straddle_range_move(straddle_move: float) -> float:
+    """Index-point range for Auto cap / stop floor: straddle / 0.8."""
+    return float(straddle_move) / STRADDLE_SIGMA_FACTOR
+
+
 def expected_move_bands(spot: float, move: float) -> dict[str, float]:
     return {"move": move, "upper": spot + move, "lower": spot - move}
 
 
-def prob_close_beyond(spot: float, level: float, sigma: float, t_years: float) -> float | None:
-    """P(S_T beyond level at expiry). Upside N(d2); downside N(−d2). r = q = 0."""
-    if spot <= 0 or level <= 0 or sigma <= 0 or t_years <= 0:
+def prob_close_beyond_vs(spot: float, level: float, vs: float) -> float | None:
+    """P(S_T beyond level) from a single σ√T (= vs). Upside N(d2); downside N(−d2)."""
+    if spot <= 0 or level <= 0 or vs <= 0:
         return None
-    vs = sigma * math.sqrt(t_years)
-    d2 = (math.log(spot / level) - 0.5 * sigma * sigma * t_years) / vs
+    d2 = (math.log(spot / level) - 0.5 * vs * vs) / vs
     if level >= spot:
         return ncdf(d2)
     return ncdf(-d2)
+
+
+def prob_close_beyond(spot: float, level: float, sigma: float, t_years: float) -> float | None:
+    """P(S_T beyond level at expiry) via IV×√T (info path only). Prefer prob_close_beyond_vs."""
+    if spot <= 0 or level <= 0 or sigma <= 0 or t_years <= 0:
+        return None
+    return prob_close_beyond_vs(spot, level, sigma * math.sqrt(t_years))
 
 
 def prob_touch(p_close: float | None, *, cap: float = TOUCH_CAP) -> float | None:
@@ -425,25 +445,26 @@ def attach_level_probs(
     levels: list[dict[str, Any]],
     *,
     spot: float,
-    atm_iv_pct: float | None,
-    t_years: float,
+    vs: float | None,
 ) -> list[dict[str, Any]]:
-    if atm_iv_pct is None or atm_iv_pct <= 0 or t_years <= 0:
+    """Attach close/touch probs from straddle-implied σ√T (`vs`). Independent of IV T convention."""
+    if vs is None or vs <= 0:
         return [{**lvl, "p_close": None, "p_touch": None} for lvl in levels]
-    sigma = iv_to_sigma(atm_iv_pct)
     out = []
     for lvl in levels:
         strike = float(lvl["strike"])
-        pc = prob_close_beyond(spot, strike, sigma, t_years)
+        pc = prob_close_beyond_vs(spot, strike, vs)
         out.append({**lvl, "p_close": pc, "p_touch": prob_touch(pc)})
     return out
 
 
-def _level_prob(obj: dict[str, Any] | None, *, spot: float, sigma: float, t_years: float) -> dict[str, Any] | None:
+def _level_prob(obj: dict[str, Any] | None, *, spot: float, vs: float | None) -> dict[str, Any] | None:
     if obj is None:
         return None
     strike = float(obj["strike"])
-    pc = 0.5 if abs(strike - spot) < 1e-9 else prob_close_beyond(spot, strike, sigma, t_years)
+    if vs is None or vs <= 0:
+        return {**obj, "p_close": None, "p_touch": None}
+    pc = 0.5 if abs(strike - spot) < 1e-9 else prob_close_beyond_vs(spot, strike, vs)
     return {**obj, "p_close": pc, "p_touch": prob_touch(pc)}
 
 
@@ -876,26 +897,41 @@ def build_expected_move(
     expiry: str,
     is_trading_day: Callable[[date], bool],
 ) -> dict[str, Any]:
-    """Two labelled moves: market-priced ATM straddle, and 1σ IV range (≈68%)."""
+    """Primary = ATM straddle; σ√T_implied = straddle/(0.8×spot) for probs / Auto / stop.
+
+    1σ (IV) is info-only (trading-day T = minutes/375/252).
+    """
     t_years = years_to_expiry_trading(now, expiry, is_trading_day)
     trading_days = t_years * TRADING_DAYS_PER_YEAR
     straddle_move = expected_move_straddle(call_ltp, put_ltp)
     straddle = expected_move_bands(spot, straddle_move)
+    vs = straddle_implied_vs(spot, straddle_move)
+    range_pts = straddle_range_move(straddle_move) if straddle_move > 0 else 0.0
+    range_band = expected_move_bands(spot, range_pts)
     iv_move = expected_move_iv(spot, atm_iv_pct, t_years) if atm_iv_pct is not None else None
     iv_band = expected_move_bands(spot, iv_move) if iv_move is not None else None
+    t_label = f"trading days/252 (T={t_years:.5f}, ≈{trading_days:.2f}d)"
     return {
         "t_years": t_years,
         "trading_days": trading_days,
+        "t_convention": t_label,
+        "implied_vs": vs,
+        "range_move": range_pts,  # straddle/0.8 — Auto cap + stop EM
         "market_priced": {
             **straddle,
             "label": "Market-priced move (ATM straddle)",
         },
+        "straddle_range": {
+            **range_band,
+            "label": "Straddle-implied range (÷0.8)",
+        },
+        # IV 1σ — info only; not used for probs / Auto / stop
         "one_sigma": {
             **(iv_band or {"move": 0.0, "upper": spot, "lower": spot}),
-            "label": "1σ range (IV), ≈68% probability",
+            "label": f"1σ (IV), {t_label}",
             "available": iv_band is not None,
+            "info_only": True,
         },
-        # backwards-compatible aliases (market-priced is primary for stops / walk distance)
         "straddle": straddle,
         "iv": iv_band,
         "primary": "market_priced",
@@ -1153,47 +1189,35 @@ def enrich_phase3(
         is_trading_day=is_trading_day,
     )
     view["expected_move"] = em
+    # Stash IV T convention on the IV panel for the info line
+    if isinstance(view.get("iv_panel"), dict):
+        view["iv_panel"]["t_convention"] = em.get("t_convention")
+        view["iv_panel"]["one_sigma_iv"] = em.get("one_sigma")
 
-    if atm_iv_pct is not None and atm_iv_pct > 0 and t_years > 0:
-        sigma = iv_to_sigma(atm_iv_pct)
-        view["resistance"] = attach_level_probs(
-            view.get("resistance") or [], spot=spot, atm_iv_pct=atm_iv_pct, t_years=t_years
-        )
-        view["support"] = attach_level_probs(
-            view.get("support") or [], spot=spot, atm_iv_pct=atm_iv_pct, t_years=t_years
-        )
-        view["pivot"] = _level_prob(view.get("pivot"), spot=spot, sigma=sigma, t_years=t_years)
-        view["max_pain"] = _level_prob(view.get("max_pain"), spot=spot, sigma=sigma, t_years=t_years)
-    else:
-        view["resistance"] = attach_level_probs(
-            view.get("resistance") or [], spot=spot, atm_iv_pct=None, t_years=t_years
-        )
-        view["support"] = attach_level_probs(
-            view.get("support") or [], spot=spot, atm_iv_pct=None, t_years=t_years
-        )
+    vs = em.get("implied_vs")
+    view["resistance"] = attach_level_probs(view.get("resistance") or [], spot=spot, vs=vs)
+    view["support"] = attach_level_probs(view.get("support") or [], spot=spot, vs=vs)
+    view["pivot"] = _level_prob(view.get("pivot"), spot=spot, vs=vs)
+    view["max_pain"] = _level_prob(view.get("max_pain"), spot=spot, vs=vs)
 
     resistance = view.get("resistance") or []
     support = view.get("support") or []
     pivot = view.get("pivot")
-    one_sigma = None
-    osig = em.get("one_sigma") or {}
-    if osig.get("available") is not False and osig.get("move") is not None:
-        one_sigma = float(osig["move"])
-    elif em.get("iv") and em["iv"].get("move") is not None:
-        one_sigma = float(em["iv"]["move"])
+    # Auto cap + stop EM walk use straddle/0.8 (not IV 1σ)
+    range_move = float(em["range_move"]) if em.get("range_move") else None
     common = dict(
         rows=all_rows,
         spot=spot,
         resistance=resistance,
         support=support,
         pivot=pivot,
-        expected_move=em.get("move"),
+        expected_move=range_move if range_move else em.get("move"),
         lot_size=lot_size,
         now=now,
         expiry=expiry,
         hold_mode=hold_mode,
         is_trading_day=is_trading_day,
-        one_sigma_move=one_sigma,
+        one_sigma_move=range_move,  # param name historical; value is straddle/0.8
     )
     bull_auto = _picker_for(direction="Bullish", target_mode="Auto", **common)  # type: ignore[arg-type]
     bear_auto = _picker_for(direction="Bearish", target_mode="Auto", **common)  # type: ignore[arg-type]
@@ -1247,11 +1271,7 @@ def rebuild_strike_picker(
         {"strike": r["strike"], "call": r["call"], "put": r["put"]} for r in view.get("rows", [])
     ]
     em_block = view.get("expected_move") or {}
-    em = em_block.get("move")
-    osig = em_block.get("one_sigma") or {}
-    one_sigma = None
-    if osig.get("available") is not False and osig.get("move") is not None:
-        one_sigma = float(osig["move"])
+    range_move = em_block.get("range_move") or em_block.get("move")
     lot = (view.get("strike_picker") or {}).get("lot_size")
     return _picker_for(
         all_rows,
@@ -1260,14 +1280,14 @@ def rebuild_strike_picker(
         resistance=view.get("resistance") or [],
         support=view.get("support") or [],
         pivot=view.get("pivot"),
-        expected_move=em,
+        expected_move=range_move,
         lot_size=lot,
         now=int(view["as_of"]),
         expiry=str(view["expiry"]),
         hold_mode=hold_mode,
         is_trading_day=is_trading_day,
         target_mode=target_mode,
-        one_sigma_move=one_sigma,
+        one_sigma_move=float(range_move) if range_move is not None else None,
     )
 
 

@@ -196,7 +196,8 @@ def test_pivot_is_heavy_oi_within_two_strikes_of_spot() -> None:
     rows = []
     for strike in range(24800, 25300, 50):
         call_oi = 112_000_000 if strike == 25000 else 1_000_000 + strike
-        put_oi = 5_000_000 if strike == 25000 else 500_000
+        # Put peak far below the band so pivot is call-only (not battle)
+        put_oi = 50_000_000 if strike == 24800 else 500_000
         rows.append(row(float(strike), leg(oi=call_oi), leg(oi=put_oi), spot=25030.0))
     out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
     pivot = out["pivot"]
@@ -204,8 +205,9 @@ def test_pivot_is_heavy_oi_within_two_strikes_of_spot() -> None:
     assert pivot["strike"] == 25000.0
     assert pivot["tag"] == "PIVOT"
     assert pivot["heavy_call"] is True
+    assert pivot["heavy_put"] is False
     assert pivot["read"] == chain_view.PIVOT_READ_ABOVE_CALL
-    tagged = [r for r in out["rows"] if r["tag"] == "PIVOT"]
+    tagged = [r for r in out["rows"] if r["tag"] and "PIVOT" in str(r["tag"])]
     assert len(tagged) == 1 and tagged[0]["strike"] == 25000.0
 
 
@@ -235,7 +237,51 @@ def test_pivot_below_spot_with_heavy_put() -> None:
     assert out["pivot"]["strike"] == 25050.0
     assert out["pivot"]["heavy_put"] is True
     assert out["pivot"]["heavy_call"] is False
+    # Spot below pivot + heavy put → bearish-under-pressure
     assert out["pivot"]["read"] == chain_view.PIVOT_READ_BELOW_PUT
+
+
+def test_pivot_all_four_reads_and_battle() -> None:
+    assert (
+        chain_view._pivot_read(25100, 25000, heavy_call=True, heavy_put=False)
+        == chain_view.PIVOT_READ_ABOVE_CALL
+    )
+    assert (
+        chain_view._pivot_read(24900, 25000, heavy_call=True, heavy_put=False)
+        == chain_view.PIVOT_READ_BELOW_CALL
+    )
+    assert (
+        chain_view._pivot_read(25100, 25000, heavy_call=False, heavy_put=True)
+        == chain_view.PIVOT_READ_ABOVE_PUT
+    )
+    assert (
+        chain_view._pivot_read(24900, 25000, heavy_call=False, heavy_put=True)
+        == chain_view.PIVOT_READ_BELOW_PUT
+    )
+    assert (
+        chain_view._pivot_read(25100, 25000, heavy_call=True, heavy_put=True)
+        == chain_view.PIVOT_READ_BATTLE
+    )
+
+
+def test_pivot_keeps_r1_tag_when_coincident() -> None:
+    """Heavy call at nearest resistance → table shows 'R1 / PIVOT', lists keep R1 + pivot."""
+    # Sparse strikes so 25100 is the first above spot (R1) and the only heavy-call in the ±100 band
+    rows = []
+    for strike in (24800, 24900, 25000, 25100, 25200, 25300):
+        call_oi = 50_000_000 if strike == 25100 else 1_000_000
+        put_oi = 50_000_000 if strike == 24800 else 100_000
+        rows.append(row(float(strike), leg(oi=call_oi), leg(oi=put_oi), spot=25050.0))
+    out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
+    assert out["pivot"] is not None
+    assert out["pivot"]["strike"] == 25100.0
+    r1 = next(r for r in out["resistance"] if r["tag"] == "R1")
+    assert r1["strike"] == 25100.0
+    assert r1.get("also_pivot") is True
+    assert r1.get("display_tag") == "R1 / PIVOT"
+    row_25100 = next(r for r in out["rows"] if r["strike"] == 25100.0)
+    assert row_25100["tag"] == "R1 / PIVOT"
+    assert out["pivot"]["read"] == chain_view.PIVOT_READ_BELOW_CALL  # spot below heavy-call pivot
 
 
 def test_leg_derived_fields() -> None:
