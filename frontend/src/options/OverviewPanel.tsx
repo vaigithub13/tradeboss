@@ -44,6 +44,28 @@ function fmtDelta(d: number | null | undefined, digits = 0): string {
   return `${n > 0 ? "+" : ""}${n}`;
 }
 
+/** One entry when R1/S1 shares the pivot strike: "R1 / PIVOT 25000 (+14)". */
+function formatOverviewLevels(lv: OptionsOverview["levels"]): string {
+  const mergeR1 = lv.pivot_label === "R1 / PIVOT" && lv.pivot != null;
+  const mergeS1 = lv.pivot_label === "S1 / PIVOT" && lv.pivot != null;
+  const parts: string[] = [];
+  if (!mergeR1) {
+    parts.push(`R1 ${lv.r1 != null ? formatStrike(lv.r1) : "—"} (${fmtDist(lv.r1_dist)})`);
+  }
+  if (lv.pivot != null) {
+    parts.push(`${lv.pivot_label ?? "PIVOT"} ${formatStrike(lv.pivot)} (${fmtDist(lv.pivot_dist)})`);
+  } else {
+    parts.push("PIVOT —");
+  }
+  if (!mergeS1) {
+    parts.push(`S1 ${lv.s1 != null ? formatStrike(lv.s1) : "—"} (${fmtDist(lv.s1_dist)})`);
+  }
+  parts.push(
+    `Max Pain ${lv.max_pain != null ? formatStrike(lv.max_pain) : "—"} (${fmtDist(lv.max_pain_dist)})`,
+  );
+  return parts.join(" · ");
+}
+
 function ComponentBars({ bias }: { bias: OptionsBias }) {
   return (
     <div className="mt-2 space-y-1" data-testid="options-bias-components">
@@ -150,12 +172,7 @@ export function OverviewPanel({ data }: { data: OptionsChainResponse }) {
       </h2>
 
       <div className="mt-2 space-y-1 text-[11px] text-white/65">
-        <p data-testid="overview-levels">
-          Levels: R1 {lv.r1 != null ? formatStrike(lv.r1) : "—"} ({fmtDist(lv.r1_dist)}) ·{" "}
-          {lv.pivot_label ?? "Pivot"} {lv.pivot != null ? formatStrike(lv.pivot) : "—"} (
-          {fmtDist(lv.pivot_dist)}) · S1 {lv.s1 != null ? formatStrike(lv.s1) : "—"} ({fmtDist(lv.s1_dist)}) ·
-          Max Pain {lv.max_pain != null ? formatStrike(lv.max_pain) : "—"} ({fmtDist(lv.max_pain_dist)})
-        </p>
+        <p data-testid="overview-levels">Levels: {formatOverviewLevels(lv)}</p>
         {lv.pivot_read ? (
           <p className="text-[10px] text-sky-100/60" data-testid="overview-pivot-read">
             {lv.pivot_label ?? "PIVOT"}: {lv.pivot_read}
