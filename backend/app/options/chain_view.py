@@ -242,16 +242,39 @@ def format_level_tag(rs_tag: str | None, *, is_pivot: bool) -> str | None:
     return rs_tag
 
 
+def _peak_leg(rows: list[dict[str, Any]], side: str) -> tuple[float, float | None]:
+    """Peak OI and its strike for call|put over `rows` (empty → 0, None)."""
+    if not rows:
+        return 0.0, None
+    best = max(rows, key=lambda r: (r[side]["oi"], -r["strike"]))
+    return float(best[side]["oi"]), float(best["strike"])
+
+
+def pivot_window_ref(rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Peaks used for the 80% pivot threshold — must be the ±window slice, never major_walls."""
+    call_oi, call_k = _peak_leg(rows, "call")
+    put_oi, put_k = _peak_leg(rows, "put")
+    return {
+        "call_peak_oi": call_oi,
+        "call_peak_strike": call_k,
+        "put_peak_oi": put_oi,
+        "put_peak_strike": put_k,
+        "threshold": PIVOT_STRONG,
+        "band_pts": PIVOT_BAND_PTS,
+    }
+
+
 def _pivot(rows: list[dict[str, Any]], spot: float) -> dict[str, Any] | None:
     """Nearest heavy-OI strike within ±2 strikes (±100 pts) of spot, or None.
 
-    Qualifies when Call OI ≥ 80% of the window's peak Call OI, or Put OI ≥ 80% of peak Put OI.
-    If several qualify, pick the nearest to spot (then highest max(call, put) OI).
+    Qualifies when Call OI ≥ 80% of the **±window** peak Call OI, or Put OI ≥ 80% of
+    that window's peak Put OI. Caller must pass the same window_rows used for R/S —
+    never the full chain / major_walls (e.g. 26000 can sit outside ±15 of ATM).
     """
     if not rows:
         return None
-    call_peak = max((r["call"]["oi"] for r in rows), default=0.0)
-    put_peak = max((r["put"]["oi"] for r in rows), default=0.0)
+    call_peak, _ = _peak_leg(rows, "call")
+    put_peak, _ = _peak_leg(rows, "put")
     candidates: list[dict[str, Any]] = []
     for r in rows:
         if abs(r["strike"] - spot) > PIVOT_BAND_PTS:
@@ -350,6 +373,8 @@ def build_chain_view(
     window_rows = parsed[lo:hi]
     # R/S only from the visible ±window so every tag matches a table row
     resistance, support = _levels(window_rows, spot)
+    # Peaks for the 80% rule come ONLY from window_rows (same slice as R/S), not major_walls
+    pivot_ref = pivot_window_ref(window_rows)
     pivot = _pivot(window_rows, spot)
     from app.options.chain_analytics import enrich_chain
 
@@ -418,6 +443,7 @@ def build_chain_view(
         "resistance": resistance,
         "support": support,
         "pivot": pivot,
+        "pivot_ref": pivot_ref,
         "major_walls": major_walls,
         "pcrs": phase2["pcrs"],
         "pcr_mixed_signals": phase2.get("pcr_mixed_signals", False),

@@ -264,6 +264,51 @@ def test_pivot_all_four_reads_and_battle() -> None:
     )
 
 
+def test_friday_112l_vs_26000_115l_is_r1_pivot() -> None:
+    """Friday-style: 25,000 Call 112 L, full-chain peak Call 26,000 at 115 L, spot 24,986.
+
+    26,000 is outside the ±15 window around ATM 25,000 (window ends 25,750), so the
+    80% threshold must use the in-window peak — here 25,000 itself → R1 / PIVOT.
+    """
+    spot = 24986.4
+    atm = 25000
+    rows: list[dict[str, Any]] = []
+    for i in range(-25, 26):  # includes 24,000 put wall and 26,000 call wall
+        strike = float(atm + i * 50)
+        if strike == 25000.0:
+            call_oi, put_oi = 112_00_000.0, 40_00_000.0  # 112 L / 40 L
+        elif strike == 26000.0:
+            call_oi, put_oi = 115_00_000.0, 10_00_000.0  # 115 L — outside ±15 window
+        elif strike == 24000.0:
+            call_oi, put_oi = 10_00_000.0, 120_00_000.0
+        elif strike == 24500.0:
+            call_oi, put_oi = 15_00_000.0, 80_00_000.0  # in-window put peak (not at 25000)
+        else:
+            call_oi, put_oi = 20_00_000.0, 15_00_000.0
+        rows.append(row(strike, leg(oi=call_oi), leg(oi=put_oi), spot=spot))
+
+    out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 15, 30), expiry="2026-11-11", window=15)
+    assert out["rows"][0]["strike"] == 24250.0
+    assert out["rows"][-1]["strike"] == 25750.0
+    assert out["major_walls"]["call"]["strike"] == 26000.0
+    assert out["major_walls"]["call"]["oi"] == 115_00_000.0
+    # Threshold peaks are window-only — NOT the 26,000 major wall
+    assert out["pivot_ref"]["call_peak_strike"] == 25000.0
+    assert out["pivot_ref"]["call_peak_oi"] == 112_00_000.0
+    assert out["pivot_ref"]["put_peak_strike"] == 24500.0
+    assert out["pivot"] is not None
+    assert out["pivot"]["strike"] == 25000.0
+    assert out["pivot"]["heavy_call"] is True
+    r1 = next(r for r in out["resistance"] if r["tag"] == "R1")
+    assert r1["strike"] == 25000.0
+    assert r1.get("also_pivot") is True
+    assert r1.get("display_tag") == "R1 / PIVOT"
+    assert next(r for r in out["rows"] if r["strike"] == 25000.0)["tag"] == "R1 / PIVOT"
+    # Sanity: against the full-chain wall 25000 would also clear 80% (97%), but the
+    # code path must not need that — window peak alone is enough.
+    assert 112_00_000 / 115_00_000 >= chain_view.PIVOT_STRONG
+
+
 def test_pivot_keeps_r1_tag_when_coincident() -> None:
     """Heavy call at nearest resistance → table shows 'R1 / PIVOT', lists keep R1 + pivot."""
     # Sparse strikes so 25100 is the first above spot (R1) and the only heavy-call in the ±100 band

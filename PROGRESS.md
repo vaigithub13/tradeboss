@@ -1527,6 +1527,16 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - Test: level probs invariant when only the IV time convention changes
   (`test_level_probs_invariant_to_iv_time_convention`).
 
+## 8 Nov 2026: Pivot threshold debug — window peaks, not major walls
+
+- Confirmed 80% peak is from ±15 `window_rows` (same as R/S). Major wall 26,000 is
+  outside that window and is not the reference; response now exposes `pivot_ref`
+  (call/put peak strike+OI) so walls aren't confused with the threshold.
+- Tonight (Nov 9 expiry): window Call peak = 25,500 (124.3 L); 25,000 Call = 97.3 L
+  → 78.3% < 80% → no pivot. Friday 112 L vs 26,000 115 L still → R1 / PIVOT because
+  26,000 is outside the window (regression `test_friday_112l_vs_26000_115l_is_r1_pivot`).
+
+
 ## 8 Nov 2026: Strike Picker win chance + EV ranking
 
 - Driftless win = `stop_dist / (stop_dist + target_dist)`; breakeven win = `1/(1+R:R)`.
