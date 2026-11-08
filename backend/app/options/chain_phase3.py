@@ -50,6 +50,15 @@ HOLD_LABELS: dict[HoldMode, str] = {
     "2d": "2 days",
 }
 
+# Strike-picker quality gates (✅ pass / ⚠️ warn / ❌ fail)
+SPREAD_PASS_PCT = 2.0
+SPREAD_WARN_PCT = 3.0
+RR_PASS = 2.0
+RR_WARN = 1.5
+THETA_DRAG_PASS = 0.10
+THETA_DRAG_WARN = 0.15
+NO_SETUP_MSG = "No good buy setup now"
+
 
 def years_to_expiry_calendar(now: int | float, expiry: str | date, *, floor_min: int = T_FLOOR_MINUTES) -> float:
     """Calendar years to 15:30 IST on expiry, floored at `floor_min` minutes."""
@@ -478,6 +487,120 @@ def _protective_levels(
     return out
 
 
+def _check_status(value: float | None, *, pass_at: float, warn_at: float, higher_is_better: bool) -> str:
+    if value is None or math.isnan(value):
+        return "fail"
+    if higher_is_better:
+        if value >= pass_at:
+            return "pass"
+        if value >= warn_at:
+            return "warn"
+        return "fail"
+    if value <= pass_at:
+        return "pass"
+    if value <= warn_at:
+        return "warn"
+    return "fail"
+
+
+def score_candidate(c: dict[str, Any], *, t_hold: float) -> dict[str, Any]:
+    """Attach est_gain / est_loss / R:R / checks; returns a new dict."""
+    ltp = float(c.get("ltp") or 0.0)
+    at_target = c.get("est_at_target")
+    at_stop = c.get("est_at_stop")
+    est_gain = (float(at_target) - ltp) if at_target is not None else None
+    est_loss = (ltp - float(at_stop)) if at_stop is not None else None
+    rr = (est_gain / est_loss) if est_gain is not None and est_loss is not None and est_loss > 0 else None
+    spread = c.get("spread_pct")
+    spread_v = float(spread) if spread is not None else None
+    drag = (abs(float(c.get("theta") or 0.0)) * float(t_hold) / ltp) if ltp > 0 else None
+
+    checks = [
+        {
+            "id": "spread",
+            "label": "Spread",
+            "status": _check_status(spread_v, pass_at=SPREAD_PASS_PCT, warn_at=SPREAD_WARN_PCT, higher_is_better=False)
+            if spread_v is not None
+            else "fail",
+            "detail": None if spread_v is None else f"{spread_v:.2f}%",
+        },
+        {
+            "id": "rr",
+            "label": "R:R",
+            "status": _check_status(rr, pass_at=RR_PASS, warn_at=RR_WARN, higher_is_better=True),
+            "detail": None if rr is None else f"{rr:.2f}",
+        },
+        {
+            "id": "loss",
+            "label": "Est. loss",
+            "status": "pass" if est_loss is not None and est_loss > 0 else "fail",
+            "detail": None if est_loss is None else f"{est_loss:.2f}",
+        },
+        {
+            "id": "theta_drag",
+            "label": "θ drag",
+            "status": _check_status(drag, pass_at=THETA_DRAG_PASS, warn_at=THETA_DRAG_WARN, higher_is_better=False)
+            if drag is not None
+            else "fail",
+            "detail": None if drag is None else f"{drag * 100:.1f}%",
+        },
+    ]
+    failed = [ch["label"] for ch in checks if ch["status"] == "fail"]
+    out = {
+        **c,
+        "est_gain": est_gain,
+        "est_loss": est_loss,
+        "reward_risk": rr,
+        "checks": checks,
+        "passed": len(failed) == 0,
+        "failed_checks": failed,
+    }
+    return out
+
+
+def apply_picker_highlight(candidates: list[dict[str, Any]]) -> dict[str, Any]:
+    """Highlight best passing R:R; otherwise no highlight + closest with fail list."""
+    scored = list(candidates)
+    passing = [c for c in scored if c.get("passed")]
+    highlight: str | None = None
+    closest: str | None = None
+    closest_fails: list[str] = []
+    message: str | None = None
+
+    def rr_key(c: dict[str, Any]) -> float:
+        rr = c.get("reward_risk")
+        return float(rr) if rr is not None else float("-inf")
+
+    if passing:
+        best = max(passing, key=rr_key)
+        highlight = str(best["bucket"])
+        for c in scored:
+            c["highlighted"] = c["bucket"] == highlight
+            c["closest_failed"] = False
+    else:
+        message = NO_SETUP_MSG
+        if scored:
+            closest_c = max(scored, key=rr_key)
+            closest = str(closest_c["bucket"])
+            closest_fails = list(closest_c.get("failed_checks") or [])
+            for c in scored:
+                c["highlighted"] = False
+                c["closest_failed"] = c["bucket"] == closest
+        else:
+            for c in scored:
+                c["highlighted"] = False
+                c["closest_failed"] = False
+
+    return {
+        "candidates": scored,
+        "highlight": highlight,
+        "closest": closest,
+        "closest_fails": closest_fails,
+        "setup_message": message,
+        "has_setup": highlight is not None,
+    }
+
+
 def build_strike_picker(
     rows: list[dict[str, Any]],
     *,
@@ -491,6 +614,9 @@ def build_strike_picker(
 ) -> dict[str, Any]:
     side: Literal["call", "put"] = "call" if direction == "Bullish" else "put"
     stop = stop_info.get("stop")
+    stop_distance = stop_info.get("distance")
+    if stop_distance is None and stop is not None:
+        stop_distance = abs(float(spot) - float(stop))
     pool: list[dict[str, Any]] = []
     for r in rows:
         leg = r.get(side) or {}
@@ -510,7 +636,7 @@ def build_strike_picker(
             }
         )
 
-    candidates = []
+    raw_candidates = []
     for label, (lo, hi) in DELTA_BANDS.items():
         pick = _pick_by_delta(pool, lo, hi)
         if pick is None:
@@ -530,7 +656,7 @@ def build_strike_picker(
             if stop is not None
             else None
         )
-        candidates.append(
+        scored = score_candidate(
             {
                 "bucket": label,
                 "strike": pick["strike"],
@@ -546,14 +672,18 @@ def build_strike_picker(
                 "cost_per_lot": cost,
                 "est_at_target": at_target,
                 "est_at_stop": at_stop,
-            }
+            },
+            t_hold=t_hold,
         )
+        raw_candidates.append(scored)
 
+    hi = apply_picker_highlight(raw_candidates)
     return {
         "direction": direction,
         "side": side,
         "target": target,
         "stop": stop,
+        "stop_distance": stop_distance,
         "stop_level": stop_info.get("level"),
         "stop_tag": stop_info.get("tag"),
         "stop_why": stop_info.get("why"),
@@ -563,7 +693,12 @@ def build_strike_picker(
         "t_hold": t_hold,
         "hold_mode": hold_mode,
         "hold_label": HOLD_LABELS[hold_mode],
-        "candidates": candidates,
+        "candidates": hi["candidates"],
+        "highlight": hi["highlight"],
+        "closest": hi["closest"],
+        "closest_fails": hi["closest_fails"],
+        "setup_message": hi["setup_message"],
+        "has_setup": hi["has_setup"],
     }
 
 

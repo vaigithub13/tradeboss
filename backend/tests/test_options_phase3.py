@@ -277,6 +277,7 @@ def test_strike_picker_three_buckets_and_lot() -> None:
         "tag": "S1",
         "buffer": 20.0,
         "min_distance": 40.0,
+        "distance": 100.0,
         "why": "S1 − buffer 20",
     }
     out = p3.build_strike_picker(
@@ -292,6 +293,7 @@ def test_strike_picker_three_buckets_and_lot() -> None:
     assert out["side"] == "call"
     assert out["stop"] == 24900.0
     assert out["stop_why"]
+    assert out["stop_distance"] == 100.0
     buckets = {c["bucket"] for c in out["candidates"]}
     assert buckets == {"ITM", "ATM", "OTM"}
     for c in out["candidates"]:
@@ -299,6 +301,59 @@ def test_strike_picker_three_buckets_and_lot() -> None:
         assert c["cost_per_lot"] == pytest.approx(c["ltp"] * 65)
         assert c["est_at_target"] is not None
         assert c["est_at_stop"] is not None
+        assert "est_gain" in c and "est_loss" in c and "reward_risk" in c
+        assert c["checks"]
+
+
+def test_no_setup_does_not_highlight() -> None:
+    """When every candidate fails a gate, no ★ — closest is labelled instead."""
+    cands = [
+        p3.score_candidate(
+            {
+                "bucket": "ITM",
+                "strike": 24900.0,
+                "side": "call",
+                "ltp": 200.0,
+                "delta": 0.65,
+                "gamma": 0.001,
+                "theta": -5.0,
+                "theta_pct_premium": 2.5,
+                "iv": 15.0,
+                "spread_pct": 0.5,
+                "lot_size": 65,
+                "cost_per_lot": 13000.0,
+                "est_at_target": 210.0,  # gain 10
+                "est_at_stop": 50.0,  # loss 150 → R:R 0.07 fail
+            },
+            t_hold=1.0,
+        ),
+        p3.score_candidate(
+            {
+                "bucket": "ATM",
+                "strike": 25000.0,
+                "side": "call",
+                "ltp": 100.0,
+                "delta": 0.5,
+                "gamma": 0.002,
+                "theta": -8.0,
+                "theta_pct_premium": 8.0,
+                "iv": 15.0,
+                "spread_pct": 0.5,
+                "lot_size": 65,
+                "cost_per_lot": 6500.0,
+                "est_at_target": 105.0,
+                "est_at_stop": 20.0,
+            },
+            t_hold=1.0,
+        ),
+    ]
+    hi = p3.apply_picker_highlight(cands)
+    assert hi["has_setup"] is False
+    assert hi["highlight"] is None
+    assert hi["setup_message"] == p3.NO_SETUP_MSG
+    assert hi["closest"] in ("ITM", "ATM")
+    assert any(c["closest_failed"] for c in hi["candidates"])
+    assert not any(c["highlighted"] for c in hi["candidates"])
 
 
 def test_enrich_phase3_attaches_blocks(tmp_path: Path) -> None:

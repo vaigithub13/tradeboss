@@ -156,6 +156,15 @@ export interface ExpectedMove {
   lower: number;
 }
 
+export type StrikeCheckStatus = "pass" | "warn" | "fail";
+
+export interface StrikeCheck {
+  id: string;
+  label: string;
+  status: StrikeCheckStatus;
+  detail?: string | null;
+}
+
 export interface StrikeCandidate {
   bucket: "ITM" | "ATM" | "OTM" | string;
   strike: number;
@@ -171,6 +180,14 @@ export interface StrikeCandidate {
   cost_per_lot: number | null;
   est_at_target: number | null;
   est_at_stop: number | null;
+  est_gain?: number | null;
+  est_loss?: number | null;
+  reward_risk?: number | null;
+  checks?: StrikeCheck[];
+  passed?: boolean;
+  failed_checks?: string[];
+  highlighted?: boolean;
+  closest_failed?: boolean;
 }
 
 export interface StrikePickerSide {
@@ -178,6 +195,7 @@ export interface StrikePickerSide {
   side: "call" | "put";
   target: number | null;
   stop: number | null;
+  stop_distance?: number | null;
   stop_level?: number | null;
   stop_tag?: string | null;
   stop_why?: string | null;
@@ -188,6 +206,11 @@ export interface StrikePickerSide {
   hold_mode: HoldMode;
   hold_label?: string;
   candidates: StrikeCandidate[];
+  highlight?: string | null;
+  closest?: string | null;
+  closest_fails?: string[];
+  setup_message?: string | null;
+  has_setup?: boolean;
 }
 
 export interface StrikePicker {

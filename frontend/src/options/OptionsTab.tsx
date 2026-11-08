@@ -1,18 +1,26 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type {
-  BuildupLabel,
-  HoldMode,
-  OptionsChainResponse,
-  OptionsLeg,
-  OptionsLevel,
-  OptionsRow,
-  PcrValue,
-  StrikeDirection,
-  StrikePickerSide,
+import {
+  fetchOptionsChain,
+  optionsErrorMessage,
+  type BuildupLabel,
+  type HoldMode,
+  type OptionsChainResponse,
+  type OptionsLeg,
+  type OptionsLevel,
+  type OptionsRow,
+  type PcrValue,
+  type StrikeDirection,
+  type StrikePickerSide,
 } from "../api/options";
 import { useOptionsStore } from "../store/optionsStore";
-import { formatProb, repricePickerSide } from "./estimate";
+import {
+  checkGlyph,
+  formatProb,
+  nextExpiryAfter,
+  NO_SETUP_MSG,
+  repricePickerSide,
+} from "./estimate";
 import {
   chgClass,
   formatChg,
@@ -377,10 +385,41 @@ function MaxPainPanel({ data }: { data: OptionsChainResponse }) {
 }
 
 function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
-  const picker = data.strike_picker;
-  const spot = data.spot ?? 0;
   const [direction, setDirection] = useState<StrikeDirection>("Bullish");
   const [hold, setHold] = useState<HoldMode>("1d");
+  const [expiryMode, setExpiryMode] = useState<"current" | "next">("current");
+  const [nextData, setNextData] = useState<OptionsChainResponse | null>(null);
+  const [nextError, setNextError] = useState<string | null>(null);
+  const [nextLoading, setNextLoading] = useState(false);
+
+  const expiries = data.expiries ?? [data.expiry];
+  const nextExp = nextExpiryAfter(data.expiry, expiries);
+
+  useEffect(() => {
+    if (expiryMode !== "next" || !nextExp) {
+      return;
+    }
+    const ac = new AbortController();
+    setNextLoading(true);
+    setNextError(null);
+    void fetchOptionsChain(ac.signal, nextExp)
+      .then((res) => {
+        if (!ac.signal.aborted) {
+          setNextData(res);
+          setNextLoading(false);
+        }
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
+        setNextError(optionsErrorMessage(err));
+        setNextLoading(false);
+      });
+    return () => ac.abort();
+  }, [expiryMode, nextExp]);
+
+  const activeData = expiryMode === "next" && nextData?.available ? nextData : data;
+  const picker = activeData.strike_picker;
+  const spot = activeData.spot ?? 0;
 
   const side: StrikePickerSide | null = useMemo(() => {
     if (!picker) return null;
@@ -390,7 +429,7 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
     return repricePickerSide(base, spot, tHold, hold);
   }, [picker, direction, hold, spot]);
 
-  if (!picker || !side) {
+  if (!data.strike_picker) {
     return <Placeholder title="Strike Picker" />;
   }
 
@@ -398,6 +437,21 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
     <div className="rounded border border-white/10 px-2 py-2 text-[11px]" data-testid="options-strike-picker">
       <div className="mb-1 text-[10px] uppercase tracking-wide text-white/40">Strike Picker</div>
       <div className="mb-2 flex flex-wrap gap-1">
+        {(["current", "next"] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            disabled={m === "next" && !nextExp}
+            className={`rounded px-2 py-0.5 text-[10px] ${
+              expiryMode === m ? "bg-violet-500/25 text-violet-100" : "text-white/45"
+            } disabled:opacity-30`}
+            onClick={() => setExpiryMode(m)}
+            title={m === "next" ? (nextExp ? `Live chain ${nextExp}` : "No next expiry") : data.expiry}
+          >
+            {m === "current" ? "Current" : "Next"}
+            {m === "next" && nextExp ? ` ${nextExp.slice(5)}` : ""}
+          </button>
+        ))}
         {(["Bullish", "Bearish"] as StrikeDirection[]).map((d) => (
           <button
             key={d}
@@ -424,40 +478,100 @@ function StrikePickerPanel({ data }: { data: OptionsChainResponse }) {
           </button>
         ))}
       </div>
-      <div className="mb-1 font-mono text-[10px] text-white/55">
-        Target {side.target != null ? formatStrike(side.target) : "—"} · Stop{" "}
-        {side.stop != null ? formatStrike(side.stop) : "—"}
-        {side.lot_size != null ? ` · lot ${side.lot_size}` : ""}
-      </div>
-      {side.stop_why ? (
-        <p className="mb-2 text-[9px] leading-snug text-white/35" data-testid="strike-stop-why">
-          Stop: {side.stop_why}
-        </p>
+
+      {expiryMode === "next" && nextLoading ? (
+        <p className="text-[10px] text-white/40">Loading next expiry chain…</p>
       ) : null}
-      <div className="flex flex-col gap-1.5">
-        {side.candidates.map((c) => (
-          <div key={c.bucket} className="rounded border border-white/5 bg-white/[0.02] px-1.5 py-1">
-            <div className="flex justify-between font-mono text-white/80">
-              <span>
-                {c.bucket} {formatStrike(c.strike)} {c.side === "call" ? "CE" : "PE"}
-              </span>
-              <span>{formatSpot(c.ltp)}</span>
-            </div>
-            <div className="mt-0.5 grid grid-cols-2 gap-x-2 text-[9px] text-white/45">
-              <span>Δ {c.delta.toFixed(3)}</span>
-              <span>Γ {c.gamma.toFixed(4)}</span>
-              <span>θ {c.theta.toFixed(2)}/d</span>
-              <span>θ% {c.theta_pct_premium != null ? `${c.theta_pct_premium.toFixed(1)}%` : "—"}</span>
-              <span>IV {formatIv(c.iv)}</span>
-              <span>Spr {formatPct(c.spread_pct)}</span>
-              <span>Cost/lot {c.cost_per_lot != null ? formatSpot(c.cost_per_lot) : "—"}</span>
-              <span>t_hold {side.t_hold.toFixed(2)}d</span>
-              <span>@tgt {c.est_at_target != null ? formatSpot(c.est_at_target) : "—"}</span>
-              <span>@stop {c.est_at_stop != null ? formatSpot(c.est_at_stop) : "—"}</span>
-            </div>
+      {expiryMode === "next" && nextError ? (
+        <p className="text-[10px] text-amber-200/80">{nextError}</p>
+      ) : null}
+
+      {!side ? (
+        <Placeholder title="Strike Picker" />
+      ) : (
+        <>
+          <div className="mb-1 font-mono text-[10px] text-white/55">
+            Expiry {activeData.expiry} · Target{" "}
+            {side.target != null ? formatStrike(side.target) : "—"} · Stop{" "}
+            {side.stop != null ? formatStrike(side.stop) : "—"}
+            {side.stop_distance != null ? ` (${formatStrike(side.stop_distance)} pts)` : ""}
+            {side.lot_size != null ? ` · lot ${side.lot_size}` : ""}
           </div>
-        ))}
-      </div>
+          {side.stop_why ? (
+            <p className="mb-2 text-[9px] leading-snug text-white/35" data-testid="strike-stop-why">
+              Stop: {side.stop_why}
+            </p>
+          ) : null}
+
+          {!side.has_setup ? (
+            <p className="mb-2 text-[10px] font-medium text-amber-200/90" data-testid="strike-no-setup">
+              {side.setup_message ?? NO_SETUP_MSG}
+            </p>
+          ) : null}
+
+          <div className="flex flex-col gap-1.5">
+            {side.candidates.map((c) => {
+              const grey = Boolean(c.closest_failed);
+              const hi = Boolean(c.highlighted);
+              return (
+                <div
+                  key={c.bucket}
+                  className={`rounded border px-1.5 py-1 ${
+                    hi
+                      ? "border-emerald-400/50 bg-emerald-500/10"
+                      : grey
+                        ? "border-white/5 bg-white/[0.02] opacity-50"
+                        : "border-white/5 bg-white/[0.02]"
+                  }`}
+                  data-highlighted={hi ? "1" : undefined}
+                  data-closest-failed={grey ? "1" : undefined}
+                >
+                  <div className="flex justify-between font-mono text-white/80">
+                    <span>
+                      {c.bucket} {formatStrike(c.strike)} {c.side === "call" ? "CE" : "PE"}
+                      {hi ? <span className="ml-1 text-[9px] text-emerald-300">★ pick</span> : null}
+                    </span>
+                    <span>{formatSpot(c.ltp)}</span>
+                  </div>
+                  {grey ? (
+                    <div className="mt-0.5 text-[9px] text-amber-200/70">
+                      Closest — fails: {(c.failed_checks ?? side.closest_fails ?? []).join(", ") || "—"}
+                    </div>
+                  ) : null}
+                  <div className="mt-0.5 grid grid-cols-2 gap-x-2 text-[9px] text-white/45">
+                    <span>Δ {c.delta.toFixed(3)}</span>
+                    <span>θ {c.theta.toFixed(2)}/d</span>
+                    <span>Spr {formatPct(c.spread_pct)}</span>
+                    <span>Cost/lot {c.cost_per_lot != null ? formatSpot(c.cost_per_lot) : "—"}</span>
+                    <span>Tgt {side.target != null ? formatStrike(side.target) : "—"}</span>
+                    <span>Stop {side.stop != null ? formatStrike(side.stop) : "—"}</span>
+                    <span>
+                      Gain{" "}
+                      {c.est_gain != null ? `${c.est_gain >= 0 ? "+" : ""}${c.est_gain.toFixed(2)}` : "—"}
+                    </span>
+                    <span>
+                      Loss{" "}
+                      {c.est_loss != null ? `${c.est_loss >= 0 ? "+" : ""}${c.est_loss.toFixed(2)}` : "—"}
+                    </span>
+                    <span>R:R {c.reward_risk != null ? c.reward_risk.toFixed(2) : "—"}</span>
+                    <span>t_hold {side.t_hold.toFixed(2)}d</span>
+                  </div>
+                  {c.checks?.length ? (
+                    <div className="mt-1 flex flex-wrap gap-x-2 gap-y-0.5 text-[9px] text-white/50">
+                      {c.checks.map((ch) => (
+                        <span key={ch.id} title={ch.detail ?? undefined}>
+                          {checkGlyph(ch.status)} {ch.label}
+                          {ch.detail ? ` ${ch.detail}` : ""}
+                        </span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </>
+      )}
     </div>
   );
 }

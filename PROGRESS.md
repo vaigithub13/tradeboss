@@ -1493,6 +1493,14 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
 - The participant-OI look-back (market view) also uses regular days, so Monday reads Friday's file, not a missing
   Muhurat one.
 
+## 8 Nov 2026: Options Strike Picker polish (checks, next expiry, no false highlight)
+
+- Candidates show est. gain / est. loss / R:R and ✅/⚠️/❌ checks (spread, R:R, est. loss, θ drag).
+- If none pass: **"No good buy setup now"** — no ★; grey **Closest — fails: …**.
+- Picker **Current | Next** toggle: Next calls live `/api/options/chain?expiry=…` (Upstox last
+  close off-hours), no history file required.
+- Tests: `test_no_setup_does_not_highlight`, frontend estimate scoring.
+
 ## 8 Nov 2026: Options tab Phase 3 (greeks, IV, EM, probs, strike picker)
 
 - Chain columns: Delta / Gamma / Theta / Vega from Upstox `option_greeks`; Columns toggle
