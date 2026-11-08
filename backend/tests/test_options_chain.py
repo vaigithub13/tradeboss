@@ -113,8 +113,9 @@ def test_totals_and_pcr_use_full_chain_not_upstox_pcr() -> None:
     assert [r["strike"] for r in out["rows"]] == [24900.0, 24950.0, 25000.0, 25050.0, 25100.0]
 
 
-def test_resistance_and_support_top3_within_window() -> None:
-    # Hand-built: call OI highest above spot at 25100, 25200, 25050; put OI below at 24900, 24800, 25000
+def test_resistance_and_support_numbered_by_distance() -> None:
+    # Top-3 Call OI above spot: 25100(900), 25200(800), 25050(500) → R1=nearest=25050
+    # Top-3 Put OI below: 24900(900), 24800(800), 25000(700) → S1=nearest=25000
     rows = [
         row(24800, leg(oi=10), leg(oi=800)),
         row(24900, leg(oi=20), leg(oi=900)),
@@ -124,10 +125,30 @@ def test_resistance_and_support_top3_within_window() -> None:
         row(25200, leg(oi=800), leg(oi=20), spot=25010),
     ]
     out = chain_view.build_chain_view(rows, now=ts(2026, 11, 7, 16, 0), expiry=EXPIRY, window=15)
-    assert [r["strike"] for r in out["resistance"]] == [25100.0, 25200.0, 25050.0]
-    assert [r["tag"] for r in out["resistance"]] == ["R1", "R2", "R3"]
-    assert [r["strike"] for r in out["support"]] == [24900.0, 24800.0, 25000.0]
-    assert [r["tag"] for r in out["support"]] == ["S1", "S2", "S3"]
+    assert [(r["tag"], r["strike"]) for r in out["resistance"]] == [
+        ("R1", 25050.0),
+        ("R2", 25100.0),
+        ("R3", 25200.0),
+    ]
+    assert [(r["tag"], r["strike"]) for r in out["support"]] == [
+        ("S1", 25000.0),
+        ("S2", 24900.0),
+        ("S3", 24800.0),
+    ]
+    # peak call OI above spot = 900 → 500/900≈55.6% Medium; 900 & 800 (≥80%) Strong
+    by_r = {r["tag"]: r for r in out["resistance"]}
+    assert by_r["R1"]["strength"] == "Medium" and by_r["R1"]["oi_pct"] == pytest.approx(500 / 900 * 100)
+    assert by_r["R2"]["strength"] == "Strong"
+    assert by_r["R3"]["strength"] == "Strong"
+    # peak put OI below = 900 → 700 Medium; 900 & 800 Strong
+    by_s = {r["tag"]: r for r in out["support"]}
+    assert by_s["S1"]["strength"] == "Medium"
+    assert by_s["S2"]["strength"] == "Strong"
+    assert by_s["S3"]["strength"] == "Strong"
+    # window edges 24800 and 25200
+    assert by_s["S3"]["edge"] is True
+    assert by_r["R3"]["edge"] is True
+    assert by_r["R1"]["edge"] is False
     visible = {r["strike"] for r in out["rows"]}
     assert all(r["strike"] in visible for r in out["resistance"] + out["support"])
 
@@ -153,8 +174,15 @@ def test_sr_ignores_oi_outside_display_window_major_walls_use_full_chain() -> No
     visible = {r["strike"] for r in out["rows"]}
     assert visible == {24900.0, 24950.0, 25000.0, 25050.0, 25100.0}
     assert 24000.0 not in visible and 26000.0 not in visible
-    assert [r["strike"] for r in out["resistance"]] == [25100.0, 25050.0]
-    assert [r["strike"] for r in out["support"]] == [24900.0, 24950.0, 25000.0]
+    # numbered by distance: R1=25050, R2=25100; S1=25000, S2=24950, S3=24900
+    assert [(r["tag"], r["strike"]) for r in out["resistance"]] == [("R1", 25050.0), ("R2", 25100.0)]
+    assert [(r["tag"], r["strike"]) for r in out["support"]] == [
+        ("S1", 25000.0),
+        ("S2", 24950.0),
+        ("S3", 24900.0),
+    ]
+    assert out["support"][-1]["edge"] is True  # 24900 is window low
+    assert out["resistance"][-1]["edge"] is True  # 25100 is window high
     assert all(r["strike"] in visible for r in out["resistance"] + out["support"])
     assert out["major_walls"]["call"] == {"strike": 26000.0, "oi": 8_000_000.0}
     assert out["major_walls"]["put"] == {"strike": 24000.0, "oi": 9_000_000.0}

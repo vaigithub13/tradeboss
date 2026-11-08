@@ -134,11 +134,29 @@ function KeyLevels({ data }: { data: OptionsChainResponse }) {
           return (
             <li key={item.key} className="rounded border border-white/10 px-2 py-1.5">
               <div className="flex justify-between font-mono">
-                <span className={item.kind === "R" ? "text-red-300" : "text-emerald-300"}>{lvl?.tag ?? item.key}</span>
+                <span className={item.kind === "R" ? "text-red-300" : "text-emerald-300"}>
+                  {lvl?.tag ?? item.key}
+                  {lvl?.edge ? <span className="ml-1 text-[9px] text-amber-300/80">edge</span> : null}
+                </span>
                 <span>{lvl ? formatStrike(lvl.strike) : "—"}</span>
               </div>
               <div className="mt-0.5 flex justify-between text-[10px] text-white/40">
-                <span>{lvl ? formatOiLakhs(lvl.oi) : ""}</span>
+                <span>
+                  {lvl ? formatOiLakhs(lvl.oi) : ""}
+                  {lvl?.strength ? (
+                    <span
+                      className={`ml-1 ${
+                        lvl.strength === "Strong"
+                          ? "text-emerald-300/80"
+                          : lvl.strength === "Medium"
+                            ? "text-amber-300/70"
+                            : "text-white/35"
+                      }`}
+                    >
+                      {lvl.strength}
+                    </span>
+                  ) : null}
+                </span>
                 <span>{dist == null ? "" : `${dist > 0 ? "+" : ""}${formatStrike(dist)} pts`}</span>
               </div>
             </li>
@@ -259,8 +277,10 @@ function ChainRow({ row, maxOi, spot }: { row: OptionsRow; maxOi: number; spot: 
               className={`rounded px-1 text-[9px] ${
                 row.tag.startsWith("R") ? "bg-red-500/20 text-red-300" : "bg-emerald-500/20 text-emerald-300"
               }`}
+              title={row.strength ? `${row.tag} · ${row.strength}` : row.tag}
             >
               {row.tag}
+              {row.edge ? <span className="ml-0.5 opacity-80">·edge</span> : null}
             </span>
           ) : null}
           <span>{formatStrike(row.strike)}</span>

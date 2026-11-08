@@ -83,21 +83,66 @@ def _leg(raw: dict[str, Any] | None) -> dict[str, Any]:
     }
 
 
+def _strength(oi: float, peak: float) -> str:
+    """Strong ≥ 80% of peak, Medium 50–80%, Weak < 50%."""
+    if peak <= 0:
+        return "Weak"
+    pct = oi / peak * 100.0
+    if pct >= 80.0:
+        return "Strong"
+    if pct >= 50.0:
+        return "Medium"
+    return "Weak"
+
+
 def _levels(rows: list[dict[str, Any]], spot: float) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Top 3 call-OI at/above spot (R1..) and put-OI at/below spot (S1..) — from `rows` only.
+    """Pick top-3 OI on each side of spot, then number R1/S1 by nearest distance.
 
     Callers must pass the ±window display slice so every R/S tag lands on a visible table row.
+    Strength is vs the largest Call/Put OI on that side within the window. `edge` marks a
+    level that sits on the first/last strike of the window (true peak may be outside).
     """
-    above = sorted(
-        (r for r in rows if r["strike"] >= spot),
-        key=lambda r: (-r["call"]["oi"], r["strike"]),
-    )[:3]
-    below = sorted(
-        (r for r in rows if r["strike"] <= spot),
-        key=lambda r: (-r["put"]["oi"], -r["strike"]),
-    )[:3]
-    resistance = [{"strike": r["strike"], "oi": r["call"]["oi"], "tag": f"R{i}"} for i, r in enumerate(above, 1)]
-    support = [{"strike": r["strike"], "oi": r["put"]["oi"], "tag": f"S{i}"} for i, r in enumerate(below, 1)]
+    if not rows:
+        return [], []
+    edge_strikes = {rows[0]["strike"], rows[-1]["strike"]}
+    above_pool = [r for r in rows if r["strike"] >= spot]
+    below_pool = [r for r in rows if r["strike"] <= spot]
+    call_peak = max((r["call"]["oi"] for r in above_pool), default=0.0)
+    put_peak = max((r["put"]["oi"] for r in below_pool), default=0.0)
+
+    # select by OI…
+    above_picked = sorted(above_pool, key=lambda r: (-r["call"]["oi"], r["strike"]))[:3]
+    below_picked = sorted(below_pool, key=lambda r: (-r["put"]["oi"], -r["strike"]))[:3]
+    # …number by distance from spot (nearest = R1 / S1)
+    above_picked.sort(key=lambda r: (r["strike"] - spot, r["strike"]))
+    below_picked.sort(key=lambda r: (spot - r["strike"], -r["strike"]))
+
+    resistance = []
+    for i, r in enumerate(above_picked, 1):
+        oi = r["call"]["oi"]
+        resistance.append(
+            {
+                "strike": r["strike"],
+                "oi": oi,
+                "tag": f"R{i}",
+                "strength": _strength(oi, call_peak),
+                "oi_pct": (oi / call_peak * 100.0) if call_peak else 0.0,
+                "edge": r["strike"] in edge_strikes,
+            }
+        )
+    support = []
+    for i, r in enumerate(below_picked, 1):
+        oi = r["put"]["oi"]
+        support.append(
+            {
+                "strike": r["strike"],
+                "oi": oi,
+                "tag": f"S{i}",
+                "strength": _strength(oi, put_peak),
+                "oi_pct": (oi / put_peak * 100.0) if put_peak else 0.0,
+                "edge": r["strike"] in edge_strikes,
+            }
+        )
     return resistance, support
 
 
@@ -181,19 +226,21 @@ def build_chain_view(
     window_rows = parsed[lo:hi]
     # R/S only from the visible ±window so every tag matches a table row
     resistance, support = _levels(window_rows, spot)
-    tags = {r["strike"]: r["tag"] for r in resistance}
-    for s in support:
-        tags[s["strike"]] = s["tag"]
+    level_by_strike = {r["strike"]: r for r in resistance}
+    level_by_strike.update({s["strike"]: s for s in support})
 
     display = []
     for r in window_rows:
+        lvl = level_by_strike.get(r["strike"])
         display.append(
             {
                 "strike": r["strike"],
                 "call": r["call"],
                 "put": r["put"],
                 "atm": r["strike"] == atm,
-                "tag": tags.get(r["strike"]),
+                "tag": lvl["tag"] if lvl else None,
+                "strength": lvl.get("strength") if lvl else None,
+                "edge": bool(lvl.get("edge")) if lvl else False,
                 "call_itm": r["strike"] < spot,
                 "put_itm": r["strike"] > spot,
             }
