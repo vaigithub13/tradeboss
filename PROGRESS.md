@@ -1632,3 +1632,68 @@ After five_ema failed after costs, two families aimed at fewer, larger moves (mi
   At 09:16 IST it POSTs `/api/paper/start` for each slot in `scripts/launchd/paper_slots.json` (slots 1-4 as in the
   checklist) not already running; 409 "already running" counts as done, 400 is not retried, other failures retry
   every 30 s until 09:45. Tests: `tests/test_paper_autostart.py` (5, fake transport).
+
+## 9 Nov 2026: forward-test day 9 (four slots, weekly expiry)
+
+Expiry day (DTE 0). 10 Nov is Guru Nanak Jayanti (NSE holiday); no session today. Backend pid 89779 from 08:51 to
+16:35 (launchd `session-stop`). All four slots warm 500 bars, 75 closed bars each, no incomplete or given-up bars; one
+late bar at 14:50 (during the feed outage). Every signal and trade `live`, every premium leg a real quote (0 modelled).
+Settings unchanged. Two shadow exits (slot 3). End-of-day check: slots 1–4 6/4/6/4 live vs backtest trades; every slot
+0 differences; slot 3 **2 exchange-only**; slot 4 **2 fill-driven**; no warnings. Nifty opened 25076.40, low 24838.75,
+was 25005.80 at the 15:15 square-off and closed 25044.65 (day range 245 points).
+
+Trades (9 Nov expiry, DTE 0, 1 lot of 65; paper / backtest):
+- Slot 1 (Log XZ): 10:45 sell → fill 10:51:00 at Nifty 24881.95, 24900 PE 84.10 / 84.50; reversal 11:31:00 at Nifty
+  24936.10, 52.75 / 53.35; net −2,093.99 / −2,081.07. 11:25 buy → 11:31:00 at 24936.10, 24950 CE 70.90 / 69.70;
+  reversal 12:26:00 at 24898.40, 45.65 / 45.45; net −1,696.22 / −1,631.16. 12:20 sell → 12:26:00 at 24898.40, 24900 PE
+  64.45 / 64.70; reversal 13:11:00 at 24921.10, 43.95 / 43.00; net −1,387.08 / −1,464.95. 13:05 buy → 13:11:00 at
+  24921.10, 24900 CE 78.20 / 78.90; reversal 13:26:00 at 24879.95, 44.60 / 44.20; net −2,239.07 / −2,310.52. 13:20 sell
+  → 13:26:00 at 24879.95, 24900 PE 65.70 / 66.20; reversal 13:56:00 at 24935.50, 27.15 / 27.15; net −2,558.26 /
+  −2,590.78. 13:50 buy → 13:56:00 at 24935.50, 24950 CE 49.85 / 49.75; square-off 15:15 at 25005.80, 93.40 / 93.05;
+  net +2,770.42 / +2,754.22.
+- Slot 2 (Price Channel 20): 10:30 sell stop 24874.80, filled 10:40:47 at Nifty 24874.80, 24850 PE 66.20 / 65.78;
+  reverse 11:33:09 at 24958.70, 28.50 / 29.43; net −2,503.20 / −2,415.69. 11:25 buy stop 24958.70, filled 11:33:09,
+  24950 CE 83.00 / 78.77; reverse 13:16:40 at 24875.25, 31.60 / 31.23; net −3,394.58 / −3,143.69. 13:10 sell stop
+  24875.25, filled 13:16:40, 24900 PE 68.30 / 68.96; reverse 14:12:50 at 24967.55, 15.80 / 15.67; net −3,463.65 /
+  −3,514.59. 14:05 buy stop 24967.55, filled 14:12:50, 24950 CE 63.45 / 60.57; square-off 15:15 at 25005.80, 93.40 /
+  93.05; net +1,886.03 / +2,050.36.
+- Slot 3 (Log XZ, 1:2 premium): same entries as slot 1. PE stop 67.28 / 67.60, target 117.74 / 118.30; stop 11:14:42
+  at Nifty 24902.15, 68.50 / 67.40; net −1,072.20 / −1,169.58, R −0.98 / −1.07. CE stop 56.72 / 55.76, target 99.26 /
+  97.58; target 11:34:03 at 24980.75, 96.25 / 97.38; net +1,586.46 / +1,737.80, R +1.72 / +1.92. PE stop 51.56 / 51.76,
+  target 90.23 / 90.58; stop 12:50:23 at 24911.30, 52.20 / 51.56; net −851.86 / −909.62, R −1.02 / −1.08. CE stop 62.56
+  / 63.12, target 109.48 / 110.46; stop 13:13:13 at 24908.95, 69.55 / 62.92; net −620.43 / −1,096.05, R −0.61 / −1.07.
+  PE stop 52.56 / 52.96, target 91.98 / 92.68; stop 13:32:17 at 24891.50, 53.90 / 52.76 (exchange-only: shadow 13:31
+  at 52.56, shadow net −909.77); paper −822.84 / bt −929.32, R −0.96 / −1.08. CE stop 39.88 / 39.80, target 69.79 /
+  69.65; stop 13:57:05 at 24928.85, 39.70 / 39.60 (exchange-only: shadow 13:56 at 39.88, shadow net −701.69); paper
+  −713.37 / bt −713.34, R −1.10 / −1.10.
+- Slot 4 (Price Channel 20, 1:2 premium): same entries as slot 2. PE stop 52.96 / 52.63, target 92.68 / 92.09; stop
+  10:48:28 at 24892.80, 51.45 / 52.43; net −1,014.31 / −923.52, R −1.18 / −1.08. CE stop 66.40 / 63.01, target 116.20 /
+  110.28; target 11:35:37 at 24998.75, 115.75 / 110.08 (fill-driven: paper fill 83.00 vs bt 78.77 moved the target);
+  net +2,064.66 / +1,972.00, R +1.91 / +1.93. PE stop 54.64 / 55.17, target 95.62 / 96.54; stop 13:31:53 at 24889.65,
+  54.65 / 54.97; net −943.26 / −965.28, R −1.06 / −1.08. CE stop 50.76 / 48.46, target 88.83 / 84.80; target 14:16:53 at
+  24999.05, 89.80 / 84.60 (fill-driven); net +1,652.49 / +1,502.17, R +2.00 / +1.91.
+- Today: slot 1 −7,204.20 (6 trades, 1 win; reversal 5, square-off 1) / bt −7,324.26; slot 2 −7,475.40 (4, 1;
+  reversal 3, square-off 1) / bt −7,023.61; slot 3 −2,494.24 (6, 1; stop 5, target 1; shadow net −2,569.49) / bt
+  −3,080.11; slot 4 +1,759.58 (4, 2; stop 2, target 2) / bt +1,585.37.
+- Running (live days 8, 9, 12 Oct, 2–6 + 9 Nov; target/stop/reversal/square-off): slot 1 +37,780.61 (24 trades, 13
+  wins; 0/0/16/8), slot 2 +36,451.65 (18, 10; 0/0/9/9), slot 3 +15,340.90 (23, 11; 9/9/4/1), slot 4 +8,008.93 (17, 9;
+  6/6/2/3). Shadow difference (shadow net − paper net): slot 3 −22.05 (3 shadows), slot 4 −117.43 (1), all −139.48
+  (4). The vacation backtest (13–30 Oct, 31 Oct entry) is not in these totals.
+- Spreads 9 Nov, ATM, DTE 0: median 0.15 / p90 0.25; one-side 1-lot fill 0.075 (both), round trip ≈ ₹9.75. Since 6 Oct
+  (11 days: DTE 0, 4, 3, 2, 1, 1, 0, 3, 2, 1, 0): mean one-side 0.129, round trip ₹16.72. Paper's own legs today:
+  0.08 (slot 1), 0.07 (slot 2), 0.09 (slot 3), 0.09 (slot 4) points on average. Spread depth held ~8.6–8.9k snapshots
+  per 15 minutes after the 6 Nov cap-40 fix (14:45 dipped to 6,928 during the outage).
+- Reconcile: 9 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 volume 53,560 vs
+  60,515; 15 expected: OI and 15:30–15:39). 8 Nov (Diwali Muhurat) `final` at the 08:51 start (0 differences on all
+  three). Option capture 15:45: 9 Nov expiry, 16 strikes, 32 stored, 0 empty, 0 failed. Spread report written.
+- Health: one backend 08:51–16:35 (launchd stop; `app.crash` KeyboardInterrupt after shutdown, as before). Feed live
+  08:55–15:40 with **one reconnect** 14:52–14:54 (DNS/`ConnectError`, ~2 minutes; feed live again 14:54:50), then
+  15:50–16:00; 34 warnings (Upstox retries + reconnect), 0 errors. One late paper bar (14:50). Session gate: listed
+  trading day. Snapshot 08:30 (kept). No option-key-cap warnings; ATM depth stayed full after the 6 Nov priority fix.
+- Automatic start: launchd `session-start` at 08:45 found :8000 already listening (overnight leftover from Muhurat /
+  prior process) and left it alone — so it did **not** spawn `paper_autostart`. Backend was restarted at 08:51:19
+  (pid 89779); the four paper slots were POSTed at 08:51:53 / 08:51:58 / 08:52:00 / 08:52:02 (UI / early start, not
+  the 09:16 autostart). `session-stop` at 16:35 worked. **10 Nov holiday:** `session-start` logged `not a session
+  day: not starting` (Guru Nanak Jayanti in `nse_holidays.json`). Weekends are skipped unless Muhurat (8 Nov was
+  Muhurat and is listed). 15:45 jobs (reconcile, option capture, eod_check, spread report) **did run** on 9 Nov —
+  nothing to re-run.
