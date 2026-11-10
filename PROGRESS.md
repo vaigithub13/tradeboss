@@ -1697,3 +1697,15 @@ Trades (9 Nov expiry, DTE 0, 1 lot of 65; paper / backtest):
   day: not starting` (Guru Nanak Jayanti in `nse_holidays.json`). Weekends are skipped unless Muhurat (8 Nov was
   Muhurat and is listed). 15:45 jobs (reconcile, option capture, eod_check, spread report) **did run** on 9 Nov —
   nothing to re-run.
+
+## 10 Nov 2026: autostart — recycle overnight backends; paper only on normal days
+
+- `scripts/session_start_guard.py`: if :8000 is listening and the process was started on a **previous** day,
+  stop it with one SIGINT (same as Ctrl+C / session-stop) then start fresh; never stop a backend started
+  **today**. `session-start.sh` uses it; paper_autostart is still spawned when today's backend is left alone.
+  Tests: `tests/test_session_start_guard.py`.
+- `normal_trading_day` in `session_days.py`: NSE trading day and not Muhurat / `SESSION_WINDOWS`. Paper
+  autostart skips those days; the backend still starts on Muhurat via `listed_session` to record. POSTs send
+  `start_source: "auto"`.
+- Paper panel / API: `start_source` auto | hand on status and the day file; the panel shows `started: auto` or
+  `started: by hand`. Default for the UI Start button is hand.

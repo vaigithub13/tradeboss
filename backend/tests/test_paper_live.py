@@ -169,11 +169,21 @@ def test_routes_start_status_stop_and_day(tmp_path) -> None:
     assert c.get("/api/paper/status").json()["state"] == "stopped"
     r = c.post("/api/paper/start", json={"strategy": "log_xz", "params": {}})
     assert r.status_code == 200 and r.json()["state"] == "running"
+    assert r.json()["start_source"] == "hand"  # UI / default
     assert c.post("/api/paper/start", json={"strategy": "log_xz"}).status_code == 409
     assert c.post("/api/paper/stop").json()["state"] == "stopped"
     assert c.post("/api/paper/stop").status_code == 409
     assert c.get("/api/paper/day", params={"day": "2026-10-05"}).status_code == 200
     assert c.get("/api/paper/day", params={"day": "2026-10-06"}).status_code == 404
+
+
+def test_start_source_auto_is_shown_and_saved(tmp_path) -> None:
+    fx = Fixture(tmp_path, {})
+    c = client_for(fx.runner)
+    r = c.post("/api/paper/start", json={"strategy": "log_xz", "params": {}, "start_source": "auto"})
+    assert r.status_code == 200 and r.json()["start_source"] == "auto"
+    assert c.get("/api/paper/status").json()["slots"][0]["start_source"] == "auto"
+    assert load_day(tmp_path, DAY)["start_source"] == "auto"
 
 
 def test_routes_refuse_unknown_strategies_and_a_disabled_feed(tmp_path) -> None:

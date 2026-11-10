@@ -16,7 +16,7 @@ from app.live.frames import FeedItem, encode_feed, encode_market_info
 from app.live.model import IST
 from app.live.recorder import BINARY, RECV, Recorder, recording_path
 from app.live.service import LiveConfig, LiveService
-from app.live.session_days import listed_session
+from app.live.session_days import listed_session, normal_trading_day
 
 MON = date(2026, 11, 2)
 FRI = date(2026, 10, 30)
@@ -56,6 +56,15 @@ def test_listed_sessions_are_trading_days_and_listed_special_sessions() -> None:
     assert listed_session(SUN_MUHURAT)  # Muhurat 2026 is on a Sunday
     assert not listed_session(SAT) and not listed_session(date(2026, 11, 1))
     assert not listed_session(date(2026, 11, 10))  # a weekday NSE holiday
+
+
+def test_normal_trading_day_skips_muhurat_holidays_and_weekends() -> None:
+    """Paper autostart uses this: backend may still record on Muhurat via listed_session."""
+    assert normal_trading_day(MON) and normal_trading_day(FRI)
+    assert not normal_trading_day(SUN_MUHURAT)
+    assert not normal_trading_day(SAT)
+    assert not normal_trading_day(date(2026, 11, 10))
+    assert listed_session(SUN_MUHURAT) and not normal_trading_day(SUN_MUHURAT)
 
 
 # ---------------------------------------------------------------- the engine

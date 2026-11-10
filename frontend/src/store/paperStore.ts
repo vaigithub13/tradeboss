@@ -25,7 +25,7 @@ export const usePaperStore = create<PaperState>((set, get) => ({
   },
   start: async (slot, strategy, params) => {
     try {
-      await startPaper(slot, strategy, params);
+      await startPaper(slot, strategy, params, "hand");
       set({ errors: { ...get().errors, [slot]: null } });
     } catch (e) {
       set({ errors: { ...get().errors, [slot]: messageOf(e) } });

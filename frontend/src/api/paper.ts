@@ -27,6 +27,8 @@ export interface PaperStatus {
   exit_rule?: { kind: string; stop: number; target: number } | null;
   /** live, or replay: a run started after the day's session ended (kept apart, never counted) */
   source?: "live" | "replay";
+  /** who started the slot: launchd paper_autostart, or the Paper panel */
+  start_source?: "auto" | "hand" | null;
 }
 
 export interface PaperWeek {
@@ -46,8 +48,13 @@ export const PAPER_SLOTS = ["1", "2", "3", "4"] as const;
 
 export const fetchPaperStatus = (): Promise<PaperDeskStatus> => getJson<PaperDeskStatus>("/api/paper/status");
 
-export const startPaper = (slot: string, strategy: string, params: Record<string, unknown>): Promise<PaperStatus> =>
-  postJson<PaperStatus>("/api/paper/start", { strategy, params, slot });
+export const startPaper = (
+  slot: string,
+  strategy: string,
+  params: Record<string, unknown>,
+  startSource: "auto" | "hand" = "hand",
+): Promise<PaperStatus> =>
+  postJson<PaperStatus>("/api/paper/start", { strategy, params, slot, start_source: startSource });
 
 export const fetchPaperWeek = (slot: string, day: string): Promise<PaperWeek> =>
   getJson<PaperWeek>(`/api/paper/week?slot=${encodeURIComponent(slot)}&day=${encodeURIComponent(day)}`);

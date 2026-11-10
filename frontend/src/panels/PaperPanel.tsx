@@ -144,6 +144,8 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
       <div className="text-white/60">
         state: {status?.state ?? "…"}
         {status?.ended_by ? ` (${status.ended_by})` : ""}
+        {status?.start_source === "auto" && <span className="ml-2">started: auto</span>}
+        {status?.start_source === "hand" && <span className="ml-2">started: by hand</span>}
         {status?.source === "replay" && (
           <span className="ml-2 text-amber-300">replay: started after the close, kept apart, not counted</span>
         )}

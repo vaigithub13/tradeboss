@@ -6,7 +6,7 @@ Paper trading places no orders. Every route runs on the feed's event loop (async
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from pydantic import BaseModel, Field
@@ -31,6 +31,8 @@ class StartBody(BaseModel):
     params: dict[str, Any] = Field(default_factory=dict)
     #: "1".."4": strategies run side by side, each with its own position and P&L
     slot: str = "1"
+    #: who pressed Start: launchd paper_autostart ("auto") or the Paper panel ("hand")
+    start_source: Literal["auto", "hand"] = "hand"
 
 
 def _service(request: Request) -> LiveService:
@@ -84,7 +86,10 @@ async def start(body: StartBody, request: Request) -> dict[str, Any]:
     day = ist_date(now)
     try:
         # after 15:30 it replays the day, apart; the catch-up runs off the event loop, so the feed goes on
-        await runner.start_async(day, body.strategy, body.params, now_ms=now, clock=lambda: _now_ms(svc))
+        await runner.start_async(
+            day, body.strategy, body.params, now_ms=now, clock=lambda: _now_ms(svc),
+            start_source=body.start_source,
+        )
     except AlreadyRunning as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     except (KeyError, ValueError, TypeError, UnsupportedSettings) as exc:

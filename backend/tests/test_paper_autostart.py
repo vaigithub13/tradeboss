@@ -64,9 +64,24 @@ def test_waits_until_0916_then_starts_each_slot_once() -> None:
     assert clock.slept[0] == 35 * 60
     posts = [c[2] for c in calls if c[0] == "POST"]
     assert posts == [
-        {"slot": "1", "strategy": "log_xz", "params": {}},
-        {"slot": "2", "strategy": "price_channel", "params": {"length": 20}},
+        {"slot": "1", "strategy": "log_xz", "params": {}, "start_source": "auto"},
+        {"slot": "2", "strategy": "price_channel", "params": {"length": 20}, "start_source": "auto"},
     ]
+
+
+def test_skips_muhurat_and_other_special_sessions_with_no_posts() -> None:
+    # 8 Nov 2026 is Diwali Muhurat: backend may record, paper slots must not auto-start.
+    clock = Clock(datetime(2026, 11, 8, 9, 17, tzinfo=IST))
+    posts: list[Any] = []
+
+    def req(method: str, path: str, body: Any) -> tuple[int, Any]:
+        if method == "POST":
+            posts.append(body)
+        return 200, {"slots": []}
+
+    assert run(CFG, request=req, now=clock.now, sleep=clock.sleep, start_now=True) == {}
+    assert posts == []
+    assert clock.slept == []
 
 
 def test_a_running_slot_is_left_alone_and_a_failure_is_retried_then_given_up() -> None:

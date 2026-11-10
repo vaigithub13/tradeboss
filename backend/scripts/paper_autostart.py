@@ -5,7 +5,10 @@
 Run in the background by scripts/launchd/session-start.sh. Waits until `start_at_ist` (default 09:16, so the
 first 5m bar exists), then POSTs /api/paper/start for each slot in scripts/launchd/paper_slots.json that is not
 already running. Slots that fail are retried every 30 s until `give_up_at_ist`. A slot already running (409)
-counts as done. Places no orders: paper only. Standard library only; talks to 127.0.0.1:8000.
+counts as done. Places no orders: paper only. Talks to 127.0.0.1:8000.
+
+Skips Muhurat and other listed special sessions (`normal_trading_day` only). The backend may still start on those
+days to record the feed; paper slots stay off unless started by hand. Each POST sets `start_source: "auto"`.
 """
 
 from __future__ import annotations
@@ -19,6 +22,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
+
+from app.live.session_days import normal_trading_day
 
 IST = timezone(timedelta(hours=5, minutes=30))
 BASE = "http://127.0.0.1:8000"
@@ -77,6 +82,10 @@ def run(
     if not cfg.get("enabled", True):
         log("disabled in paper_slots.json")
         return {}
+    today = now().astimezone(IST).date()
+    if not normal_trading_day(today):
+        log(f"skip: {today.isoformat()} is not a normal trading day (Muhurat / holiday / weekend / special)")
+        return {}
     start_at = at_today(cfg.get("start_at_ist", "09:16"), now())
     give_up = at_today(cfg.get("give_up_at_ist", "09:45"), now())
     if not start_now and now() < start_at:
@@ -98,7 +107,12 @@ def run(
                 done.add(str(s["slot"]))
         if code == 200:
             for s in to_start(cfg, running, done):
-                body = {"slot": str(s["slot"]), "strategy": s["strategy"], "params": s.get("params", {})}
+                body = {
+                    "slot": str(s["slot"]),
+                    "strategy": s["strategy"],
+                    "params": s.get("params", {}),
+                    "start_source": "auto",
+                }
                 try:
                     c, out = request("POST", "/api/paper/start", body)
                 except (urllib.error.URLError, OSError) as e:

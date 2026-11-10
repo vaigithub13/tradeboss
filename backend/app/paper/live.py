@@ -120,6 +120,7 @@ class _Prepared:
     source: str
     replay: bool
     continuation: Any
+    start_source: str
 
 
 class PaperRunner:
@@ -139,6 +140,7 @@ class PaperRunner:
         self.eod_check: dict[str, Any] | None = None
         self._wanted_sent: frozenset[str] = frozenset()
         self.source = "live"  # live, or replay: a run started after its day's session ended
+        self.start_source: str | None = None  # "auto" (paper_autostart) or "hand" (Paper panel)
 
     @property
     def save_dir(self) -> Path:
@@ -147,7 +149,8 @@ class PaperRunner:
         return self.directory if self.source == "live" else self.directory / "replay"
 
     # ------------------------------------------------------------------ control
-    def start(self, day: date, strategy: str, params: dict[str, Any], now_ms: int | None = None) -> None:
+    def start(self, day: date, strategy: str, params: dict[str, Any], now_ms: int | None = None,
+              start_source: str = "hand") -> None:
         """Start (or resume) today's strategy. The session warms on the stored bars, catches up on the day's
         recorded feed, and resumes from today's file if there is one, so the signals do not depend on when
         this was called. What the catch-up decides is marked `replay`. With `now_ms` after the day's session
@@ -157,10 +160,10 @@ class PaperRunner:
         `start_async`, which does the same work without holding up the feed."""
         if self.state in ("running", "starting"):
             raise AlreadyRunning("a strategy is already running")
-        self._activate(self._prepare(day, strategy, params, now_ms))
+        self._activate(self._prepare(day, strategy, params, now_ms, start_source))
 
     async def start_async(self, day: date, strategy: str, params: dict[str, Any], *, now_ms: int,
-                          clock: Callable[[], int]) -> None:
+                          clock: Callable[[], int], start_source: str = "hand") -> None:
         """`start` for the event loop (M2, review 2026-10-11): build, warm and catch up in a worker thread while
         the feed goes on, then, on the loop, replay the frames recorded meanwhile and go live. While it starts,
         the runner is `starting`: feed events are ignored and a second Start is refused. `clock` is the feed's
@@ -170,7 +173,7 @@ class PaperRunner:
         before = self.state
         self.state = "starting"
         try:
-            prepared = await asyncio.to_thread(self._prepare, day, strategy, params, now_ms)
+            prepared = await asyncio.to_thread(self._prepare, day, strategy, params, now_ms, start_source)
         except BaseException:
             self.state = before
             raise
@@ -181,7 +184,8 @@ class PaperRunner:
                 self.state = before
             raise
 
-    def _prepare(self, day: date, strategy: str, params: dict[str, Any], now_ms: int | None) -> _Prepared:
+    def _prepare(self, day: date, strategy: str, params: dict[str, Any], now_ms: int | None,
+                 start_source: str = "hand") -> _Prepared:
         """Everything that takes time, touching no state of the runner (it may run in a worker thread)."""
         replay = now_ms is not None and session_over(day, now_ms)
         source = "replay" if replay else "live"
@@ -208,7 +212,7 @@ class PaperRunner:
             finally:
                 session.source = source
         return _Prepared(day=day, strategy=strategy, params=dict(params), session=session, source=source,
-                         replay=replay, continuation=continuation)
+                         replay=replay, continuation=continuation, start_source=start_source)
 
     def _activate(self, prepared: _Prepared, now_ms: int | None = None) -> None:
         """On the loop: replay what was recorded since the catch-up, then take the session live."""
@@ -221,6 +225,7 @@ class PaperRunner:
             finally:
                 session.source = prepared.source
         self.source = prepared.source
+        self.start_source = prepared.start_source
         self.session = session
         self.day, self.strategy, self.params = prepared.day, prepared.strategy, dict(prepared.params)
         self.eod_check = None
@@ -243,7 +248,8 @@ class PaperRunner:
         if saved.get("state") != "running":
             self._load_ended(day)
             return False
-        self.start(day, saved["requested_strategy"], saved["requested_params"])
+        source = saved.get("start_source") if saved.get("start_source") in ("auto", "hand") else "hand"
+        self.start(day, saved["requested_strategy"], saved["requested_params"], start_source=source)
         return True
 
     def stop(self, now_ms: int, reason: str = "stopped") -> None:
@@ -290,6 +296,8 @@ class PaperRunner:
         self.session, self.day, self.strategy, self.params = session, day, strategy, params
         self.state, self.ended_by = "stopped", saved.get("ended_by")
         self.eod_check = saved.get("eod_check")
+        self.start_source = saved.get("start_source") if saved.get("start_source") in ("auto", "hand") else None
+        self.source = saved.get("source") or "live"
 
     def flush(self) -> None:
         """Write the day's file now (backend shutdown). A running strategy stays `running` in the file, so a
@@ -380,6 +388,7 @@ class PaperRunner:
             "strategy": self.strategy,
             "params": self.params,
             "source": self.source,
+            "start_source": self.start_source,
             "wanted_keys": sorted(self.wanted_keys()),
         }
         if self.session is not None:
@@ -406,5 +415,6 @@ class PaperRunner:
             "requested_params": self.params,
             **self.session.snapshot(),
             "source": self.source,
+            "start_source": self.start_source,
             **extra,
         })

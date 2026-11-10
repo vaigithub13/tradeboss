@@ -17,15 +17,17 @@ For every trading day (first used for Monday sessions). Times are IST.
 `backend/scripts/launchd/install-session.sh` installs two launchd agents and prints a `sudo pmset` wake command:
 
 - 08:30 IST Mon-Fri the Mac wakes (pmset); 08:40 `session-start.sh` runs `npm run session` under `caffeinate`
-  on a session day, only between 08:00 and 15:30, and never when :8000 is already in use. A crash restarts it
-  (at most once a minute) inside that window.
+  on a session day, only between 08:00 and 15:30. A backend started **today** on :8000 is left alone; one from a
+  **previous day** is stopped cleanly (one SIGINT) then replaced. A crash restarts it (at most once a minute)
+  inside that window.
 - 16:35 `session-stop.sh` sends ONE SIGINT to the backend (after the reconcile retries end at 16:30), waits up to
   60 s for the clean shutdown, then stops the frontend preview.
 - Paper: at 09:16 `scripts/paper_autostart.py` starts the slots in `backend/scripts/launchd/paper_slots.json`
-  (the four below), skipping any already running, retrying until 09:45. Log: `data/logs/paper-autostart.log`.
+  on a **normal trading day only** (skips Muhurat / special sessions; the backend may still record those days),
+  skipping any already running, retrying until 09:45. Each slot is marked `started: auto` in the Paper panel.
+  Log: `data/logs/paper-autostart.log`.
 - Logs: `data/logs/com.tradeboss.session-start.log`, `...session-stop.log`; status: `check-session.sh`.
-- Weekdays only: a Sunday Muhurat session is started by hand. Keep the Mac on power (caffeinate does not stop
-  sleep on battery with the lid closed).
+- Keep the Mac on power (caffeinate does not stop sleep on battery with the lid closed).
 
 ## Before 08:55
 

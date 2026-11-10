@@ -3,9 +3,10 @@
 # Starts `npm run session` (backend without auto-reload + production frontend) and keeps the Mac awake while it runs.
 #
 # Does nothing (exit 0) when:
-#   * today is not a session day (weekend / NSE holiday; Muhurat counts as a session day),
+#   * today is not a session day (weekend / NSE holiday; Muhurat counts as a session day for the backend),
 #   * it is outside 08:00-15:30 IST (never start or restart a session late in the day),
-#   * a backend is already listening on :8000 (you started it by hand: never run two).
+#   * a backend started TODAY is already listening on :8000 (you started it by hand: never run two).
+# A backend listening from a PREVIOUS day is stopped cleanly (one SIGINT, same as Ctrl+C) then replaced.
 # A crash exits non-zero, so launchd starts it again (at most once a minute) while the window is open.
 set -uo pipefail
 
@@ -32,14 +33,21 @@ sys.exit(0 if listed_session(datetime.now(ZoneInfo('Asia/Kolkata')).date()) else
   exit 0
 fi
 
-if /usr/sbin/lsof -nP -iTCP:8000 -sTCP:LISTEN >/dev/null 2>&1; then
-  log "a backend is already listening on :8000: leaving it alone"
+# Paper slots: only on normal trading days (Muhurat / special sessions are skipped inside paper_autostart).
+# Spawn before the backend guard so a "leave alone" today still gets 09:16 slot starts.
+(cd "$BACKEND" && "$PY" -m scripts.paper_autostart) >> "$REPO_ROOT/data/logs/paper-autostart.log" 2>&1 &
+
+(cd "$BACKEND" && "$PY" -m scripts.session_start_guard)
+GUARD=$?
+if (( GUARD == 10 )); then
+  # Backend already up today: slots still autostart above; do not start a second server.
   exit 0
+fi
+if (( GUARD != 0 )); then
+  exit "$GUARD"
 fi
 
 log "starting npm run session (Mac kept awake while it runs)"
-# Paper slots: started on the running backend at 09:16 IST (scripts/launchd/paper_slots.json).
-(cd "$BACKEND" && "$PY" -m scripts.paper_autostart) >> "$REPO_ROOT/data/logs/paper-autostart.log" 2>&1 &
 cd "$REPO_ROOT"
 # -i: no idle sleep, -m: no disk sleep, -s: no system sleep on AC power. The display may still sleep.
 exec /usr/bin/caffeinate -ims npm run session
