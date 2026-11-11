@@ -1709,3 +1709,57 @@ Trades (9 Nov expiry, DTE 0, 1 lot of 65; paper / backtest):
   `start_source: "auto"`.
 - Paper panel / API: `start_source` auto | hand on status and the day file; the panel shows `started: auto` or
   `started: by hand`. Default for the UI Start button is hand.
+
+## 11 Nov 2026: forward-test day 10 (four slots)
+
+First session after the 10 Nov holiday. Backend pid 19971 from 08:47 (launchd `session-start`, port free) — still up
+at the close write; launchd `session-stop` at 16:35 is the daily stop (one SIGINT), same as Ctrl+C after 16:10.
+All four slots warm 500 bars, 75 closed bars each, 0 incomplete / late / given-up. Every signal and trade `live`,
+every premium leg a real quote (0 modelled). Settings unchanged. No shadow exits. End-of-day check: slots 1–4
+1/2/1/2 live vs backtest trades; every slot 0 differences, 0 fill-driven, 0 exchange-only; no warnings. Nifty opened
+25337.80, high 25424.35, low 25095.35, was 25125.80 / 25130 at the 15:15 square-off and closed 25255.05 (day range
+329 points). Expiry 17 Nov (DTE 3–4), lot 65.
+
+Trades (17 Nov expiry, 1 lot of 65; paper / backtest):
+- Slot 1 (Log XZ): 12:20 sell → fill 12:26:00 at Nifty 25318.80, 25300 PE 212.65 / 211.70; square-off 15:15 at
+  25125.80, 299.45 / 299.40; net +5,551.20 / +5,609.75.
+- Slot 2 (Price Channel 20): 09:15 buy stop 25377.45, filled 09:21:00 at Nifty 25368.15 (level crossed before arm),
+  25350 CE 261.55 / 261.95; reverse 12:12:04 at 25348.95, 239.60 / 240.44; net −1,511.52 / −1,483.20. 12:05 sell stop
+  25348.95, filled 12:12:04 at 25348.95, 25350 PE 218.80 / 218.84; square-off 15:15 at 25125.80, 330.90 / 330.75; net
+  +7,191.60 / +7,179.43.
+- Slot 3 (Log XZ, 1:2 premium): same entry as slot 1. PE stop 170.12 / 169.36, target 297.71 / 296.38; target 13:51:27
+  at Nifty 25178.05, 296.15 / 296.18; net +5,337.13 / +5,400.84, R +1.93 / +1.96.
+- Slot 4 (Price Channel 20, 1:2 premium): same entries as slot 2. CE stop 209.24 / 209.56, target 366.17 / 366.73;
+  reverse 12:12:04 at 25348.95, 239.60 / 240.44; net −1,511.52 / −1,483.20, R −0.45 / −0.44. PE stop 175.04 / 175.07,
+  target 306.32 / 306.37; target 13:32:40 at Nifty 25226.05, 304.75 / 306.17; net +5,495.11 / +5,584.81, R +1.93 /
+  +1.96.
+- Today: slot 1 +5,551.20 (1 trade, 1 win; square-off 1) / bt +5,609.75; slot 2 +5,680.08 (2, 1; reversal 1,
+  square-off 1) / bt +5,696.23; slot 3 +5,337.13 (1, 1; target 1) / bt +5,400.84; slot 4 +3,983.59 (2, 1; reversal 1,
+  target 1) / bt +4,101.61.
+- Running (live days 8, 9, 12 Oct, 2–6 + 9 + 11 Nov; target/stop/reversal/square-off): slot 1 +43,331.81 (25 trades,
+  14 wins; 0/0/16/9), slot 2 +42,131.73 (20, 11; 0/0/10/10), slot 3 +20,678.03 (24, 12; 10/9/4/1), slot 4 +11,992.52
+  (19, 10; 7/6/3/3). Shadow difference (shadow net − paper net): slot 3 −22.05 (3 shadows), slot 4 −117.43 (1), all
+  −139.48 (4). Unchanged today (no shadows). The vacation backtest (13–30 Oct, 31 Oct entry) is not in these totals.
+- Spreads 11 Nov, ATM, DTE 3–4: median 0.50 / p90 0.60; one-side 1-lot fill 0.25 (both), round trip ≈ ₹32.50. Since
+  6 Oct (12 days: DTE 0, 3–4, 2, 1, 1, 0, 3–4, 2, 1, 1, 0, 3–4): mean one-side 0.140, round trip ₹18.15. Paper's own
+  legs today: 0.30 (slot 1), 0.29 (slot 2), 0.14 (slot 3), 0.26 (slot 4) points on average. Spread depth held
+  ~8.7–8.8k snapshots per 15 minutes (full after the 6 Nov cap-40 fix).
+- Reconcile: 11 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 low 25310.1 vs
+  25310.0 and volume 266,565 vs 310,570; 15 expected: OI and 15:30–15:39). 9 Nov already `final` from the 08:47
+  start (0 differences on all three). Option capture 15:45: 17 Nov expiry, 17 strikes, 34 stored, 0 empty, 0 failed.
+  Spread report written. Paper eod_check written with the day files.
+- Health: one backend from 08:47 (pid 19971). Feed live 08:55–15:40, then 15:50–16:00, then off at 16:10; **no
+  reconnect**. 0 warnings, 0 errors. No late / incomplete / given-up paper bars. Session gate: listed trading day
+  (normal). Snapshot 08:30 saved (and again at backend start). No option-key-cap warnings.
+- Automatic start: launchd `session-start` at 08:47 found port free and started `npm run session` (backend 08:47:15,
+  pid 19971). Paper slots POSTed by hand at 08:56:40 / 08:56:43 / 08:56:45 / 08:56:46 (`start_source: hand`).
+  `paper-autostart` waited until 09:16 and at 09:19 reported all four already running. **Stop each day:** leave the
+  session up through 15:45 jobs; launchd `session-stop` at 16:35 sends one SIGINT (preferred). After 16:10, one
+  Ctrl+C is equivalent if stopping by hand. Do not stop before 15:45.
+- Levels today (pre-open market view + GEX walls at 09:45): PDH 25084.05, PDL 24838.75, CPR top 25016.90, CPR bottom
+  24961.40, put wall 25000, call wall 25500 — **not touched** (day stayed above the supports / below the call wall).
+  Gamma flip 25152.95 (09:45): touched, broke through on the 14:55 5m close 25147.20. Range high 25319.48: touched
+  on the 09:15 bar (gap above, dipped through, closed back above 25373.35), later broke through on the 12:25 5m close
+  25305.55. Range low 24769.82: not touched. Premarket γ flip 24914.92 (market-view plan): not touched.
+- Option planner 09:10 target 25,400 vs stop 24,888: **target first**, first 1m touch 09:37 (high 25403.20); stop never
+  reached (day low 25095.35).
