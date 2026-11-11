@@ -1763,3 +1763,14 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest):
   25305.55. Range low 24769.82: not touched. Premarket γ flip 24914.92 (market-view plan): not touched.
 - Option planner 09:10 target 25,400 vs stop 24,888: **target first**, first 1m touch 09:37 (high 25403.20); stop never
   reached (day low 25095.35).
+
+## 11 Nov 2026 (after the close): real-trades log for manual fills of paper slot 3
+
+- `app/paper/real.py` + `/api/paper/real` (GET join, PUT upsert, DELETE, settings, order-helper). Stored under
+  `data/paper/real/` (apart from paper day files). Does not change paper session or fills.
+- Paper panel: "Log real trade" under each trade-report row (entry/exit time and price, exit reason, charges from
+  the contract note). Slot 3 shows an order helper when an open premium position exists (contract, quantity, SL
+  trigger/limit, target limit, copy buttons).
+- Trades view: real vs paper columns (entry/exit Δ, delays, net Δ), today and running real/paper totals, account
+  stop progress bar (default ₹5,000 loss) with a clear warning when reached.
+- Tests: `tests/test_paper_real.py`, `frontend/src/paper/real.test.ts`.

@@ -152,7 +152,7 @@ function sortValue(row: PaperTradeRow, key: ColumnKey): number | string | null {
 }
 
 /** Sorted copy; empty values go last either way. */
-export function sortRows(rows: readonly PaperTradeRow[], key: ColumnKey, dir: "asc" | "desc"): PaperTradeRow[] {
+export function sortRows<T extends PaperTradeRow>(rows: readonly T[], key: ColumnKey, dir: "asc" | "desc"): T[] {
   const sign = dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => {
     const x = sortValue(a, key);
@@ -171,7 +171,7 @@ export interface TradeFilter {
   to: string;
 }
 
-export function filterRows(rows: readonly PaperTradeRow[], f: TradeFilter): PaperTradeRow[] {
+export function filterRows<T extends PaperTradeRow>(rows: readonly T[], f: TradeFilter): T[] {
   return rows.filter((r) => (!f.slot || r.slot === f.slot) && (!f.from || r.date >= f.from) && (!f.to || r.date <= f.to));
 }
 

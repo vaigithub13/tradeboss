@@ -1,11 +1,15 @@
+import { Fragment, type ReactNode } from "react";
+
 import { exitCountsLine, reportCells, type ExitCounts, type ReportRow } from "./present";
 
 /** The trade report: one row per trade (paper day or backtest run). `~` marks levels estimated through the delta. */
-export function TradeReport({ rows, counts, withDate = false, title = "Trade report" }: {
+export function TradeReport({ rows, counts, withDate = false, title = "Trade report", afterRow }: {
   rows: readonly ReportRow[];
   counts?: Partial<ExitCounts> | null;
   withDate?: boolean;
   title?: string;
+  /** Optional block under each trade (e.g. Log real trade). */
+  afterRow?: (row: ReportRow, index: number) => ReactNode;
 }) {
   return (
     <div className="flex flex-col gap-1">
@@ -26,21 +30,29 @@ export function TradeReport({ rows, counts, withDate = false, title = "Trade rep
             <tbody>
               {rows.map((row, i) => {
                 const c = reportCells(row, withDate);
+                const after = afterRow?.(row, i);
                 return (
-                  <tr key={row.id ?? i} className="border-t border-white/5 whitespace-nowrap">
-                    <td className="pr-3">{c.signal}</td>
-                    <td className="pr-3 text-right">{c.trigger}</td>
-                    <td className="pr-3">{c.fill}</td>
-                    <td className="pr-3">{c.contract}</td>
-                    <td className="pr-3 text-right">{c.entry}</td>
-                    <td className="pr-3 text-right">{c.indexLevels}</td>
-                    <td className="pr-3 text-right">{c.premiumLevels}</td>
-                    <td className="pr-3">{c.exit}</td>
-                    <td className="pr-3 text-right">{c.exitPremium}</td>
-                    <td className="pr-3">{c.reason}</td>
-                    <td className={`pr-3 text-right ${row.net != null && row.net < 0 ? "text-red-300" : "text-emerald-300"}`}>{c.net}</td>
-                    <td className="pr-3 text-right">{c.r}</td>
-                  </tr>
+                  <Fragment key={row.id ?? `${row.fill_time}-${i}`}>
+                    <tr className="border-t border-white/5 whitespace-nowrap">
+                      <td className="pr-3">{c.signal}</td>
+                      <td className="pr-3 text-right">{c.trigger}</td>
+                      <td className="pr-3">{c.fill}</td>
+                      <td className="pr-3">{c.contract}</td>
+                      <td className="pr-3 text-right">{c.entry}</td>
+                      <td className="pr-3 text-right">{c.indexLevels}</td>
+                      <td className="pr-3 text-right">{c.premiumLevels}</td>
+                      <td className="pr-3">{c.exit}</td>
+                      <td className="pr-3 text-right">{c.exitPremium}</td>
+                      <td className="pr-3">{c.reason}</td>
+                      <td className={`pr-3 text-right ${row.net != null && row.net < 0 ? "text-red-300" : "text-emerald-300"}`}>{c.net}</td>
+                      <td className="pr-3 text-right">{c.r}</td>
+                    </tr>
+                    {after != null && (
+                      <tr>
+                        <td colSpan={12} className="pb-2">{after}</td>
+                      </tr>
+                    )}
+                  </Fragment>
                 );
               })}
             </tbody>

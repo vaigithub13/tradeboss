@@ -1,7 +1,10 @@
 import { Fragment, useEffect, useState } from "react";
 
-import { PAPER_SLOTS, fetchPaperWeek, type PaperStatus, type PaperWeek } from "../api/paper";
+import { PAPER_SLOTS, fetchPaperWeek, fetchRealTrades, type PaperStatus, type PaperWeek } from "../api/paper";
+import { LogRealTrade } from "../paper/LogRealTrade";
+import { OrderHelperBox } from "../paper/OrderHelper";
 import { EXIT_RULES, SLOT_DEFAULTS, exitLabel, formatRupees, markLine, paperRows, parseParams, startParams } from "../paper/present";
+import { paperTradeKey, type RealTradeLog } from "../paper/real";
 import { exitCountsLine } from "../report/present";
 import { TradeReport } from "../report/TradeReport";
 import { useAlertStore } from "../store/alertStore";
@@ -71,12 +74,30 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
   const [exit, setExit] = useState(SLOT_DEFAULTS[slot]?.exit ?? "");
   const [paramsText, setParamsText] = useState("");
   const [week, setWeek] = useState<PaperWeek | null>(null);
+  const [reals, setReals] = useState<Record<string, RealTradeLog>>({});
   const day = status?.day ?? null;
   const closed = status?.trades?.length ?? 0;
   useEffect(() => {
     if (!day) return;
     let live = true;
     fetchPaperWeek(slot, day).then((w) => live && setWeek(w)).catch(() => live && setWeek(null));
+    return () => {
+      live = false;
+    };
+  }, [slot, day, closed]);
+  useEffect(() => {
+    if (!day) return;
+    let live = true;
+    fetchRealTrades({ slot, from: day, to: day })
+      .then((r) => {
+        if (!live) return;
+        const map: Record<string, RealTradeLog> = {};
+        for (const row of r.rows) {
+          if (row.real) map[row.paper_key] = row.real;
+        }
+        setReals(map);
+      })
+      .catch(() => live && setReals({}));
     return () => {
       live = false;
     };
@@ -170,6 +191,7 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
         </div>
       )}
       {error && <div className="text-red-400">{error}</div>}
+      {slot === "3" && <OrderHelperBox open={status?.position ?? null} />}
 
       <table className="w-full table-fixed text-left tabular-nums">
         <colgroup>
@@ -205,7 +227,22 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
           ))}
         </tbody>
       </table>
-      <TradeReport rows={status?.report ?? []} counts={summary?.exits} />
+      <TradeReport
+        rows={status?.report ?? []}
+        counts={summary?.exits}
+        afterRow={day ? (row) => {
+          const key = paperTradeKey(slot, day, row.fill_time);
+          return (
+            <LogRealTrade
+              slot={slot}
+              day={day}
+              row={row}
+              existing={reals[key] ?? null}
+              onSaved={(trade) => setReals((m) => ({ ...m, [trade.key]: trade }))}
+            />
+          );
+        } : undefined}
+      />
     </section>
   );
 }

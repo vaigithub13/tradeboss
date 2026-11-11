@@ -1,6 +1,12 @@
 import { create } from "zustand";
 
-import { fetchPaperTrades } from "../api/paper";
+import {
+  fetchRealTrades,
+  saveRealSettings,
+  type PaperTradeWithReal,
+  type RealTotals,
+} from "../api/paper";
+import { DEFAULT_ACCOUNT_STOP } from "../paper/real";
 import { tradeOverlay, type ColumnKey, type PaperTradeRow, type TradeFilter, type TradeOverlay } from "../paper/trades";
 import { useChartStore } from "./chartStore";
 
@@ -9,7 +15,9 @@ export const rowKey = (row: PaperTradeRow): string => `${row.slot}:${row.entry_t
 interface PaperTradesState {
   open: boolean;
   full: boolean;
-  rows: PaperTradeRow[];
+  rows: PaperTradeWithReal[];
+  totals: RealTotals | null;
+  accountStop: number;
   loading: boolean;
   error: string | null;
   filter: TradeFilter;
@@ -25,12 +33,22 @@ interface PaperTradesState {
   sortBy: (key: ColumnKey) => void;
   select: (row: PaperTradeRow) => Promise<void>;
   clearSelection: () => void;
+  setAccountStop: (value: number) => Promise<void>;
 }
+
+const emptyTotals = (stop = DEFAULT_ACCOUNT_STOP): RealTotals => ({
+  logged: 0,
+  day: { date: null, trades: 0, real_net: 0, paper_net: 0, net_diff: 0 },
+  running: { trades: 0, real_net: 0, paper_net: 0, net_diff: 0 },
+  stop: { account_stop: stop, real_net: 0, loss_used: 0, fraction: 0, reached: false },
+});
 
 export const usePaperTradesStore = create<PaperTradesState>((set, get) => ({
   open: false,
   full: false,
   rows: [],
+  totals: null,
+  accountStop: DEFAULT_ACCOUNT_STOP,
   loading: false,
   error: null,
   filter: { slot: "", from: "", to: "" },
@@ -46,8 +64,13 @@ export const usePaperTradesStore = create<PaperTradesState>((set, get) => ({
   load: async () => {
     set({ loading: true });
     try {
-      const { rows } = await fetchPaperTrades();
-      set({ rows, error: null });
+      const data = await fetchRealTrades();
+      set({
+        rows: data.rows,
+        totals: data.totals,
+        accountStop: data.settings.account_stop,
+        error: null,
+      });
     } catch (e) {
       set({ error: e instanceof Error ? e.message : "could not load the trades" });
     } finally {
@@ -67,4 +90,19 @@ export const usePaperTradesStore = create<PaperTradesState>((set, get) => ({
     set({ focus: { token: Date.now(), time: row.entry_time } });
   },
   clearSelection: () => set({ selected: null, overlay: null }),
+  setAccountStop: async (value) => {
+    const settings = await saveRealSettings(value);
+    const totals = get().totals ?? emptyTotals(settings.account_stop);
+    const stop = {
+      ...totals.stop,
+      account_stop: settings.account_stop,
+      loss_used: Math.max(0, -totals.running.real_net),
+      fraction: settings.account_stop
+        ? Math.min(1, Math.max(0, -totals.running.real_net) / settings.account_stop)
+        : 0,
+      reached: Math.max(0, -totals.running.real_net) >= settings.account_stop - 1e-9,
+      real_net: totals.running.real_net,
+    };
+    set({ accountStop: settings.account_stop, totals: { ...totals, stop } });
+  },
 }));

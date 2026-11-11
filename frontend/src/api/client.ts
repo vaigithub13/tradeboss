@@ -159,6 +159,14 @@ export async function postJson<T>(url: string, body: unknown, signal?: AbortSign
   return parseResponse<T>(res);
 }
 
+export async function deleteJson<T>(url: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(url, {
+    method: "DELETE",
+    ...(signal ? { signal } : {}),
+  });
+  return parseResponse<T>(res);
+}
+
 export function fetchCandles(q: CandlesQuery, signal?: AbortSignal): Promise<CandlesResponse> {
   return getJson<CandlesResponse>(candlesUrl(q), signal);
 }

@@ -1,5 +1,13 @@
-import { getJson, postJson } from "./client";
+import { deleteJson, getJson, postJson, putJson } from "./client";
 import type { PaperMark, PaperSignal } from "../paper/present";
+import type {
+  AccountStopProgress,
+  OrderHelper,
+  PaperOpenPosition,
+  RealTotals,
+  RealTradeLog,
+  RealVsPaper,
+} from "../paper/real";
 import type { ExitCounts, ReportRow } from "../report/present";
 import type { PaperTradeRow } from "../paper/trades";
 
@@ -20,7 +28,7 @@ export interface PaperStatus {
     shadow_net?: number;
     shadow_diff?: number;
   } | null;
-  position: { symbol: string } | null;
+  position: PaperOpenPosition | null;
   mark: PaperMark | null;
   /** one row per closed trade (backend app/exits/report.py) */
   report?: ReportRow[];
@@ -64,3 +72,51 @@ export const stopPaper = (slot: string): Promise<PaperStatus> =>
 
 /** Every paper trade over the slots, one row each (live days only). */
 export const fetchPaperTrades = (): Promise<{ rows: PaperTradeRow[] }> => getJson<{ rows: PaperTradeRow[] }>("/api/paper/trades");
+
+export interface PaperTradeWithReal extends PaperTradeRow {
+  paper_key: string;
+  real: RealTradeLog | null;
+  real_vs_paper: RealVsPaper | null;
+}
+
+export interface RealTradesResponse {
+  rows: PaperTradeWithReal[];
+  totals: RealTotals;
+  settings: { account_stop: number };
+}
+
+export const fetchRealTrades = (opts?: { slot?: string; from?: string; to?: string }): Promise<RealTradesResponse> => {
+  const q = new URLSearchParams();
+  if (opts?.slot) q.set("slot", opts.slot);
+  if (opts?.from) q.set("from", opts.from);
+  if (opts?.to) q.set("to", opts.to);
+  const qs = q.toString();
+  return getJson<RealTradesResponse>(`/api/paper/real${qs ? `?${qs}` : ""}`);
+};
+
+export const upsertRealTrade = (body: {
+  slot: string;
+  day: string;
+  fill_time: number;
+  contract?: string | null;
+  entry_time: number;
+  entry_price: number;
+  exit_time: number;
+  exit_price: number;
+  exit_reason: string;
+  charges: number;
+  units: number;
+}): Promise<{ trade: RealTradeLog }> => putJson("/api/paper/real", body);
+
+export const deleteRealTrade = (key: string): Promise<{ deleted: string }> =>
+  deleteJson(`/api/paper/real?key=${encodeURIComponent(key)}`);
+
+export const fetchRealSettings = (): Promise<{ account_stop: number }> => getJson("/api/paper/real/settings");
+
+export const saveRealSettings = (account_stop: number): Promise<{ account_stop: number }> =>
+  putJson("/api/paper/real/settings", { account_stop });
+
+export const fetchOrderHelper = (slot = "3"): Promise<{ slot: string; helper: OrderHelper | null; state: string }> =>
+  getJson(`/api/paper/real/order-helper?slot=${encodeURIComponent(slot)}`);
+
+export type { AccountStopProgress, OrderHelper, RealTotals };
