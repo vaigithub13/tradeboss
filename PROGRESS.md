@@ -1835,3 +1835,26 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest):
   Premarket γ flip 24948.04 (market-view plan): not touched.
 - Option planner (market-view: hold/calls above PDH 25,424; puts only below PDL 25,095): **neither hit** — day high
   25384.80 stayed below the target, day low 25142.95 stayed above the stop.
+
+
+## 14 Nov 2026 - DD 5-confirmation strategy, paper slot 5
+
+- New strategy `dd_five_confirm` (`backend/app/strategies/dd_five_confirm.py`), in the backtest catalog. Source: DD Nifty
+  (Dharanidharan Ganesan) "5 Confirmation Intraday Options Buying Strategy" (Upsurge Club video). Long = close above the
+  Supertrend (10, 2.0) + RSI(14) > 70 + close > previous-day classic R1 + close > upper Bollinger(20, 2); short the mirror
+  (RSI < 30, S1, lower band). Exit when the Supertrend direction flips; normal 15:15 square-off; no entries from 14:50.
+  `use_pivots` (default true) can drop the R1/S1 check for research. Tests: `tests/test_bt_dd_five_confirm.py`, and the
+  look-ahead suite (`tests/test_bt_lookahead.py`) now includes it.
+- Backtest 2022-01-03 to 2026-06-30 (before the holdout), options mode, 1 lot, after costs:
+  `data/validation/dd_five_confirm_2026-11-14.md` (script `scripts/dd_five_confirm_backtest.py`).
+  5m: 810 trades, 47.8% wins, +6,541 index points (PF 1.35); option net ATM -40,666 (PF 0.94), 1 ITM -4,565 (PF 0.99),
+  max DD about 63-73k. 3m: 1,034 trades, +6,741 points; option net ATM -25,974, 1 ITM -8,530.
+  Same period: log_xz 5m option net -613,147, price_channel(20) 5m -257,955.
+  Positive on the index, about break-even on options after costs; ITM strikes help (the video uses premium ~1% of spot,
+  2-3 strikes ITM, which the overlay cannot model beyond 1 ITM). Run in this container with a pure-Python parquet reader
+  against the same store files; please rerun `uv run python -m scripts.dd_five_confirm_backtest` on the Mac to confirm.
+- Paper desk extended to 5 slots (backend `SLOTS`, routes, frontend `PAPER_SLOTS`, `SLOT_DEFAULTS`, alerts, tests).
+  Slot 5 = `dd_five_confirm`, no exit rule (its own Supertrend exit), ATM contract as the other slots; added to
+  `scripts/launchd/paper_slots.json` so paper_autostart starts it at 09:16 from Mon 16 Nov.
+- Not run here (need the Mac env): the fastapi-based paper route tests (`test_paper_desk.py`, `test_paper_live.py`) and
+  Vitest. Run `npm test` on the Mac before 09:00 Monday.

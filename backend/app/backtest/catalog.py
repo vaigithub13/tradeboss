@@ -8,6 +8,7 @@ from typing import Any
 from app.backtest.contracts import Strategy
 from app.backtest.engine import INTRADAY_MIN
 from app.data.sessions import SESSION_TYPES
+from app.strategies.dd_five_confirm import DdFiveConfirm
 from app.strategies.ema_cross import EmaCrossover
 from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
@@ -127,6 +128,22 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
         {
             "length": _Field("int", 20, min_value=1),
             "execution": _Field("str", "realistic", choices=("realistic", "tv_parity")),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "dd_five_confirm": (
+        DdFiveConfirm,
+        {
+            "st_atr": _Field("int", 10, min_value=1),
+            "st_mult": _Field("float", 2.0, min_value=0.1),
+            "rsi_len": _Field("int", 14, min_value=2),
+            "rsi_long": _Field("float", 70.0, min_value=0),
+            "rsi_short": _Field("float", 30.0, min_value=0),
+            "bb_len": _Field("int", 20, min_value=1),
+            "bb_mult": _Field("float", 2.0, min_value=0.1),
+            "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
+            "last_entry": _Field("str", "14:50"),
+            "use_pivots": _Field("bool", True),
             "lots": _Field("int", 1, min_value=1),
         },
     ),

@@ -127,12 +127,14 @@ export const EXIT_RULES = [
   { name: "atr_1to2", label: "1:2 index ATR(14) (1x / 2x)" },
 ] as const;
 
-/** What each slot starts with: 1 and 2 are the week's comparison (no exits); 3 and 4 the same with 1:2 premium. */
+/** What each slot starts with: 1 and 2 are the week's comparison (no exits); 3 and 4 the same with 1:2 premium;
+ * 5 is the DD Nifty 5-confirmation system (its own Supertrend exit, no premium rule). */
 export const SLOT_DEFAULTS: Record<string, { strategy: string; exit: string }> = {
   "1": { strategy: "log_xz", exit: "" },
   "2": { strategy: "price_channel", exit: "" },
   "3": { strategy: "log_xz", exit: "premium_1to2" },
   "4": { strategy: "price_channel", exit: "premium_1to2" },
+  "5": { strategy: "dd_five_confirm", exit: "" },
 };
 
 /** The params sent to start a slot: the box's params, plus `exit_rule` when one is chosen. */

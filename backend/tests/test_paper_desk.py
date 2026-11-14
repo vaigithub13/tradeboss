@@ -26,7 +26,7 @@ def feed(d: PaperDesk, minutes) -> None:
 
 
 def test_slot_1_keeps_the_existing_directory_and_slot_2_has_its_own(tmp_path) -> None:
-    assert SLOTS == ("1", "2", "3", "4")
+    assert SLOTS == ("1", "2", "3", "4", "5")
     assert PaperDesk.slot_dir(tmp_path, "1") == tmp_path and PaperDesk.slot_dir(tmp_path, "2") == tmp_path / "slot2"
     assert PaperDesk.slot_dir(tmp_path, "3") == tmp_path / "slot3" and PaperDesk.slot_dir(tmp_path, "4") == tmp_path / "slot4"
 

@@ -40,6 +40,7 @@ def test_shipped_config_matches_the_checklist() -> None:
         ("2", "price_channel", {"length": 20}),
         ("3", "log_xz", {"exit_rule": "premium_1to2"}),
         ("4", "price_channel", {"length": 20, "exit_rule": "premium_1to2"}),
+        ("5", "dd_five_confirm", {}),
     ]
 
 

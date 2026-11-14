@@ -16,7 +16,7 @@ from app.config import settings
 from app.data.store import CandleStore
 from app.live.model import ist_date
 from app.live.service import LiveService
-from app.paper.desk import PaperDesk, UnknownSlot
+from app.paper.desk import SLOTS, PaperDesk, UnknownSlot
 from app.paper.live import AlreadyRunning, NotRunning, PaperError, PaperRunner, UnsupportedSettings
 from app.paper.real import (
     DEFAULT_ACCOUNT_STOP,
@@ -40,7 +40,7 @@ STRATEGIES = {
 class StartBody(BaseModel):
     strategy: str = "log_xz"
     params: dict[str, Any] = Field(default_factory=dict)
-    #: "1".."4": strategies run side by side, each with its own position and P&L
+    #: "1".."5": strategies run side by side, each with its own position and P&L
     slot: str = "1"
     #: who pressed Start: launchd paper_autostart ("auto") or the Paper panel ("hand")
     start_source: Literal["auto", "hand"] = "hand"
@@ -164,7 +164,7 @@ def _paper_base(request: Request) -> Path:
 
 
 def _slot_dirs(base: Path) -> dict[str, Path]:
-    return {s: PaperDesk.slot_dir(base, s) for s in ("1", "2", "3", "4")}
+    return {s: PaperDesk.slot_dir(base, s) for s in SLOTS}
 
 
 def _real_store(request: Request) -> RealTradeStore:

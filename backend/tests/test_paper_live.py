@@ -158,7 +158,9 @@ def client_for(runner: PaperRunner, *, enabled: bool = True, now: int = ms(9, 20
     app.include_router(paper_router)
     third = Fixture(runner.directory / "slot3", {}).runner
     fourth = Fixture(runner.directory / "slot4", {}).runner
-    app.state.live = SimpleNamespace(enabled=enabled, paper=PaperDesk({"1": runner, "2": other, "3": third, "4": fourth}),
+    fifth = Fixture(runner.directory / "slot5", {}).runner
+    app.state.live = SimpleNamespace(enabled=enabled, paper=PaperDesk({"1": runner, "2": other, "3": third, "4": fourth,
+                                                                       "5": fifth}),
                                      now_ms=lambda: now)
     return TestClient(app)
 

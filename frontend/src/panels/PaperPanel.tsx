@@ -18,10 +18,12 @@ const maxWidth = () => Math.max(320, Math.floor(window.innerWidth * 0.7));
 const STRATEGIES = [
   { name: "log_xz", label: "Log XZ (RMA 14, 5m)" },
   { name: "price_channel", label: "Price Channel (length 20, 5m)" },
+  { name: "dd_five_confirm", label: "DD 5-confirmation (ST 10/2, RSI 70/30, R1/S1, BB 20/2, 5m)" },
 ];
 
-/** Live signals (paper): four strategies side by side on the live feed, each with its own position and P&L. No orders.
- * Slots 1 and 2 are the week's comparison (no exits); 3 and 4 default to the same strategies with 1:2 premium exits.
+/** Live signals (paper): five strategies side by side on the live feed, each with its own position and P&L. No orders.
+ * Slots 1 and 2 are the week's comparison (no exits); 3 and 4 default to the same strategies with 1:2 premium exits;
+ * slot 5 runs the DD 5-confirmation system with its own Supertrend exit.
  * The status poll and the trade alerts run in App (usePaperAlerts), so they go on while this panel is closed. */
 export function PaperPanel() {
   const status = usePaperStore((s) => s.status);

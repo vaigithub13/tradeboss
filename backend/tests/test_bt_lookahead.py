@@ -14,6 +14,7 @@ from app.backtest.sources import ListSource
 from app.data.candle import Candle
 from app.indicators import registry
 from app.indicators.frame import candles_to_frame
+from app.strategies.dd_five_confirm import DdFiveConfirm
 from app.strategies.ema_cross import EmaCrossover
 from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
@@ -63,6 +64,8 @@ STRATEGIES: dict[str, Callable[[], Strategy]] = {
     "log_xz_tv": lambda: LogXZ(z_length=5, execution="tv_parity"),
     "price_channel_tv": lambda: PriceChannel(length=5, execution="tv_parity"),
     "five_ema_short_only_tagged": lambda: FiveEma(direction="short_only", swing_bars=2),
+    "dd_five_confirm": lambda: DdFiveConfirm(st_atr=5, st_mult=1.0, rsi_len=5, rsi_long=55, rsi_short=45, bb_len=10, bb_mult=0.5,
+                                                 use_pivots=False),
 }
 
 

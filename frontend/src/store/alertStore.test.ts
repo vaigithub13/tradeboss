@@ -23,7 +23,7 @@ describe("paper alert settings", () => {
   it("default: every slot on, sound off until a click", async () => {
     vi.stubGlobal("window", { localStorage: fakeStorage() });
     expect(readAlertSettings()).toEqual(DEFAULT_ALERT_SETTINGS);
-    expect(Object.values(DEFAULT_ALERT_SETTINGS.slots)).toEqual([true, true, true, true]);
+    expect(Object.values(DEFAULT_ALERT_SETTINGS.slots)).toEqual([true, true, true, true, true]);
     const { useAlertStore } = await import("./alertStore");
     expect(useAlertStore.getState().soundOn).toBe(false);
   });
@@ -38,7 +38,7 @@ describe("paper alert settings", () => {
     vi.resetModules();
     const again = (await import("./alertStore")).useAlertStore.getState();
     expect(again.volume).toBe(0.35);
-    expect(again.slots).toEqual({ "1": true, "2": false, "3": true, "4": true });
+    expect(again.slots).toEqual({ "1": true, "2": false, "3": true, "4": true, "5": true });
     expect(again.soundOn).toBe(false);
   });
 

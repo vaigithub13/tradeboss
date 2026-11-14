@@ -7,6 +7,7 @@
     {"slot": "1", "strategy": "log_xz", "params": {}},
     {"slot": "2", "strategy": "price_channel", "params": {"length": 20}},
     {"slot": "3", "strategy": "log_xz", "params": {"exit_rule": "premium_1to2"}},
-    {"slot": "4", "strategy": "price_channel", "params": {"length": 20, "exit_rule": "premium_1to2"}}
+    {"slot": "4", "strategy": "price_channel", "params": {"length": 20, "exit_rule": "premium_1to2"}},
+    {"slot": "5", "strategy": "dd_five_confirm", "params": {}}
   ]
 }
