@@ -41,8 +41,10 @@ For every trading day (first used for Monday sessions). Times are IST.
 
 - The header badge says "live". Paper: Start strategy 1 (Log XZ) and strategy 2 (Price Channel, length 20, 5m:
   the slot's default), no exits: the week's comparison. From 9 Oct also strategy 3 (Log XZ) and strategy 4
-  (Price Channel 20) with the "1:2 premium (−20% / +40%)" exit rule (the slots' defaults). From 16 Nov also strategy 5: `dd_five_confirm` (DD Nifty 5-confirmation: Supertrend 10/2,
-  RSI 14 > 70 / < 30, previous-day classic R1 / S1, Bollinger 20/2; exit on the Supertrend flip; no premium rule), 5m. A Start late in the day catches up from the recording, so the signals are the same.
+  (Price Channel 20) with the "1:2 premium (−20% / +40%)" exit rule (the slots' defaults). From 16 Nov also strategy 5: `dd_five_confirm` as the user's Quantman run 12524478 (calls
+  only: close > Supertrend 10/2, RSI 14 > 70, close > previous-day classic R1, close > upper Bollinger 20/2, Williams %R 14
+  > -30; exit on close below the Supertrend), **3m bars**, the strike whose model premium is nearest **250**, premium stop
+  -10% trailing +10% per +15% (`premium_trail_10`), at most 10 entries a day. All in `paper_slots.json`. A Start late in the day catches up from the recording, so the signals are the same.
 - Paper squares off at 15:15:00 at the live bid.
 - A Start after 15:30 replays the day from the recording into `data/paper/slotN/replay/` (marked replay); it never
   touches the live day files or the totals. The panel's Trades button lists every live trade over the slots.

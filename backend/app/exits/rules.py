@@ -32,6 +32,10 @@ class ExitRule:
     stop: float  # premium: fraction of the entry premium; atr: multiple of ATR
     target: float
     atr_length: int = 14
+    #: premium only, both or neither: each time the premium's best price since the entry has gained another
+    #: `trail_every` (fraction of the entry fill), the stop moves up by `trail_by` (Quantman's TSL X / Y)
+    trail_every: float | None = None
+    trail_by: float | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
@@ -44,23 +48,47 @@ class ExitRule:
             raise ValueError("a premium stop is a fraction of the entry premium, below 1")
         if isinstance(self.atr_length, bool) or not isinstance(self.atr_length, int) or self.atr_length < 1:
             raise ValueError("atr_length must be a whole number >= 1")
+        if (self.trail_every is None) != (self.trail_by is None):
+            raise ValueError("trail_every and trail_by go together")
+        if self.trail_every is not None:
+            if self.kind != "premium":
+                raise ValueError("a trailing stop is for the premium rule")
+            for name in ("trail_every", "trail_by"):
+                v = getattr(self, name)
+                if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v <= 0:
+                    raise ValueError(f"exit rule {name} must be a positive number")
+
+    @property
+    def trailing(self) -> bool:
+        return self.trail_every is not None
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {"kind": self.kind, "stop": float(self.stop), "target": float(self.target)}
         if self.kind == "atr":
             out["atr_length"] = self.atr_length
+        if self.trailing:
+            out["trail_every"] = float(self.trail_every)  # type: ignore[arg-type]
+            out["trail_by"] = float(self.trail_by)  # type: ignore[arg-type]
         return out
 
     @property
     def label(self) -> str:
+        if self.kind == "premium" and self.trailing:
+            target = "no target" if self.target >= NO_TARGET else f"+{self.target * 100:g}%"
+            return (f"premium -{self.stop * 100:g}% / {target}, trail +{self.trail_by * 100:g}% "  # type: ignore[operator]
+                    f"per +{self.trail_every * 100:g}%")  # type: ignore[operator]
         if self.kind == "premium":
             return f"premium -{self.stop * 100:g}% / +{self.target * 100:g}%"
         return f"ATR({self.atr_length}) {self.stop:g}x / {self.target:g}x"
 
 
+#: a premium target this far away (x the entry fill) is never reached: the rule has no target
+NO_TARGET = 50.0
 PREMIUM_1TO2 = ExitRule("premium", 0.20, 0.40)
 ATR_1TO2 = ExitRule("atr", 1.0, 2.0)
-NAMED = {"premium_1to2": PREMIUM_1TO2, "atr_1to2": ATR_1TO2}
+#: the user's Quantman run 12524478: stop 10% of the premium, no target, trailing stop X 15% / Y 10%
+PREMIUM_TRAIL_10 = ExitRule("premium", 0.10, NO_TARGET, trail_every=0.15, trail_by=0.10)
+NAMED = {"premium_1to2": PREMIUM_1TO2, "atr_1to2": ATR_1TO2, "premium_trail_10": PREMIUM_TRAIL_10}
 
 
 def parse_exit_rule(value: Any) -> ExitRule | None:
@@ -73,12 +101,13 @@ def parse_exit_rule(value: Any) -> ExitRule | None:
         return NAMED[value]
     if not isinstance(value, dict):
         raise ValueError("exit rule must be a name or an object")
-    unknown = sorted(set(value) - {"kind", "stop", "target", "atr_length"})
+    unknown = sorted(set(value) - {"kind", "stop", "target", "atr_length", "trail_every", "trail_by"})
     if unknown:
         raise ValueError(f"unknown exit rule field(s) {unknown}")
     try:
         return ExitRule(kind=value["kind"], stop=value["stop"], target=value["target"],
-                        atr_length=value.get("atr_length", 14))
+                        atr_length=value.get("atr_length", 14), trail_every=value.get("trail_every"),
+                        trail_by=value.get("trail_by"))
     except KeyError as exc:
         raise ValueError(f"exit rule needs {exc.args[0]!r}") from None
 
@@ -86,6 +115,16 @@ def parse_exit_rule(value: Any) -> ExitRule | None:
 def premium_levels(entry_fill: float, rule: ExitRule) -> tuple[float, float]:
     """(stop, target) premium of a bought option."""
     return round(entry_fill * (1 - rule.stop), 2), round(entry_fill * (1 + rule.target), 2)
+
+
+def trailed_stop(entry_fill: float, rule: ExitRule, best: float | None) -> float:
+    """The premium stop after the best price `best` seen since the entry. Without trailing (or no gain yet): the
+    rule's stop. Each full `trail_every` of gain (fraction of the entry fill) raises it by `trail_by`."""
+    base = entry_fill * (1 - rule.stop)
+    if not rule.trailing or best is None or not entry_fill > 0 or best <= entry_fill:
+        return round(base, 2)
+    steps = math.floor((best - entry_fill) / (entry_fill * rule.trail_every) + 1e-9)  # type: ignore[operator]
+    return round(base + steps * rule.trail_by * entry_fill, 2)  # type: ignore[operator]
 
 
 def index_levels(direction: str, index_fill: float, stop_points: float, target_points: float) -> tuple[float, float]:

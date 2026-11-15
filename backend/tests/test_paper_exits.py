@@ -14,7 +14,7 @@ import pytest
 
 from app.backtest.contracts import Signal
 from app.backtest.costs import load_default_cost_table
-from app.exits.rules import ATR_1TO2, PREMIUM_1TO2
+from app.exits.rules import ATR_1TO2, PREMIUM_1TO2, PREMIUM_TRAIL_10
 from app.paper.quotes import QuoteBook
 from app.paper.session import PaperSession
 from tests import test_paper_session as tps
@@ -76,6 +76,22 @@ def test_a_premium_target_sells_at_the_bid_and_keeps_the_index_side() -> None:
     assert row["exit_reason"] == "target" and row["premium_stop"] == 80.0 and row["premium_target"] == 140.0
     assert row["r_multiple"] == pytest.approx(t["net"] / (20.0 * 75), abs=1e-3)
     assert s.snapshot()["summary"]["exits"] == {"target": 1, "stop": 0, "reversal": 0, "square-off": 0, "other": 0}
+
+
+def test_a_trailing_premium_stop_moves_up_with_the_best_price_and_exits_at_the_bid() -> None:
+    s = make(tps.Scripted({0: "BUY"}), PREMIUM_TRAIL_10)
+    bars(s, (9, 15), (9, 19))  # BUY at the ask, 100
+    p = s.book.position
+    assert p is not None and p.levels["premium_stop"] == 90.0
+    now = ist_ms(9, 22)
+    assert s.on_option_tick(CE, 114.0, now_ms=now) is False and p.levels["premium_stop"] == 90.0  # +14%: no step
+    assert s.on_option_tick(CE, 116.0, now_ms=now) is False and p.levels["premium_stop"] == 100.0  # +16%: to cost
+    assert s.on_option_tick(CE, 131.0, now_ms=now) is False and p.levels["premium_stop"] == 110.0  # +31%: 2 steps
+    assert s.on_option_tick(CE, 120.0, now_ms=now) is False and p.levels["premium_stop"] == 110.0  # never lowered
+    quotes(s, now, ce=(109.0, 109.5))
+    assert s.on_option_tick(CE, 110.0, now_ms=now) is True
+    t = s.book.trades[-1]
+    assert t["exit_reason"] == "premium_stop" and t["exit_price"] == 109.0
 
 
 def test_after_a_premium_stop_a_same_direction_entry_is_cancelled_and_an_opposite_one_reverses() -> None:
@@ -185,13 +201,14 @@ def test_the_exit_rule_travels_in_the_params_and_builds_the_same_strategy_as_the
         paper_strategy("log_xz", {"exit_rule": "nope"})
 
 
-def test_the_desk_has_four_slots() -> None:
+def test_the_desk_has_five_slots() -> None:
     from pathlib import Path
 
     from app.paper.desk import SLOTS, PaperDesk
 
-    assert SLOTS == ("1", "2", "3", "4")
+    assert SLOTS == ("1", "2", "3", "4", "5")
     assert PaperDesk.slot_dir(Path("/p"), "1") == Path("/p") and PaperDesk.slot_dir(Path("/p"), "4") == Path("/p/slot4")
+    assert PaperDesk.slot_dir(Path("/p"), "5") == Path("/p/slot5")
 
 
 def test_the_week_counts_exits(tmp_path) -> None:

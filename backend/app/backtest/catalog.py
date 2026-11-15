@@ -144,6 +144,11 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
             "last_entry": _Field("str", "14:50"),
             "use_pivots": _Field("bool", True),
+            "use_wr": _Field("bool", False),
+            "wr_len": _Field("int", 14, min_value=1),
+            "wr_long": _Field("float", -30.0, min_value=-100),
+            "wr_short": _Field("float", -70.0, min_value=-100),
+            "max_trades_per_day": _Field("int", 0, min_value=0),
             "lots": _Field("int", 1, min_value=1),
         },
     ),
@@ -151,7 +156,7 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
 
 _TOP = {
     "strategy", "params", "symbol", "timeframe", "start", "end", "sessions",
-    "mode", "strike_offset", "slippage_points", "option_fill", "live_timing", "exit_rule",
+    "mode", "strike_offset", "slippage_points", "option_fill", "live_timing", "exit_rule", "strike_premium",
     *("premium_target_pct", "premium_stop_pct"),
 }
 #: option-premium exits: settings of the option overlay, not strategy parameters
@@ -270,6 +275,13 @@ def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[s
     if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
         raise RunRequestError("slippage_points must be a number >= 0")
     option_fill = _option_fill(body.get("option_fill", "delta_adjusted"))
+    strike_premium = body.get("strike_premium")
+    if strike_premium is not None:
+        if isinstance(strike_premium, bool) or not isinstance(strike_premium, (int, float)) or not strike_premium > 0:
+            raise RunRequestError("strike_premium must be a number > 0 (rupees)")
+        if mode != "options":
+            raise RunRequestError("strike_premium applies to options mode")
+        strike_premium = float(strike_premium)
     live_timing = _live_timing(body.get("live_timing", True))
     premium = parse_premium_exits(body)
     exit_rule = parse_exit_setting(body.get("exit_rule"), mode=mode, premium=premium, params=params)
@@ -290,6 +302,7 @@ def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[s
         "option_fill": option_fill,
         "live_timing": live_timing,
         "exit_rule": exit_rule,
+        **({} if strike_premium is None else {"strike_premium": strike_premium}),
     }
 
 

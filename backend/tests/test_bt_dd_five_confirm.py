@@ -104,3 +104,37 @@ def test_in_the_catalog_with_the_video_defaults() -> None:
 def test_use_pivots_off_trades_on_the_first_day() -> None:
     res = run(DdFiveConfirm(**{**LOOSE, "use_pivots": False}), trend_day(+1.0), square_off="15:15")
     assert fills(res) and fills(res)[0][1] == "BUY"
+
+
+def test_williams_r_filter_blocks_and_allows() -> None:
+    blocked = run(DdFiveConfirm(**{**LOOSE, "use_wr": True, "wr_long": -0.0001}), prev_day() + trend_day(+1.0),
+                  square_off="15:15")
+    allowed = run(DdFiveConfirm(**{**LOOSE, "use_wr": True}), prev_day() + trend_day(+1.0), square_off="15:15")
+    assert fills(blocked) == []
+    assert fills(allowed) and fills(allowed)[0][1] == "BUY"
+
+
+def test_williams_r_value() -> None:
+    class Bars:
+        high = __import__("numpy").array([10.0, 12.0, 11.0])
+        low = __import__("numpy").array([8.0, 9.0, 9.5])
+        close = __import__("numpy").array([9.0, 11.0, 10.0])
+
+        def __len__(self) -> int:
+            return 3
+
+    class Ctx:
+        bars = Bars()
+
+    s = DdFiveConfirm(use_wr=True, wr_len=3)
+    assert s.williams_r(Ctx()) == pytest.approx((12.0 - 10.0) / (12.0 - 8.0) * -100.0)
+
+
+def test_max_trades_per_day() -> None:
+    # two up-legs in one day: the second entry is refused with max_trades_per_day=1
+    day = trend_day(+1.0)
+    res_all = run(DdFiveConfirm(**LOOSE), prev_day() + day, square_off="15:15")
+    res_one = run(DdFiveConfirm(**{**LOOSE, "max_trades_per_day": 1}), prev_day() + day, square_off="15:15")
+    buys_all = [f for f in fills(res_all) if f[1] == "BUY"]
+    buys_one = [f for f in fills(res_one) if f[1] == "BUY"]
+    assert len(buys_one) == 1 and len(buys_all) >= 1

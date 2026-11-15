@@ -121,20 +121,25 @@ export function parseParams(text: string): { params?: Record<string, unknown>; e
   }
 }
 
+/** Slot 5's strategy params (the Quantman run): the same as scripts/launchd/paper_slots.json. */
+export const SLOT5_PARAMS = {"mode": "long_only", "use_wr": true, "max_trades_per_day": 10, "last_entry": "15:10", "timeframe": "3m", "strike_premium": 250};
+
 export const EXIT_RULES = [
   { name: "", label: "no stop / target" },
   { name: "premium_1to2", label: "1:2 premium (−20% / +40%)" },
   { name: "atr_1to2", label: "1:2 index ATR(14) (1x / 2x)" },
+  { name: "premium_trail_10", label: "premium −10%, trailing +10% per +15% (Quantman)" },
 ] as const;
 
 /** What each slot starts with: 1 and 2 are the week's comparison (no exits); 3 and 4 the same with 1:2 premium;
- * 5 is the DD Nifty 5-confirmation system (its own Supertrend exit, no premium rule). */
-export const SLOT_DEFAULTS: Record<string, { strategy: string; exit: string }> = {
+ * 5 is the DD Nifty 5-confirmation system as in the user's Quantman run 12524478: calls only, Williams %R filter,
+ * 3m bars, the strike nearest a 250 premium, 10% premium stop trailing 10% per 15% (`params` prefill the box). */
+export const SLOT_DEFAULTS: Record<string, { strategy: string; exit: string; params?: string }> = {
   "1": { strategy: "log_xz", exit: "" },
   "2": { strategy: "price_channel", exit: "" },
   "3": { strategy: "log_xz", exit: "premium_1to2" },
   "4": { strategy: "price_channel", exit: "premium_1to2" },
-  "5": { strategy: "dd_five_confirm", exit: "" },
+  "5": { strategy: "dd_five_confirm", exit: "premium_trail_10", params: JSON.stringify(SLOT5_PARAMS) },
 };
 
 /** The params sent to start a slot: the box's params, plus `exit_rule` when one is chosen. */

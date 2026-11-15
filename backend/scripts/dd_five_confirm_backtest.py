@@ -3,8 +3,10 @@
     cd backend && uv run python -m scripts.dd_five_confirm_backtest [--start 2022-01-03] [--end 2026-06-30]
 
 Options mode (shipped premium model, charges, slippage), normal sessions, the period before the fixed holdout.
-Rows: dd_five_confirm on 5m and 3m with the ATM strike and one strike in the money, plus log_xz and
-price_channel(20) on 5m as the comparison. Extra columns: longest losing streak, the share of the net made by
+Rows: dd_five_confirm on 5m and 3m with the ATM strike and one strike in the money; the Quantman variant (run
+12524478: calls only, Williams %R filter, premium near 250, 10% premium stop with a 15/10 trailing stop); and
+log_xz and price_channel(20) on 5m as the comparison. Premium stops on minutes with no stored option bars are
+checked on the model's premium from the index bar. Extra columns: longest losing streak, the share of the net made by
 the 5 best trades, long vs short. The table is written to data/validation/.
 """
 
@@ -21,13 +23,21 @@ from app.config import settings
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
-RUNS: list[tuple[str, str, dict[str, Any], str, int]] = [
-    ("DD-5m-ATM", "dd_five_confirm", {}, "5m", 0),
-    ("DD-5m-ITM1", "dd_five_confirm", {}, "5m", -1),
-    ("DD-3m-ATM", "dd_five_confirm", {}, "3m", 0),
-    ("DD-3m-ITM1", "dd_five_confirm", {}, "3m", -1),
-    ("LogXZ-5m", "log_xz", {}, "5m", 0),
-    ("PChan20-5m", "price_channel", {"length": 20}, "5m", 0),
+#: the user's Quantman run 12524478: calls only, + Williams %R(14) > -30, at most 10 entries a day
+QUANTMAN = {"mode": "long_only", "use_wr": True, "max_trades_per_day": 10, "last_entry": "15:10"}
+
+#: (id, strategy, params, timeframe, strike offset, extra run settings)
+RUNS: list[tuple[str, str, dict[str, Any], str, int, dict[str, Any]]] = [
+    ("DD-5m-ATM", "dd_five_confirm", {}, "5m", 0, {}),
+    ("DD-5m-ITM1", "dd_five_confirm", {}, "5m", -1, {}),
+    ("DD-3m-ATM", "dd_five_confirm", {}, "3m", 0, {}),
+    ("DD-3m-ITM1", "dd_five_confirm", {}, "3m", -1, {}),
+    # Quantman: premium near 250, stop 10% of the premium, trailing X 15% / Y 10%, exit on close below Supertrend
+    ("QM-3m-exact", "dd_five_confirm", QUANTMAN, "3m", 0, {"strike_premium": 250, "exit_rule": "premium_trail_10"}),
+    ("QM-3m-noSL", "dd_five_confirm", QUANTMAN, "3m", 0, {"strike_premium": 250}),
+    ("QM-5m-exact", "dd_five_confirm", QUANTMAN, "5m", 0, {"strike_premium": 250, "exit_rule": "premium_trail_10"}),
+    ("LogXZ-5m", "log_xz", {}, "5m", 0, {}),
+    ("PChan20-5m", "price_channel", {"length": 20}, "5m", 0, {}),
 ]
 
 
@@ -107,12 +117,12 @@ def main(argv: list[str] | None = None) -> None:
     args = p.parse_args(argv)
     wanted = {s.strip() for s in args.only.split(",") if s.strip()}
     rows = []
-    for rid, strategy, params, tf, offset in RUNS:
+    for rid, strategy, params, tf, offset, extra in RUNS:
         if wanted and rid not in wanted:
             continue
         config = parse_config({"strategy": strategy, "params": params, "symbol": "NIFTY50", "timeframe": tf,
                                "start": args.start, "end": args.end, "sessions": ["normal"], "mode": "options",
-                               "strike_offset": offset})
+                               "strike_offset": offset, **extra})
         print(f"{rid} ...", flush=True)
         rows.append(summarise(rid, execute_run(config, lambda _e: None, hash_data=False)))
         r = rows[-1]

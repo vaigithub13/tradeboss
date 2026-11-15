@@ -106,7 +106,11 @@ describe("slots and exit rules", () => {
     expect(SLOT_DEFAULTS["2"]).toEqual({ strategy: "price_channel", exit: "" });
     expect(SLOT_DEFAULTS["3"]).toEqual({ strategy: "log_xz", exit: "premium_1to2" });
     expect(SLOT_DEFAULTS["4"]).toEqual({ strategy: "price_channel", exit: "premium_1to2" });
-    expect(SLOT_DEFAULTS["5"]).toEqual({ strategy: "dd_five_confirm", exit: "" });
+    expect(SLOT_DEFAULTS["5"]?.strategy).toBe("dd_five_confirm");
+    expect(SLOT_DEFAULTS["5"]?.exit).toBe("premium_trail_10");
+    expect(JSON.parse(SLOT_DEFAULTS["5"]?.params ?? "{}")).toEqual({
+      mode: "long_only", use_wr: true, max_trades_per_day: 10, last_entry: "15:10", timeframe: "3m", strike_premium: 250,
+    });
   });
 
   it("puts the chosen rule into the params, and only then", () => {

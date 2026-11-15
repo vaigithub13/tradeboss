@@ -18,7 +18,7 @@ const maxWidth = () => Math.max(320, Math.floor(window.innerWidth * 0.7));
 const STRATEGIES = [
   { name: "log_xz", label: "Log XZ (RMA 14, 5m)" },
   { name: "price_channel", label: "Price Channel (length 20, 5m)" },
-  { name: "dd_five_confirm", label: "DD 5-confirmation (ST 10/2, RSI 70/30, R1/S1, BB 20/2, 5m)" },
+  { name: "dd_five_confirm", label: "DD 5-confirmation (ST 10/2, RSI 70/30, R1/S1, BB 20/2; slot 5: Quantman, 3m)" },
 ];
 
 /** Live signals (paper): five strategies side by side on the live feed, each with its own position and P&L. No orders.
@@ -74,7 +74,7 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
   const stop = usePaperStore((s) => s.stop);
   const [strategy, setStrategy] = useState(SLOT_DEFAULTS[slot]?.strategy ?? "log_xz");
   const [exit, setExit] = useState(SLOT_DEFAULTS[slot]?.exit ?? "");
-  const [paramsText, setParamsText] = useState("");
+  const [paramsText, setParamsText] = useState(SLOT_DEFAULTS[slot]?.params ?? "");
   const [week, setWeek] = useState<PaperWeek | null>(null);
   const [reals, setReals] = useState<Record<string, RealTradeLog>>({});
   const day = status?.day ?? null;

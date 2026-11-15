@@ -1858,3 +1858,27 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest):
   `scripts/launchd/paper_slots.json` so paper_autostart starts it at 09:16 from Mon 16 Nov.
 - Not run here (need the Mac env): the fastapi-based paper route tests (`test_paper_desk.py`, `test_paper_live.py`) and
   Vitest. Run `npm test` on the Mac before 09:00 Monday.
+
+
+## 15 Nov 2026 - Quantman variant of the DD strategy on slot 5
+
+- The user's Quantman run 12524478 (ST copy-5, profit 5,53,329 from Apr 2019 to Nov 2026, 1,006 trades, 44.6% wins,
+  max DD 21,050, loss streak 9; Quantman slippage left at 0) uses: 3m bars; calls only; entry = close > Supertrend(10, 2)
+  + RSI(14) > 70 + close > daily traditional R1 + close > upper BB(20, 2) + Williams %R(14) > -30; exit when the close is
+  below the Supertrend; option = current week, premium near 250; stop loss 10% of the premium; trailing stop X 15 / Y 10;
+  no target; intraday 09:15-15:28; at most 10 transactions a day.
+- Added: `use_wr`, `wr_len`, `wr_long`, `wr_short`, `max_trades_per_day` on `dd_five_confirm`; a trailing premium stop on
+  the premium exit rule (`trail_every` / `trail_by`, named rule `premium_trail_10`; backtest overlay and paper ticks;
+  `trailed_stop`); the strike by premium (`strike_premium`, `strike_by_premium`: ATM +- 15 steps, model premium at the
+  entry) in the backtest config and in paper; paper slot settings `timeframe` (1/3/5/15m) and `strike_premium` that travel
+  in the slot params (`slot_settings`), also read by the end-of-day check. Premium stops on minutes without stored option
+  bars are walked on the model's premium from the index bar (only when a trailing stop is set, so the 1:2 premium runs
+  are unchanged). A binary-search VIX lookup for that walk (`_vix_lookup`, same answer as `vix_asof`).
+- Backtest 2022-01-03 to 2026-06-30, options mode, after costs (`data/validation/dd_five_confirm_2026-11-15.md`):
+  Quantman exact on 3m: 565 trades, option net +1,33,802, PF 1.39, max DD 21,591, loss streak 9, every year positive
+  (2022 +28,443, 2023 +16,207, 2024 +18,441, 2025 +67,072, 2026 H1 +3,640). Without the premium stop: +1,03,194, max DD
+  39,577. On 5m: +1,04,171, max DD 33,094. The video's plain version on 5m ATM: -40,666.
+- Slot 5 now runs exactly that (paper_slots.json; the Paper panel prefills it). Tests: `tests/test_quantman_variant.py`,
+  more in `tests/test_bt_dd_five_confirm.py`, a paper trailing test in `tests/test_paper_exits.py` (which also expected
+  4 slots: fixed). No new test failures against the previous commit in this container (fastapi / duckdb tests could not
+  run here); run `npm test` on the Mac before 09:00 Monday.

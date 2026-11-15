@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import asdict, dataclass
 from datetime import date, timedelta
@@ -24,7 +25,7 @@ from app.options.bs import PricingError, bs_forward_delta, bs_forward_price, sna
 class OptionOverlayError(ValueError):
     """The trade is not one entry fill and one exit fill, so it cannot be priced as one option."""
 from app.exits.rules import first_hit
-from app.options.contract import OptionContract, choose_contract
+from app.options.contract import OptionContract, choose_contract, strike_by_premium
 from app.options.events import EventCalendar, load_default_events
 from app.options.history import default_history_store
 from app.options.result import EstimatedResult, OptionEstimate, estimated_run_id
@@ -103,6 +104,12 @@ class OptionModelConfig:
     #: research exits on the option's own premium, as a fraction of the entry fill (0.30 = +30%); None = off
     premium_target_pct: float | None = None
     premium_stop_pct: float | None = None
+    #: trailing premium stop (with premium_stop_pct): each `every` of gain raises the stop by `by` (fractions of the
+    #: entry fill). Minutes without real option bars are priced by the model from the index bar.
+    premium_trail_every: float | None = None
+    premium_trail_by: float | None = None
+    #: pick the strike whose model premium at the entry is nearest this (Quantman "premium near"); None = offset
+    strike_premium: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "option_fill", canonical_option_fill(self.option_fill))
@@ -124,6 +131,13 @@ class OptionModelConfig:
             raise ValueError("premium_target_pct must be > 0")
         if self.premium_stop_pct is not None and not 0 < self.premium_stop_pct < 1:
             raise ValueError("premium_stop_pct must be between 0 and 1")
+        if (self.premium_trail_every is None) != (self.premium_trail_by is None):
+            raise ValueError("premium_trail_every and premium_trail_by go together")
+        if self.premium_trail_every is not None and (
+                not self.premium_trail_every > 0 or not self.premium_trail_by > 0 or self.premium_stop_pct is None):  # type: ignore[operator]
+            raise ValueError("a trailing premium stop needs premium_stop_pct and positive trail fractions")
+        if self.strike_premium is not None and not self.strike_premium > 0:
+            raise ValueError("strike_premium must be > 0")
 
     def scale_for(self, dte: int) -> float:
         if not self.vix_scales:
@@ -133,7 +147,8 @@ class OptionModelConfig:
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         raw["vix_scales"] = {name: scale for name, scale in self.vix_scales}
-        for key in ("premium_target_pct", "premium_stop_pct"):  # off: left out, so earlier run ids stay the same
+        for key in ("premium_target_pct", "premium_stop_pct", "premium_trail_every", "premium_trail_by",
+                    "strike_premium"):  # off: left out, so earlier run ids stay the same
             if raw[key] is None:
                 del raw[key]
         return raw
@@ -351,13 +366,16 @@ def overlay_options(
     before_history = False
 
     breaches: list[tuple[int, float, float]] = []
+    index_at = ({int(b["time"]): b for b in index_bars}
+                if cfg.premium_trail_every is not None or cfg.strike_premium is not None else None)
+    vix_fast = _vix_lookup(vix_bars, cfg.vix_stale_seconds) if index_at is not None else None
     for trade in result.trades:
         _require_single_fill(trade)
         if ist_date(trade.entry_time) < HISTORY_START or ist_date(trade.exit_time) < HISTORY_START:
             before_history = True
         row = _one_trade(
             trade, index_bars, vix_bars, cfg, cal, lot_table, step_table, cost_model, ev,
-            sessions, prev_session, tape,
+            sessions, prev_session, tape, index_at=index_at, vix_fast=vix_fast,
         )
         if row.get("unpriced"):
             unpriced.append(row)
@@ -525,7 +543,11 @@ def _one_trade(
     sessions: dict[date, dict[str, float]],
     prev_session: dict[date, date],
     tape: PremiumTape | None,
+    *,
+    index_at: dict[int, dict[str, Any]] | None = None,
+    vix_fast: Callable[[int], Any] | None = None,
 ) -> dict[str, Any]:
+    vix_q = vix_fast or (lambda t: vix_asof(vix_bars, t, stale_s=cfg.vix_stale_seconds))
     entry_d, exit_d = ist_date(trade.entry_time), ist_date(trade.exit_time)
     # ATM of the index price at the fill moment, as paper picks it: the stop level for a stop fill, the minute's
     # open for a market fill (or for a stop that gapped or filled late), the bar close for same_bar_close.
@@ -538,6 +560,15 @@ def _one_trade(
         )
     except (StrikeStepUnknown, LookupError, ValueError) as exc:
         return {"label": ESTIMATED, "index_trade_id": trade.id, "unpriced": True, "reason": str(exc)}
+    if cfg.strike_premium is not None:
+        q_pick = vix_q(trade.entry_time)
+        if q_pick is not None:
+            contract = strike_by_premium(
+                contract, cfg.strike_premium,
+                lambda k: _model_premium(contract.kind, spot, k, trade.entry_time, contract.expiry, q_pick.value,
+                                         cfg, cal)[0],
+                underlying=cfg.underlying,
+            )
 
     units = int(trade.lots) * int(contract.lot_size)
     held_past = trade.exit_time > _expiry_close_ts(contract.expiry)
@@ -600,15 +631,29 @@ def _one_trade(
         }
 
     entry_fill = _apply_slip("BUY", entry_prem, cfg.slippage_points, cfg.min_premium)
+    model_bar = None
+    if cfg.premium_trail_every is not None and index_at is not None:
+        def model_bar(t: int) -> tuple[float, float, float, float] | None:
+            ib = index_at.get(t)
+            q = vix_q(t)
+            if ib is None or q is None:
+                return None
+            px = [_model_premium(contract.kind, float(ib[f]), contract.strike, t, contract.expiry, q.value, cfg, cal)[0]
+                  for f in ("open", "high", "low", "close")]
+            return px[0], max(px), min(px), px[3]
     walk = _premium_walk(
         tape if cfg.real_premiums else None, contract.expiry, contract.strike, contract.kind,
         start=trade.entry_time if trade.entry_at_open else trade.entry_time + 60, end=exit_time,
         entry_fill=entry_fill, target_pct=cfg.premium_target_pct, stop_pct=cfg.premium_stop_pct,
+        trail=None if cfg.premium_trail_every is None else (cfg.premium_trail_every, cfg.premium_trail_by),  # type: ignore[arg-type]
+        model_bar=model_bar,
     )
     exit_reason = "index"
     if walk.exit is not None:
         exit_time, exit_prem, exit_reason = walk.exit
-        exit_source, held_past = "real", False
+        real_bar = getattr(tape, "bar_at", None) if (tape is not None and cfg.real_premiums) else None
+        real = real_bar is not None and real_bar(contract.expiry, contract.strike, contract.kind, exit_time) is not None
+        exit_source, held_past = ("real" if real else "modelled"), False
         exit_d = ist_date(exit_time)
     exit_fill = exit_prem if held_past else _apply_slip("SELL", exit_prem, cfg.slippage_points, cfg.min_premium)
     buy = costs.leg_cost("BUY", entry_fill, units, entry_d)
@@ -707,13 +752,37 @@ class _Walk:
     checked: bool  # at least one real bar was walked
 
 
+def _vix_lookup(vix_bars: Sequence[dict[str, Any]], stale_s: int) -> Callable[[int], Any]:
+    """`vix_asof` by binary search over sorted bars (same answer; the overlay asks it once per walked minute)."""
+    import bisect
+
+    from app.options.vix import VixQuote
+
+    times = [int(b["time"]) for b in vix_bars]
+
+    def at(t: int) -> Any:
+        i = bisect.bisect_right(times, int(t)) - 1
+        if i < 0:
+            return None
+        bar = vix_bars[i]
+        age = int(t) - times[i]
+        return VixQuote(float(bar["open"]), times[i], age, age > stale_s)
+
+    return at
+
+
 def _premium_walk(
     tape: PremiumTape | None, expiry: date, strike: float, kind: str, *, start: int, end: int,
     entry_fill: float, target_pct: float | None, stop_pct: float | None,
+    trail: tuple[float, float] | None = None,
+    model_bar: Callable[[int], tuple[float, float, float, float] | None] | None = None,
 ) -> _Walk:
-    """Walk the contract's real 1m bars over [start, end): the first premium target or stop, and the high."""
+    """Walk the contract's real 1m bars over [start, end): the first premium target or stop, and the high.
+
+    `trail` = (every, by): a trailing stop raised from the best high seen in EARLIER minutes (a minute's own high
+    may come after its low). `model_bar` prices a minute that has no real bar (the model on the index bar)."""
     bar_at = getattr(tape, "bar_at", None) if tape is not None else None
-    if bar_at is None:
+    if bar_at is None and model_bar is None:
         return _Walk(None, None, False)
     target = None if target_pct is None else round(entry_fill * (1 + target_pct), 2)
     stop = None if stop_pct is None else round(entry_fill * (1 - stop_pct), 2)
@@ -721,7 +790,12 @@ def _premium_walk(
     t = start - start % 60
     first = True
     while t < end:
-        ohlc = bar_at(expiry, strike, kind, t)
+        ohlc = bar_at(expiry, strike, kind, t) if bar_at is not None else None
+        if ohlc is None and model_bar is not None:
+            ohlc = model_bar(t)
+        if ohlc is not None and trail is not None and stop is not None and high is not None and high > entry_fill:
+            steps = math.floor((high - entry_fill) / (entry_fill * trail[0]) + 1e-9)
+            stop = max(stop, round(entry_fill * (1 - (stop_pct or 0.0)) + steps * trail[1] * entry_fill, 2))
         if ohlc is not None:
             o, h, lo, _c = (float(x) for x in ohlc)
             # the entry minute's open is the entry itself: only the range of that minute counts
@@ -730,7 +804,9 @@ def _premium_walk(
                 reason, price = hit
                 if reason == "stop":
                     # the minute's high may come after the stop: only its open counts toward the best open profit
-                    return _Walk((t, price, "premium_stop"), o if high is None else max(high, o), True)
+                    why = "premium_trail" if trail is not None and stop > entry_fill * (1 - (stop_pct or 0.0)) + 0.01 \
+                        else "premium_stop"
+                    return _Walk((t, price, why), o if high is None else max(high, o), True)
                 return _Walk((t, price, "premium_target"), max(o, price) if high is None else max(high, o, price), True)
             high = h if high is None else max(high, h)
         first = False

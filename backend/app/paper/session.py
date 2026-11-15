@@ -32,10 +32,10 @@ from app.backtest.contracts import Signal
 from app.backtest.costs import CostTable
 from app.backtest.engine import BacktestConfig
 from app.exits.report import reason_counts
-from app.exits.rules import ExitRule, first_hit, index_levels, premium_levels
+from app.exits.rules import ExitRule, first_hit, index_levels, premium_levels, trailed_stop
 from app.live.model import ist_ms_of_day
 from app.live.spreads.decode import DepthQuote
-from app.options.contract import OptionContract
+from app.options.contract import OptionContract, contract_symbol, strike_by_premium
 from app.paper.bars import ClosedBars
 from app.paper.book import Fill, PaperBook, Position, fill, summarise
 from app.paper.pricing import MODEL_SLIPPAGE_POINTS
@@ -44,6 +44,11 @@ from app.paper.shadow import priced, shadow_exit
 from app.strategies.pine_common import minute_of
 
 log = logging.getLogger("tradeboss.paper")
+
+
+def _underlying(symbol: str) -> str:
+    """"NIFTY 25000 CE 06 OCT 26" -> "NIFTY"."""
+    return symbol.split(" ", 1)[0]
 
 IST = timezone(timedelta(hours=5, minutes=30))
 SQUARE_OFF_MIN = 15 * 60 + 15
@@ -102,6 +107,7 @@ class PaperSession:
         symbol: str = "NIFTY50",
         exit_rule: ExitRule | None = None,
         stale_model_price: Callable[[OptionContract, float, int], float | None] | None = None,
+        strike_premium: float | None = None,
     ) -> None:
         if lots < 1:
             raise ValueError("lots must be >= 1")
@@ -115,6 +121,8 @@ class PaperSession:
         self.model_slippage = model_slippage
         #: the model at the last stored VIX close: the square-off's last resort (no quote, no live VIX)
         self.stale_model_price = stale_model_price
+        #: buy the strike whose model premium is nearest this (rupees) instead of the ATM; None = ATM
+        self.strike_premium = strike_premium
         self._square_off_noted: int | None = None  # when a square-off first found no price (one row, then retries)
         self._atm: set[str] = set()  # the current ATM call and put (prepare); an older pair is released
         self._index_minute: int | None = None  # the newest exchange-final index minute seen (epoch s)
@@ -131,6 +139,7 @@ class PaperSession:
         self._side = 0  # the index position as the strategy sees it: +1 long, -1 short
         self._spot: float | None = None
         self._contract_of: dict[str, OptionContract] = {}
+        self._best: dict[str, float] = {}  # trailing premium stop: best traded price of the held contract
         self.resume_after: int | None = None  # bars at or before this were decided before a restart (see restore)
         self.last_bar_time: int | None = None
         self.history = History()  # warm-up and live closed bars: the strategy's ctx.bars
@@ -412,6 +421,14 @@ class PaperSession:
                points: tuple[float | None, float | None] = (None, None)) -> None:
         """Buy the ATM option for `direction` at the live ask (closing an open one at the bid first)."""
         contract = self.choose(direction, spot, self.day)
+        if self.strike_premium is not None and self.model_price is not None:
+            base, price_at = contract, self.model_price
+            contract = strike_by_premium(
+                base, self.strike_premium,
+                lambda k: price_at(replace(base, strike=k, symbol=contract_symbol(_underlying(base.symbol), k, base.kind,
+                                                                                  base.expiry)), spot, now_ms),
+                underlying=_underlying(base.symbol),
+            )
         key = self.key_for(contract.symbol)
         if key is None:
             rec["note"] = "contract is not in the instrument master"
@@ -429,6 +446,7 @@ class PaperSession:
                 return
             self.book.close(exit_fill, index_exit_time=index_time, reason=close_reason, index_exit=spot)
         self._contract_of[key] = contract
+        self._best.pop(key, None)
         self.book.open(Position(
             direction=direction, key=key, symbol=contract.symbol, kind=contract.kind, strike=contract.strike,
             expiry=contract.expiry, lots=self.lots, units=units, lot_size=contract.lot_size, entry=entry,
@@ -475,8 +493,22 @@ class PaperSession:
             return False
         hit = first_hit(p.levels.get("premium_stop"), p.levels.get("premium_target"), price, price, price, long=True)
         if hit is None:
+            if self.exit_rule.trailing:
+                self._trail(p, price)
             return False
         return self._exit_on_rule(f"premium_{hit[0]}", now_ms)
+
+    def _trail(self, p: Any, price: float) -> None:
+        """Trailing premium stop: a new best traded price since the entry may raise the stop (never lowers it).
+        The stop lives in the position's levels, so a restart keeps it."""
+        assert self.exit_rule is not None and p.levels is not None
+        best = max(self._best.get(p.key, p.entry.price), price)
+        self._best[p.key] = best
+        stop = trailed_stop(p.entry.price, self.exit_rule, best)
+        current = p.levels.get("premium_stop")
+        if current is None or stop > current:
+            p.levels["premium_stop"] = stop
+            log.info("paper: %s trailing stop %s -> %s (best %s)", p.key, current, stop, best)
 
     def _note_tick(self, key: str, price: float, now_ms: int) -> None:
         minute = now_ms // 1000 // 60 * 60

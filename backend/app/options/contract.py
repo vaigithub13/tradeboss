@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from collections.abc import Callable
+from dataclasses import asdict, dataclass, replace
 from datetime import date
 from typing import Any
 
@@ -66,3 +67,26 @@ def choose_contract(
         step=row.step,
         step_verification=row.verification,
     )
+
+
+def strike_by_premium(
+    contract: OptionContract, target: float, premium_of: Callable[[float], float | None], *,
+    underlying: str = "NIFTY", reach: int = 15,
+) -> OptionContract:
+    """The same kind and expiry, at the strike (ATM +- `reach` steps) whose premium is nearest `target`
+    (Quantman's "premium near"). A tie takes the cheaper option. Unpriced strikes are skipped; none priced keeps
+    the contract as it is."""
+    best: tuple[float, float, float] | None = None  # (distance, premium, strike)
+    for i in range(-reach, reach + 1):
+        strike = contract.strike + i * contract.step
+        if strike <= 0:
+            continue
+        prem = premium_of(strike)
+        if prem is None:
+            continue
+        cand = (abs(float(prem) - target), float(prem), strike)
+        if best is None or cand[:2] < best[:2]:
+            best = cand
+    if best is None or best[2] == contract.strike:
+        return contract
+    return replace(contract, strike=best[2], symbol=contract_symbol(underlying, best[2], contract.kind, contract.expiry))

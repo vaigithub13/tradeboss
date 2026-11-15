@@ -328,10 +328,13 @@ def backtest_report(
 
     rest = dict(params)
     exit_rule = rest.pop("exit_rule", None)
+    timeframe = rest.pop("timeframe", timeframe)
+    strike_premium = rest.pop("strike_premium", None)
     config = parse_config({
         "strategy": strategy, "params": rest, "symbol": symbol, "timeframe": timeframe,
         "start": day.isoformat(), "end": day.isoformat(), "sessions": list(DEFAULT_INCLUDED_SESSION_TYPES),
         "mode": "options", "slippage_points": CHECK_SLIPPAGE, "exit_rule": exit_rule,
+        **({} if strike_premium is None else {"strike_premium": strike_premium}),
     })
     result = run_backtest(build_strategy(config), StoreSource(store, symbol), _engine_config(config))
     nifty, vix = _load_underlyings(config, store=store)
@@ -406,6 +409,7 @@ def end_of_day_check(
     fill-driven level difference goes to `fill_driven`, an exchange-only crossing to `exchange_only`, not
     `differences`."""
     decisions = [s for s in signals if s.get("side") in ("BUY", "SELL") and s.get("time") is not None]
+    timeframe = str(params.get("timeframe", timeframe))  # a slot's own bar size (slot settings in the params)
     try:
         backtest, warnings = backtest_report(store=store, symbol=symbol, day=day, strategy=strategy, params=params,
                                              timeframe=timeframe, tape=tape)

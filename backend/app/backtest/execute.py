@@ -185,7 +185,17 @@ def _model(config: dict[str, Any]) -> OptionModelConfig:
         vix_scales=shipped.vix_scales,
         premium_target_pct=_premium_exit(config, "target"),
         premium_stop_pct=_premium_exit(config, "stop"),
+        premium_trail_every=_premium_trail(config, "trail_every"),
+        premium_trail_by=_premium_trail(config, "trail_by"),
+        strike_premium=config.get("strike_premium"),
     )
+
+
+def _premium_trail(config: dict[str, Any], which: str) -> float | None:
+    rule = config.get("exit_rule")
+    if rule and rule.get("kind") == "premium" and rule.get(which) is not None:
+        return float(rule[which])
+    return None
 
 
 def _premium_exit(config: dict[str, Any], which: str) -> float | None:

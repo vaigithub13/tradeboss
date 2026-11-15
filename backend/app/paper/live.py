@@ -61,11 +61,29 @@ class SettingsMismatch(PaperError):
     """Today's file was written by another strategy or other parameters; starting would mix them."""
 
 
+#: slot settings that travel in the params but are not strategy parameters: the bar size ("3m", "5m") and the
+#: strike picked by premium (rupees, Quantman's "premium near"); the end-of-day backtest reads them too
+SLOT_KEYS = ("timeframe", "strike_premium")
+PAPER_TIMEFRAMES = {"1m": 1, "3m": 3, "5m": 5, "15m": 15}
+
+
+def slot_settings(params: dict[str, Any]) -> tuple[dict[str, Any], int, float | None]:
+    """(params without the slot keys, bar minutes, strike premium or None)."""
+    rest = {k: v for k, v in params.items() if k not in SLOT_KEYS}
+    tf = params.get("timeframe", "5m")
+    if tf not in PAPER_TIMEFRAMES:
+        raise PaperError(f"timeframe must be one of {list(PAPER_TIMEFRAMES)}")
+    sp = params.get("strike_premium")
+    if sp is not None and (isinstance(sp, bool) or not isinstance(sp, (int, float)) or not sp > 0):
+        raise PaperError("strike_premium must be a number > 0")
+    return rest, PAPER_TIMEFRAMES[tf], None if sp is None else float(sp)
+
+
 def paper_strategy(strategy: str, params: dict[str, Any]) -> tuple[Strategy, ExitRule | None]:
     """The strategy a slot runs and its exit rule. The rule travels in the params (`exit_rule`, e.g.
     "premium_1to2"), so the same-settings check, a restart and the end-of-day backtest all see it; the strategy is
     built exactly as the backtest builds it with that exit_rule."""
-    rest = dict(params)
+    rest, _minutes, _premium = slot_settings(params)
     rule = parse_exit_rule(rest.pop("exit_rule", None))
     built = build_strategy({"strategy": strategy, "params": rest,
                             "exit_rule": None if rule is None else rule.to_dict()})
@@ -87,6 +105,7 @@ def session_factory(instruments_dir: Path, vix: VixSeries, store: CandleStore, s
             raise PaperError("no instrument snapshot yet, so option contracts cannot be chosen")
         key_of = {i.symbol: i.key for i in index.instruments}
         built, rule = paper_strategy(strategy, params)
+        _rest, bar_minutes, strike_premium = slot_settings(params)
         session = PaperSession(
             day=day,
             strategy=built,
@@ -98,8 +117,10 @@ def session_factory(instruments_dir: Path, vix: VixSeries, store: CandleStore, s
             model_price=model_price_for(vix.at),
             stale_model_price=_stale_model(store, day),
             symbol=symbol,
+            bar_minutes=bar_minutes,
+            strike_premium=strike_premium,
         )
-        session.warm(stored_warmup(store, symbol, day))
+        session.warm(stored_warmup(store, symbol, day, bar_minutes))
         return session
 
     return make
