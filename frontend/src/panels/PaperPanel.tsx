@@ -21,9 +21,9 @@ const STRATEGIES = [
   { name: "dd_five_confirm", label: "DD 5-confirmation (ST 10/2, RSI 70/30, R1/S1, BB 20/2; slot 5: Quantman, 3m)" },
 ];
 
-/** Live signals (paper): five strategies side by side on the live feed, each with its own position and P&L. No orders.
+/** Live signals (paper): six strategies side by side on the live feed, each with its own position and P&L. No orders.
  * Slots 1 and 2 are the week's comparison (no exits); 3 and 4 default to the same strategies with 1:2 premium exits;
- * slot 5 runs the DD 5-confirmation system with its own Supertrend exit.
+ * slots 5 (calls) and 6 (puts) run the DD 5-confirmation system as in the user's Quantman run.
  * The status poll and the trade alerts run in App (usePaperAlerts), so they go on while this panel is closed. */
 export function PaperPanel() {
   const status = usePaperStore((s) => s.status);
@@ -193,7 +193,14 @@ function SlotSection({ slot, status, disabled }: { slot: string; status: PaperSt
         </div>
       )}
       {error && <div className="text-red-400">{error}</div>}
-      {slot === "3" && <OrderHelperBox open={status?.position ?? null} />}
+      {slot === "3" && <OrderHelperBox open={status?.position ?? null} slot="3" />}
+      {(slot === "5" || slot === "6") && (
+        <OrderHelperBox
+          open={status?.position ?? null}
+          slot={slot}
+          trailing="Trailing stop: for every +15% the premium gains, move your SL up by 10% of the entry (paper's SL above updates live). Sell when paper exits."
+        />
+      )}
 
       <table className="w-full table-fixed text-left tabular-nums">
         <colgroup>

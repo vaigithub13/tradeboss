@@ -36,6 +36,11 @@ RUNS: list[tuple[str, str, dict[str, Any], str, int, dict[str, Any]]] = [
     ("QM-3m-exact", "dd_five_confirm", QUANTMAN, "3m", 0, {"strike_premium": 250, "exit_rule": "premium_trail_10"}),
     ("QM-3m-noSL", "dd_five_confirm", QUANTMAN, "3m", 0, {"strike_premium": 250}),
     ("QM-5m-exact", "dd_five_confirm", QUANTMAN, "5m", 0, {"strike_premium": 250, "exit_rule": "premium_trail_10"}),
+    # the same rules with the mirror put side (close < ST, RSI < 30, close < S1, close < lower BB, %R < -70)
+    ("QM-3m-both", "dd_five_confirm", {**QUANTMAN, "mode": "long_short"}, "3m", 0,
+     {"strike_premium": 250, "exit_rule": "premium_trail_10"}),
+    ("QM-3m-PEonly", "dd_five_confirm", {**QUANTMAN, "mode": "short_only"}, "3m", 0,
+     {"strike_premium": 250, "exit_rule": "premium_trail_10"}),
     ("LogXZ-5m", "log_xz", {}, "5m", 0, {}),
     ("PChan20-5m", "price_channel", {"length": 20}, "5m", 0, {}),
 ]

@@ -97,13 +97,13 @@ def head_commit() -> str:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--from", dest="since", required=True, help="first day, YYYY-MM-DD")
-    p.add_argument("--slot", action="append", help="slot number; repeat for more (default: 1-5)")
+    p.add_argument("--slot", action="append", help="slot number; repeat for more (default: 1-6)")
     p.add_argument("--paper-dir", type=Path, default=ROOT / "data" / "paper")
     args = p.parse_args()
     commit = head_commit()
     check = store_check(ROOT / "data" / "candles", ROOT / "data" / "option_history")
     on = datetime.now(IST).date()
-    for slot, path in live_day_files(args.paper_dir, args.slot or ["1", "2", "3", "4", "5"], date.fromisoformat(args.since)):
+    for slot, path in live_day_files(args.paper_dir, args.slot or ["1", "2", "3", "4", "5", "6"], date.fromisoformat(args.since)):
         if json.loads(path.read_text(encoding="utf-8")).get("source", "live") != "live":
             continue
         old, new = recheck_file(path, check, commit=commit, on=on)

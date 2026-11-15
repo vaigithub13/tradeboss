@@ -42,6 +42,8 @@ def test_shipped_config_matches_the_checklist() -> None:
         ("4", "price_channel", {"length": 20, "exit_rule": "premium_1to2"}),
         ("5", "dd_five_confirm", {"mode": "long_only", "use_wr": True, "max_trades_per_day": 10, "last_entry": "15:10",
                                    "timeframe": "3m", "strike_premium": 250, "exit_rule": "premium_trail_10"}),
+        ("6", "dd_five_confirm", {"mode": "short_only", "use_wr": True, "max_trades_per_day": 10, "last_entry": "15:10",
+                                   "timeframe": "3m", "strike_premium": 250, "exit_rule": "premium_trail_10"}),
     ]
 
 

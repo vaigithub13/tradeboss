@@ -1882,3 +1882,10 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest):
   more in `tests/test_bt_dd_five_confirm.py`, a paper trailing test in `tests/test_paper_exits.py` (which also expected
   4 slots: fixed). No new test failures against the previous commit in this container (fastapi / duckdb tests could not
   run here); run `npm test` on the Mac before 09:00 Monday.
+
+- Puts (15 Nov): the same Quantman rules on puts lost money in the backtest (3m, PE only: 567 trades, option net
+  -37,026, PF 0.91, max DD 57,571; CE + PE together: +96,776, PF 1.13, max DD 43,220; CE only +1,33,802). By the user's
+  choice slot 5 stays calls only and a new slot 6 runs puts only, to test the bearish side live
+  (`data/validation/dd_five_confirm_pe_2026-11-15.md`). The desk has 6 slots now.
+- Order helper for slots 5 and 6 (as slot 3's): a table with BUY CE/PE, strike, paper entry, lots, the current (trailing)
+  stop and "no target", plus the copy fields. `contractParts` reads the strike and kind from the contract symbol.

@@ -4,6 +4,7 @@ import {
   accountStopProgress,
   compareReal,
   fromDatetimeLocalValue,
+  contractParts,
   orderHelperFromOpen,
   paperTradeKey,
   realNet,
@@ -48,9 +49,28 @@ describe("real trades helpers", () => {
       stop_trigger: 170.12,
       stop_limit: 170.07,
       target_limit: 297.71,
+      strike: 25300,
+      kind: "PE",
     });
     expect(orderHelperFromOpen(null)).toBeNull();
     expect(orderHelperFromOpen({ symbol: "X", units: 65, levels: {} })).toBeNull();
+  });
+
+  it("slot 5: a trailing stop with no target shows the strike and no target limit", () => {
+    const h = orderHelperFromOpen({
+      symbol: "NIFTY 24850 CE 17 NOV 26",
+      units: 65,
+      lots: 1,
+      lot_size: 65,
+      entry: { price: 250 },
+      levels: { premium_stop: 250, premium_target: 12750 },
+    });
+    expect(h?.strike).toBe(24850);
+    expect(h?.kind).toBe("CE");
+    expect(h?.target_limit).toBeNull();
+    expect(h?.stop_trigger).toBe(250);
+    expect(contractParts("NIFTY 25000 PE 06 OCT 26")).toEqual({ strike: 25000, kind: "PE" });
+    expect(contractParts("junk")).toEqual({ strike: null, kind: null });
   });
 
   it("marks the account stop when loss reaches the limit", () => {

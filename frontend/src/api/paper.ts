@@ -11,7 +11,7 @@ import type {
 import type { ExitCounts, ReportRow } from "../report/present";
 import type { PaperTradeRow } from "../paper/trades";
 
-/** One paper slot ("1".."5"): its own strategy, position and P&L. */
+/** One paper slot ("1".."6"): its own strategy, position and P&L. */
 export interface PaperStatus {
   slot: string;
   state: "running" | "starting" | "stopped" | "disabled";
@@ -52,7 +52,7 @@ export interface PaperDeskStatus {
   slots: PaperStatus[];
 }
 
-export const PAPER_SLOTS = ["1", "2", "3", "4", "5"] as const;
+export const PAPER_SLOTS = ["1", "2", "3", "4", "5", "6"] as const;
 
 export const fetchPaperStatus = (): Promise<PaperDeskStatus> => getJson<PaperDeskStatus>("/api/paper/status");
 

@@ -1,4 +1,4 @@
-"""Five paper strategies on one feed: slots 1-5, each a `PaperRunner` with its own session, position, P&L and day
+"""Six paper strategies on one feed: slots 1-6, each a `PaperRunner` with its own session, position, P&L and day
 files. Slot 1 keeps `data/paper/` (earlier days and dry-run marks stay where they were); slot N writes
 `data/paper/slotN/`. The feed service talks to the desk as it talked to one runner; the routes pick a slot.
 """
@@ -14,7 +14,7 @@ from typing import Any
 from app.data.store import CandleStore
 from app.paper.live import PaperError, PaperRunner
 
-SLOTS = ("1", "2", "3", "4", "5")
+SLOTS = ("1", "2", "3", "4", "5", "6")
 log = logging.getLogger("tradeboss.paper.desk")
 
 

@@ -111,6 +111,8 @@ describe("slots and exit rules", () => {
     expect(JSON.parse(SLOT_DEFAULTS["5"]?.params ?? "{}")).toEqual({
       mode: "long_only", use_wr: true, max_trades_per_day: 10, last_entry: "15:10", timeframe: "3m", strike_premium: 250,
     });
+    expect(SLOT_DEFAULTS["6"]?.exit).toBe("premium_trail_10");
+    expect(JSON.parse(SLOT_DEFAULTS["6"]?.params ?? "{}").mode).toBe("short_only");
   });
 
   it("puts the chosen rule into the params, and only then", () => {

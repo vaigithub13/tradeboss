@@ -201,14 +201,15 @@ def test_the_exit_rule_travels_in_the_params_and_builds_the_same_strategy_as_the
         paper_strategy("log_xz", {"exit_rule": "nope"})
 
 
-def test_the_desk_has_five_slots() -> None:
+def test_the_desk_has_six_slots() -> None:
     from pathlib import Path
 
     from app.paper.desk import SLOTS, PaperDesk
 
-    assert SLOTS == ("1", "2", "3", "4", "5")
+    assert SLOTS == ("1", "2", "3", "4", "5", "6")
     assert PaperDesk.slot_dir(Path("/p"), "1") == Path("/p") and PaperDesk.slot_dir(Path("/p"), "4") == Path("/p/slot4")
     assert PaperDesk.slot_dir(Path("/p"), "5") == Path("/p/slot5")
+    assert PaperDesk.slot_dir(Path("/p"), "6") == Path("/p/slot6")
 
 
 def test_the_week_counts_exits(tmp_path) -> None:

@@ -59,7 +59,20 @@ export interface OrderHelper {
   entry_premium: number;
   stop_trigger: number;
   stop_limit: number;
-  target_limit: number;
+  /** null: the rule has no target (slot 5 exits on the Supertrend or the trailing stop) */
+  target_limit: number | null;
+  /** from the contract, e.g. "NIFTY 24850 CE 17 NOV 26" -> 24850 / "CE" */
+  strike: number | null;
+  kind: string | null;
+}
+
+/** A premium target this many times the entry is the "no target" placeholder (backend NO_TARGET = 50). */
+const NO_TARGET_MULTIPLE = 20;
+
+/** "NIFTY 24850 CE 17 NOV 26" -> { strike: 24850, kind: "CE" }. */
+export function contractParts(symbol: string): { strike: number | null; kind: string | null } {
+  const m = /^\S+\s+(\d+(?:\.\d+)?)\s+(CE|PE)\b/.exec(symbol.trim());
+  return m ? { strike: Number(m[1]), kind: m[2] ?? null } : { strike: null, kind: null };
 }
 
 /** Open paper position shape from GET /api/paper/status (slot snapshot `open`). */
@@ -106,12 +119,15 @@ export function orderHelperFromOpen(open: PaperOpenPosition | null | undefined, 
   if (!open) return null;
   const stop = open.levels?.premium_stop;
   const target = open.levels?.premium_target;
-  if (stop == null || target == null) return null;
+  if (stop == null) return null;
   const qty = open.units ?? 0;
   if (qty < 1) return null;
   const entry = open.entry?.price ?? open.entry_price ?? 0;
+  const noTarget = target == null || (entry > 0 && target >= entry * NO_TARGET_MULTIPLE);
+  const contract = open.symbol ?? open.contract ?? "";
   return {
-    contract: open.symbol ?? open.contract ?? "",
+    contract,
+    ...contractParts(contract),
     quantity: qty,
     lots: open.lots ?? 1,
     lot_size: open.lot_size ?? qty,
@@ -119,7 +135,7 @@ export function orderHelperFromOpen(open: PaperOpenPosition | null | undefined, 
     entry_premium: entry,
     stop_trigger: stop,
     stop_limit: round2(stop - tick),
-    target_limit: target,
+    target_limit: noTarget ? null : target,
   };
 }
 

@@ -96,14 +96,14 @@ def fill_shadows(saved: dict[str, Any], bars: MinuteBars, cost_table: Any, day: 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--from", dest="since", required=True, help="first day, YYYY-MM-DD")
-    p.add_argument("--slot", action="append", help="slot number; repeat for more (default: 1-5)")
+    p.add_argument("--slot", action="append", help="slot number; repeat for more (default: 1-6)")
     p.add_argument("--paper-dir", type=Path, default=ROOT / "data" / "paper")
     p.add_argument("--recompute", action="store_true", help="work out every shadow again (a rule change)")
     p.add_argument("--recordings-dir", type=Path, default=ROOT / "data" / "feed-recordings")
     args = p.parse_args()
     since = date.fromisoformat(args.since)
     cost_table = load_default_cost_table()
-    for slot in args.slot or ["1", "2", "3", "4", "5"]:
+    for slot in args.slot or ["1", "2", "3", "4", "5", "6"]:
         for path in sorted(PaperDesk.slot_dir(args.paper_dir, slot).glob("????-??-??.json")):
             day = date.fromisoformat(path.stem)
             if day < since:
