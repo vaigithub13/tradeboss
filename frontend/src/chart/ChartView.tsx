@@ -46,7 +46,9 @@ import { browserStorage } from "../indicators/persistence";
 import { clipSeries, seriesThroughCursor } from "../replay/cap";
 import { fetchFvg } from "../draw/api";
 import { bindDrawings, type DrawBag } from "../draw/bind";
-import { DrawPrimitive, FvgPrimitive } from "../draw/primitive";
+import { DrawPrimitive, FirstHourBoxPrimitive, FvgPrimitive } from "../draw/primitive";
+import { FirstHourBoxHud, useFirstHourBox } from "../indicators/FirstHourBoxLayer";
+import { formatInrPrice } from "../indicators/firstHourBox";
 import type { GexResponse } from "../api/gex";
 import { gexBars } from "./gex";
 import { GexPrimitive } from "./gexPrimitive";
@@ -120,6 +122,7 @@ export function ChartView({
   const whitespaceRef = useRef<ISeriesApi<"Line"> | null>(null);
   const drawPrimitiveRef = useRef<DrawPrimitive | null>(null);
   const fvgPrimitiveRef = useRef<FvgPrimitive | null>(null);
+  const fhbPrimitiveRef = useRef<FirstHourBoxPrimitive | null>(null);
   const gexPrimitiveRef = useRef<GexPrimitive | null>(null);
   const drawBagRef = useRef<DrawBag>({ candles: [], timeframe, cursor });
   const timeframeRef = useRef(timeframe);
@@ -324,8 +327,10 @@ export function ChartView({
     });
     const drawings = new DrawPrimitive();
     const gaps = new FvgPrimitive();
+    const fhb = new FirstHourBoxPrimitive();
     candleSeries.attachPrimitive(drawings);
     candleSeries.attachPrimitive(gaps);
+    candleSeries.attachPrimitive(fhb);
     const gexBarsPrimitive = new GexPrimitive();
     candleSeries.attachPrimitive(gexBarsPrimitive);
     const unbind = bindDrawings(chart, candleSeries, el, drawings, drawBagRef);
@@ -335,6 +340,7 @@ export function ChartView({
     whitespaceRef.current = whitespace;
     drawPrimitiveRef.current = drawings;
     fvgPrimitiveRef.current = gaps;
+    fhbPrimitiveRef.current = fhb;
     gexPrimitiveRef.current = gexBarsPrimitive;
     layerRef.current = new IndicatorLayer(chart);
     return () => {
@@ -349,17 +355,64 @@ export function ChartView({
       whitespaceRef.current = null;
       drawPrimitiveRef.current = null;
       fvgPrimitiveRef.current = null;
+      fhbPrimitiveRef.current = null;
       gexPrimitiveRef.current = null;
       layerRef.current = null;
     };
   }, []);
 
+  const fhbEnabled = items.some((item) => item.type === "first_hour_box" && item.visible);
+  const fhbResult = useFirstHourBox(candles, timeframe, cursor, fhbEnabled);
+  const fhbColor =
+    items.find((item) => item.type === "first_hour_box" && item.visible)?.colors["box"] ?? "#2962ff";
+
+  const mergedMarkers = useMemo(() => {
+    const fhbMarkers: SeriesMarker<Time>[] = fhbResult.markers.map((m) => ({
+      time: m.time as UTCTimestamp,
+      position: m.side === "below" || m.kind === "FAILED" ? "belowBar" : "aboveBar",
+      shape: m.kind === "FAILED" ? "circle" : m.side === "below" ? "arrowDown" : "arrowUp",
+      color: m.color,
+      text: m.label,
+    }));
+    const byTime = new Map<number, SeriesMarker<Time>>();
+    for (const m of [...markers, ...fhbMarkers]) {
+      const t = Number(m.time);
+      if (!Number.isFinite(t)) continue;
+      byTime.set(t, m);
+    }
+    return [...byTime.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([, m]) => m);
+  }, [markers, fhbResult.markers]);
+
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
     if (!markersRef.current) markersRef.current = createSeriesMarkers(series);
-    markersRef.current.setMarkers(markers);
-  }, [markers, candles]);
+    markersRef.current.setMarkers(mergedMarkers);
+  }, [mergedMarkers, candles]);
+
+  useEffect(() => {
+    const primitive = fhbPrimitiveRef.current;
+    if (!primitive) return;
+    if (!fhbEnabled) {
+      primitive.setBoxes([]);
+      return;
+    }
+    primitive.setBoxes(
+      fhbResult.boxes.map((box) => ({
+        startTime: box.startTime,
+        endTime: box.endTime,
+        a: box.a,
+        b: box.b,
+        forming: box.forming,
+        color: fhbColor,
+        labelA: `A ${formatInrPrice(box.a)}`,
+        labelB: `B ${formatInrPrice(box.b)}`,
+        formingLabel: "Box forming",
+      })),
+    );
+  }, [fhbEnabled, fhbResult.boxes, fhbColor]);
 
   useEffect(() => {
     const series = candleSeriesRef.current;
@@ -787,6 +840,7 @@ export function ChartView({
           »
         </button>
       )}
+      <FirstHourBoxHud result={fhbResult} enabled={fhbEnabled} />
       {tradeCard}
     </div>
   );

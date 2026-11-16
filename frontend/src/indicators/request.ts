@@ -1,7 +1,14 @@
 import type { Candle, SessionType, Timeframe } from "../api/client";
 import type { IndicatorsRequest } from "../api/indicators";
 import { hasVolume } from "../chart/volume";
-import { unavailableReason, validateParams, type IndicatorInstance, type IndicatorType, type Params } from "./catalog";
+import {
+  CLIENT_ONLY_INDICATORS,
+  unavailableReason,
+  validateParams,
+  type IndicatorInstance,
+  type IndicatorType,
+  type Params,
+} from "./catalog";
 import { indicatorKey, missingRanges, type IndicatorEntry, type TimeRange } from "./cache";
 
 export interface RequestContext {
@@ -38,6 +45,7 @@ export function planFetches(ctx: RequestContext, cached: Readonly<Record<string,
   const groups = new Map<string, FetchGroup>();
   const seen = new Set<string>();
   for (const item of activeItems(ctx)) {
+    if (CLIENT_ONLY_INDICATORS.has(item.type)) continue;
     const key = indicatorKey(item.type, item.params);
     if (seen.has(key)) continue;
     seen.add(key);

@@ -602,6 +602,88 @@ export interface FvgLayer {
   colors: FvgStyle;
 }
 
+export interface FirstHourBoxPaint {
+  startTime: number;
+  endTime: number;
+  a: number;
+  b: number;
+  forming: boolean;
+  color: string;
+  labelA: string;
+  labelB: string;
+  formingLabel: string;
+}
+
+/** Shaded first-hour range + A/B labels (reuses the FVG-style fill paint). */
+export class FirstHourBoxPrimitive implements ISeriesPrimitive {
+  boxes: readonly FirstHourBoxPaint[] = [];
+  private chart: Chart | null = null;
+  private series: Series | null = null;
+  private requestUpdate: () => void = () => {};
+  private readonly views: readonly IPrimitivePaneView[];
+
+  constructor() {
+    const renderer: IPrimitivePaneRenderer = {
+      draw: (target: CanvasRenderingTarget2D) => {
+        target.useMediaCoordinateSpace(({ context, mediaSize }) => this.paint(context, mediaSize.width));
+      },
+    };
+    this.views = [{ renderer: () => renderer }];
+  }
+
+  attached(param: SeriesAttachedParameter<Time, "Candlestick">): void {
+    this.chart = param.chart as Chart;
+    this.series = param.series as Series;
+    this.requestUpdate = param.requestUpdate;
+  }
+
+  detached(): void {
+    this.chart = null;
+    this.series = null;
+  }
+
+  paneViews(): readonly IPrimitivePaneView[] {
+    return this.views;
+  }
+
+  setBoxes(boxes: readonly FirstHourBoxPaint[]): void {
+    this.boxes = boxes;
+    this.requestUpdate();
+  }
+
+  private paint(ctx: CanvasRenderingContext2D, width: number): void {
+    const chart = this.chart;
+    const series = this.series;
+    if (!chart || !series) return;
+    for (const box of this.boxes) {
+      const x1 = chart.timeScale().timeToCoordinate(box.startTime as UTCTimestamp);
+      const yTop = series.priceToCoordinate(box.a);
+      const yBot = series.priceToCoordinate(box.b);
+      if (x1 == null || yTop == null || yBot == null) continue;
+      const xEnd = chart.timeScale().timeToCoordinate(box.endTime as UTCTimestamp);
+      const x2 = xEnd ?? width;
+      const x = Math.min(x1, x2);
+      const w = Math.max(1, Math.abs(x2 - x1));
+      const y = Math.min(yTop, yBot);
+      const h = Math.max(1, Math.abs(yBot - yTop));
+      ctx.save();
+      ctx.globalAlpha = box.forming ? 0.1 : 0.18;
+      ctx.fillStyle = box.color;
+      ctx.fillRect(x, y, w, h);
+      ctx.globalAlpha = 0.9;
+      ctx.fillStyle = "#e2e8f0";
+      ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+      if (box.forming) {
+        ctx.fillText(box.formingLabel, x + 4, y + 14);
+      } else {
+        ctx.fillText(box.labelA, x + 4, y + 12);
+        ctx.fillText(box.labelB, x + 4, y + h - 4);
+      }
+      ctx.restore();
+    }
+  }
+}
+
 export class FvgPrimitive implements ISeriesPrimitive {
   layers: readonly FvgLayer[] = [];
   private chart: Chart | null = null;

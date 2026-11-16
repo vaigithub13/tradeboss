@@ -109,6 +109,7 @@ export function legendRows(args: {
           break;
         }
         case "fvg":
+        case "first_hour_box":
           break;
       }
     }

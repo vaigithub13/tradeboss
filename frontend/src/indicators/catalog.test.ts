@@ -43,7 +43,7 @@ describe("defaults mirror the backend registry", () => {
 
   it("every type has outputs and colours; RSI, Stochastic, and MACD are separate panes", () => {
     for (const t of INDICATOR_TYPES) {
-      expect(CATALOG[t].outputs.length).toBeGreaterThan(0);
+      if (t !== "first_hour_box") expect(CATALOG[t].outputs.length).toBeGreaterThan(0);
       expect(CATALOG[t].colors.length).toBeGreaterThan(0);
     }
     expect(INDICATOR_TYPES.filter((t) => CATALOG[t].pane === "separate")).toEqual(["rsi", "stoch", "macd", "vix"]);
@@ -153,9 +153,15 @@ describe("VWAP availability", () => {
 
   it("is enabled on intraday data with volume; other indicators never need volume", () => {
     expect(unavailableReason("vwap", { timeframe: "5m", hasVolume: true })).toBeNull();
-    for (const t of INDICATOR_TYPES.filter((x) => x !== "vwap" && x !== "vwap_fut")) {
+    for (const t of INDICATOR_TYPES.filter((x) => x !== "vwap" && x !== "vwap_fut" && x !== "first_hour_box")) {
       expect(unavailableReason(t, { timeframe: "1D", hasVolume: false })).toBeNull();
     }
+  });
+
+  it("hides First Hour Box on 1h / 1D / 1W", () => {
+    expect(unavailableReason("first_hour_box", { timeframe: "5m", hasVolume: false })).toBeNull();
+    expect(unavailableReason("first_hour_box", { timeframe: "1h", hasVolume: false })).toMatch(/1m/);
+    expect(unavailableReason("first_hour_box", { timeframe: "1D", hasVolume: false })).toMatch(/1m/);
   });
 });
 

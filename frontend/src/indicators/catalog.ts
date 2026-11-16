@@ -1,6 +1,9 @@
 import type { Timeframe } from "../api/client";
 
-export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg", "vix"] as const;
+export const INDICATOR_TYPES = ["sma", "ema", "bb", "supertrend", "rsi", "stoch", "macd", "vwap", "vwap_fut", "fvg", "vix", "first_hour_box"] as const;
+
+/** Computed entirely in the browser — never sent to /api/indicators. */
+export const CLIENT_ONLY_INDICATORS: ReadonlySet<IndicatorType> = new Set(["first_hour_box"]);
 export type IndicatorType = (typeof INDICATOR_TYPES)[number];
 
 export const SOURCES = ["open", "high", "low", "close", "hl2", "hlc3", "ohlc4"] as const;
@@ -202,6 +205,17 @@ export const CATALOG: Record<IndicatorType, IndicatorDef> = {
     ],
     outputs: ["bull_bottom", "bull_top", "bear_bottom", "bear_top"],
   },
+  first_hour_box: {
+    type: "first_hour_box",
+    label: "First Hour Box",
+    pane: "price",
+    params: [],
+    colors: [
+      { key: "box", label: "Box fill", default: "#2962ff" },
+      { key: "probe", label: "Probe", default: "#f59e0b" },
+    ],
+    outputs: [],
+  },
   vix: {
     type: "vix", label: "India VIX", pane: "separate",
     params: [
@@ -322,6 +336,8 @@ export function indicatorName(inst: Pick<IndicatorInstance, "type" | "params">):
       const gaps = p["session_gaps"] === "exclude" ? "overnight gaps excluded" : "overnight gaps included";
       return `${label} (${tf}, ${gaps})`;
     }
+    case "first_hour_box":
+      return label;
   }
 }
 
@@ -334,6 +350,12 @@ export interface AvailabilityContext {
 
 /** Why an indicator cannot be used right now (shown as a tooltip), or null when it can. */
 export function unavailableReason(type: IndicatorType, ctx: AvailabilityContext): string | null {
+  if (type === "first_hour_box") {
+    if (ctx.timeframe === "1h" || ctx.timeframe === "1D" || ctx.timeframe === "1W") {
+      return "First Hour Box is only on 1m / 3m / 5m / 15m / 30m.";
+    }
+    return null;
+  }
   if (type !== "vwap" && type !== "vwap_fut") return null;
   if (ctx.timeframe === "1D" || ctx.timeframe === "1W") {
     return "VWAP resets every day, so it is intraday only (not available on 1D / 1W).";

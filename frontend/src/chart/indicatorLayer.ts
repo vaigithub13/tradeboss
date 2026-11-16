@@ -265,6 +265,8 @@ export class IndicatorLayer {
       }
       case "fvg":
         return bundle("fvg", {});
+      case "first_hour_box":
+        return bundle("first_hour_box", {});
       case "vix": {
         const pane = this.newPane();
         const vix = line(color("mid"), pane, 2, {
@@ -361,6 +363,7 @@ export class IndicatorLayer {
         break;
       }
       case "fvg":
+      case "first_hour_box":
         break;
     }
 
