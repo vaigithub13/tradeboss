@@ -27,11 +27,13 @@ from dataclasses import asdict, replace
 from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
-from app.backtest.context import History, PastBars, PositionView
+from app.backtest.context import History, IndicatorView, PastBars, PositionView, _Growing
 from app.backtest.contracts import Signal
 from app.backtest.costs import CostTable
 from app.backtest.engine import BacktestConfig
 from app.exits.report import reason_counts
+from app.indicators import registry
+from app.indicators.frame import candles_to_frame
 from app.exits.rules import ExitRule, first_hit, index_levels, premium_levels, trailed_stop
 from app.live.model import ist_ms_of_day
 from app.live.spreads.decode import DepthQuote
@@ -81,13 +83,26 @@ class _Ctx:
         self.lot_size = 1
         self.open_orders: list[dict[str, Any]] = []
         self.bars = None if history is None else PastBars(history)
+        self._history = history
         self._cancel = cancel
 
     def cancel_working(self, tag: str | None = None) -> int:
         return 0 if self._cancel is None else self._cancel(tag)
 
     def indicator(self, itype: str, **params: Any) -> Any:
-        raise NotImplementedError("paper trading takes no indicator views yet")
+        """The chart's own indicator code over the closed bars so far (warm-up + today), as the backtest's hub
+        does; only the past is visible, since only closed bars are in the history."""
+        if self._history is None or not self._history.candles:
+            raise NotImplementedError("paper trading has no bars for an indicator yet")
+        clean = registry.validate_params(itype, params)
+        full = registry.compute(candles_to_frame(self._history.candles), itype, clean)
+        bufs: dict[str, _Growing] = {}
+        for name, values in full.items():
+            g = _Growing()
+            for v in values:
+                g.append(float(v))
+            bufs[name] = g
+        return IndicatorView(self._history, bufs, f"{itype}{clean}")
 
 
 class PaperSession:
