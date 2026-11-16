@@ -16,6 +16,7 @@ from app.indicators import registry
 from app.indicators.frame import candles_to_frame
 from app.strategies.dd_five_confirm import DdFiveConfirm
 from app.strategies.ema_cross import EmaCrossover
+from app.strategies.ema_pivot_pullback import EmaPivotPullback
 from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
@@ -66,6 +67,10 @@ STRATEGIES: dict[str, Callable[[], Strategy]] = {
     "five_ema_short_only_tagged": lambda: FiveEma(direction="short_only", swing_bars=2),
     "dd_five_confirm": lambda: DdFiveConfirm(st_atr=5, st_mult=1.0, rsi_len=5, rsi_long=55, rsi_short=45, bb_len=10, bb_mult=0.5,
                                                  use_pivots=False),
+    # short EMAs + pivots off so random-walk data still trades before T
+    "ema_pivot_pullback": lambda: EmaPivotPullback(fast=3, slow=8, rr=2.0, max_trades_per_day=8,
+                                                     first_entry="09:20", last_entry="14:30",
+                                                     use_pivots=False),
 }
 
 

@@ -2014,3 +2014,23 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
 - **Sensitivity** (report only; strike 200/250/300 × trail 8/10/12%): baseline 250/10% net ₹159,724.
   Axis ±20%: strike 200 −15.9%, strike 300 +3.1%, trail 8% +3.6%, trail 12% −23.6%. **Plateau with soft
   edge** (trail 12% softens; not a cliff). Slot stays at 250 / 10%.
+
+
+## 16 Nov 2026 (night) - SpringPad EMA 20/50 + pivot R1/S1 port (backtest only)
+
+- New strategy `ema_pivot_pullback` (`backend/app/strategies/ema_pivot_pullback.py`): EMA cross sets trend
+  only; ready after close beyond both EMAs; pullback touch of fast EMA; later confirm beyond both + close
+  > R1 / < S1 (classic pivots from `DailyTracker`); stop = slow EMA (re-armed each bar), target = 3× initial
+  risk; EXIT on opposite cross; entries 09:20–14:30, max 4/day; engine square-off 15:15. **No paper slot.**
+- Tests first: `tests/test_bt_ema_pivot_pullback.py` + registered in `tests/test_bt_lookahead.py` (passes).
+  Catalog entry for backtest UI only.
+- Script `backend/scripts/ema_pivot_pullback_backtest.py`; report
+  `data/validation/ema_pivot_pullback_2026-11-16.md`. 5m options, live timing, slippage 0.2, ATM and ITM1.
+- **Research** 2022-01-03..2026-06-30: EMP-ATM-both −₹38,449 (912, DD 109k); EMP-ATM-long −₹43,011 vs
+  **S5-QM-long +₹159,724** (565, DD 25k). Shorts slightly positive (ATM +4.6k / ITM1 +20.6k).
+- **Real-prem** 2024-10-03..2026-06-30: EMP-ATM-both +₹26,579; EMP-ATM-long −₹8,367 vs S5 +₹86,438.
+  Shorts carry the window (ATM +35k / ITM1 +44k).
+- **Forward** 2026-10-02..2026-11-16: EMP-ATM-long +₹8,925 (14) vs S5 +₹27,307 (20). Avg hold ~100–120 min
+  (EMP) vs ~72–74 (S5). Exits mostly stop (dyn 50 EMA), then square-off, then target.
+- **Sensitivity** ±20% EMA lengths / RR (research ATM): lengthening to 24/60 is a **cliff** (net −95k to
+  −125k vs baseline −38k); RR ±20% milder. No slot added; no backend started.

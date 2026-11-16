@@ -10,6 +10,7 @@ from app.backtest.engine import INTRADAY_MIN
 from app.data.sessions import SESSION_TYPES
 from app.strategies.dd_five_confirm import DdFiveConfirm
 from app.strategies.ema_cross import EmaCrossover
+from app.strategies.ema_pivot_pullback import EmaPivotPullback
 from app.strategies.five_ema import FiveEma
 from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
@@ -149,6 +150,20 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "wr_long": _Field("float", -30.0, min_value=-100),
             "wr_short": _Field("float", -70.0, min_value=-100),
             "max_trades_per_day": _Field("int", 0, min_value=0),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "ema_pivot_pullback": (
+        EmaPivotPullback,
+        {
+            "fast": _Field("int", 20, min_value=1),
+            "slow": _Field("int", 50, min_value=2),
+            "rr": _Field("float", 3.0, min_value=0.1),
+            "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
+            "max_trades_per_day": _Field("int", 4, min_value=1),
+            "first_entry": _Field("str", "09:20"),
+            "last_entry": _Field("str", "14:30"),
+            "use_pivots": _Field("bool", True),
             "lots": _Field("int", 1, min_value=1),
         },
     ),
