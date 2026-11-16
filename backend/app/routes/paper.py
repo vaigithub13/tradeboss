@@ -34,6 +34,8 @@ STRATEGIES = {
     "log_xz": {"label": "Log XZ (RMA 14, 5m)", "params": {}},
     # stop orders at the channel; the walk-forward's last choice (2026-10-07, slippage 0.2)
     "price_channel": {"label": "Price Channel (length 20, 5m)", "params": {"length": 20}},
+    # slots 5 (calls) and 6 (puts): the Quantman version, 3m bars, strike by premium, trailing premium stop
+    "dd_five_confirm": {"label": "DD 5-confirmation (Quantman, 3m)", "params": {}},
 }
 
 
@@ -68,7 +70,8 @@ def _slot_status(svc: LiveService, slot: str, now: int) -> dict[str, Any]:
     return {"slot": slot, **_runner(svc, slot).status(now)}
 
 
-EXIT_RULES = {"premium_1to2": "1:2 premium (-20% / +40%)", "atr_1to2": "1:2 index ATR(14) (1x / 2x)"}
+EXIT_RULES = {"premium_1to2": "1:2 premium (-20% / +40%)", "atr_1to2": "1:2 index ATR(14) (1x / 2x)",
+              "premium_trail_10": "premium -10% / no target, trail +10% per +15%"}
 
 
 @router.get("/strategies")

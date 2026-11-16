@@ -261,7 +261,7 @@ def test_price_channel_is_offered_for_paper() -> None:
 def test_the_strategies_route_offers_the_exit_rules(tmp_path) -> None:
     c = client_for(Fixture(tmp_path, {}).runner)
     body = c.get("/api/paper/strategies").json()
-    assert [r["name"] for r in body["exit_rules"]] == ["premium_1to2", "atr_1to2"]
+    assert [r["name"] for r in body["exit_rules"]] == ["premium_1to2", "atr_1to2", "premium_trail_10"]
 
 
 def test_a_start_after_the_close_replays_apart_from_the_live_files(tmp_path) -> None:
