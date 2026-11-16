@@ -290,9 +290,9 @@ class PaperRunner:
                         tape: Any = None) -> dict[str, Any] | None:
         """After the reconcile and the option capture: rerun the normal backtest for the day on the official bars,
         with the option overlay, and keep the trade-level differences with their reasons in the day's file. Only once
-        the day has ended. With `day`, a runner that lost the ended session to a restart rebuilds it from that day's
-        file first."""
-        if day is not None and self.state != "running" and (self.session is None or self.day != day):
+        the day has ended. With `day`, always rebuild from the LIVE day file first: a post-close auto-start can leave
+        this runner on a replay, and the check must not write `eod_check` only under `replay/`."""
+        if day is not None and self.state != "running":
             self._load_ended(day)
         if self.session is None or self.day is None or self.state == "running":
             return None
@@ -303,7 +303,13 @@ class PaperRunner:
             incomplete=s.bars.incomplete, store=store, symbol=symbol, strategy=self.strategy, params=self.params,
             basis="fill" if s.uses_stops else "decision", tape=tape,
         )
-        self._save()
+        # Always persist on the live day file (16 Nov 2026: slot 1's eod landed in replay/ after an auto replay).
+        prev_source = self.source
+        self.source = "live"
+        try:
+            self._save()
+        finally:
+            self.source = prev_source
         return self.eod_check
 
     def _load_ended(self, day: date) -> None:
@@ -373,7 +379,7 @@ class PaperRunner:
         if ist_date(now_ms) != self.day:
             return  # a stale bar from another day never reaches the strategy
         records = self.session.on_index_minute(bar, now_ms=now_ms)
-        self.session.prepare(float(bar["close"]))
+        self.session.prepare(float(bar["close"]), now_ms=now_ms)
         if records:
             self._save()
         self._sync_wanted()

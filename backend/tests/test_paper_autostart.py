@@ -117,3 +117,21 @@ def test_a_bad_setting_is_not_retried_and_disabled_does_nothing() -> None:
     assert len(posts) == 2 and clock.slept == []
     assert out["2"] == "failed: unknown strategy"
     assert run({**CFG, "enabled": False}, request=req, now=clock.now, sleep=clock.sleep) == {}
+
+
+def test_past_give_up_or_session_end_does_not_post_a_start() -> None:
+    """A flapping session-start must not auto-start after 09:45 or after 15:30 (would become a replay)."""
+    posts: list[Any] = []
+
+    def req(method: str, path: str, body: Any) -> tuple[int, Any]:
+        if method == "POST":
+            posts.append(body)
+        return 200, {"slots": []}
+
+    late = Clock(datetime(2026, 11, 9, 10, 0, tzinfo=IST))
+    assert run(CFG, request=req, now=late.now, sleep=late.sleep, start_now=True) == {}
+    assert posts == []
+
+    after_close = Clock(datetime(2026, 11, 9, 15, 31, tzinfo=IST))
+    assert run(CFG, request=req, now=after_close.now, sleep=after_close.sleep, start_now=True) == {}
+    assert posts == []

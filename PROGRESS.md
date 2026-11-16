@@ -1965,3 +1965,20 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
   found all six already running. **Broken enough to ask before fixing:** (1) session_start_guard "unknown day" when
   something listens on :8000 without a matching `app.serve` pid / parseable lstart; (2) session-stop not owning that
   process; (3) slot 1 missing eod_check after option capture.
+
+
+## 16 Nov 2026 (evening) - Slot 5 subscription, ownership file, slot 1 eod_check
+
+- **Slot 5 modelled fill:** `prepare()` only pre-subscribed ATM CE/PE. Slot 5 uses `strike_premium=250`, so it
+  bought 25050 CE, which was not on the feed until after the fill (`held_keys`). Entry used the model. Fix:
+  `prepare(spot, now_ms)` also wants the strike-by-premium contract for LONG and SHORT. Tests:
+  `tests/test_paper_subscriptions.py` (5 slots on the feed; strike_premium wanted before fill).
+- **Slot 1 missing eod_check:** live file stayed at 15:30; eod was written to `data/paper/replay/2026-11-16.json`
+  (`start_source: auto`, `ended_by: replay finished`) because a post-close auto-start flipped the runner to
+  replay and `reconcile_check` saved via `save_dir`. Fix: `reconcile_check` always `_load_ended` from the live
+  file and forces `source=live` for that write. `paper_autostart` refuses to POST after give_up or after 15:30.
+  Reran the check for 16 Nov into the live file: 7/7, 0 differences / fill-driven / exchange-only.
+- **Backend ownership:** `data/live-state/backend.ownership` (pid + IST start date) written on app lifespan start,
+  cleared on shutdown. `session_start_guard` and `scripts/session_stop` (launchd 16:35) prefer it over pgrep so a
+  hand-started or oddly-named process is still recognised. Tests: `tests/test_backend_ownership.py`.
+- Slot 5 exit rule / "DD Quantman" naming: **not changed** — waiting on the user's reply (see chat).

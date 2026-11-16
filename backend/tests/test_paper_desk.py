@@ -67,7 +67,7 @@ def test_wanted_keys_are_the_union_and_an_unknown_slot_is_refused(tmp_path) -> N
     keys = d.wanted_keys()
     assert any("CE" in k for k in keys) and any("PE" in k for k in keys)
     with pytest.raises(UnknownSlot):
-        d.runner("5")
+        d.runner("9")
 
 
 def test_held_and_atm_keys_are_each_the_union_of_the_slots(tmp_path) -> None:

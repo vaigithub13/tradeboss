@@ -88,10 +88,19 @@ def run(
         return {}
     start_at = at_today(cfg.get("start_at_ist", "09:16"), now())
     give_up = at_today(cfg.get("give_up_at_ist", "09:45"), now())
+    session_end = at_today("15:30", now())
     if not start_now and now() < start_at:
         wait = (start_at - now()).total_seconds()
         log(f"waiting {wait / 60:.0f} min until {start_at:%H:%M} IST")
         sleep(wait)
+    # After the wait (or when spawned late by a flapping session-start): never POST a Start that would
+    # become a replay and steal the live day's eod_check (16 Nov 2026, slot 1).
+    if now() >= session_end:
+        log("session over (15:30 IST): not auto-starting (a Start now would be a replay)")
+        return {}
+    if now() >= give_up:
+        log(f"past give_up {give_up:%H:%M} IST: not starting (use the Paper panel if needed)")
+        return {}
     results: dict[str, str] = {}
     done: set[str] = set()
     while True:

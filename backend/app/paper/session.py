@@ -605,12 +605,27 @@ class PaperSession:
 
         return [trade_report_row(t, self.exit_rule) for t in self.book.trades]
 
-    def prepare(self, spot: float) -> None:
-        """Ask for the ATM call and put of the nearest weekly, so a signal finds its quote already subscribed.
-        The previous pair is released (a held contract stays wanted through `held_keys`)."""
+    def prepare(self, spot: float, now_ms: int | None = None) -> None:
+        """Ask for the contracts a signal would buy, so the feed already quotes them.
+
+        Default: the ATM call and put of the nearest weekly. With `strike_premium`, the strike whose model
+        premium is nearest that target (Quantman) — not only ATM — so a fill is not forced onto the model.
+        The previous pair is released (a held contract stays wanted through `held_keys`).
+        """
         atm: set[str] = set()
         for direction in ("LONG", "SHORT"):
-            key = self.key_for(self.choose(direction, spot, self.day).symbol)
+            contract = self.choose(direction, spot, self.day)
+            if (self.strike_premium is not None and self.model_price is not None and now_ms is not None):
+                base, price_at = contract, self.model_price
+                contract = strike_by_premium(
+                    base, self.strike_premium,
+                    lambda k, b=base, pa=price_at: pa(
+                        replace(b, strike=k, symbol=contract_symbol(_underlying(b.symbol), k, b.kind, b.expiry)),
+                        spot, now_ms,
+                    ),
+                    underlying=_underlying(base.symbol),
+                )
+            key = self.key_for(contract.symbol)
             if key is not None:
                 atm.add(key)
         self._atm = atm

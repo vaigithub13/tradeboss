@@ -44,11 +44,16 @@ def _startup_snapshot() -> None:
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     """Startup fallback for the launchd job: if today's instrument file is missing and it is past
     06:30 IST, fetch it in the background (never blocks or fails the start)."""
+    from app.ownership import clear, path_for, write as write_ownership
+
+    own_path = path_for(settings.live_state_dir)
     if settings.backend_log_file:
         from app.logsetup import configure_logging
 
         configure_logging(settings.data_dir / "logs")
         log.info("backend started (pid %d)", os.getpid())
+    own = write_ownership(own_path)
+    log.info("backend ownership %s (pid %d, started_on %s)", own_path, own.pid, own.started_on)
     if settings.snapshot_on_startup and snapshot_due(settings.instruments_dir):
         threading.Thread(target=_startup_snapshot, daemon=True).start()
     live = None
@@ -70,13 +75,16 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
         options_rec = build_options_scheduler()
         await options_rec.start()
-    yield
-    if options_rec is not None:
-        await options_rec.stop()
-    if gex is not None:
-        await gex.stop()
-    if live is not None:
-        await live.stop()
+    try:
+        yield
+    finally:
+        if options_rec is not None:
+            await options_rec.stop()
+        if gex is not None:
+            await gex.stop()
+        if live is not None:
+            await live.stop()
+        clear(own_path)
 
 
 app = FastAPI(title="Chart Analyser API", version="0.1.0", lifespan=lifespan)

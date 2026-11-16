@@ -26,8 +26,9 @@ def make(script: dict[int, str]) -> PaperSession:
 
 def step(s: PaperSession, h: int, m: int, close: float) -> None:
     """One exchange-final index minute, then the ATM pair at its close (as the live runner does)."""
-    s.on_index_minute(minute(h, m, close), now_ms=ist_ms(h, m))
-    s.prepare(close)
+    now = ist_ms(h, m)
+    s.on_index_minute(minute(h, m, close), now_ms=now)
+    s.prepare(close, now_ms=now)
 
 
 def k(strike: int, kind: str) -> str:
