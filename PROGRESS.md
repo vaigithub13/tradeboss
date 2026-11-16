@@ -1997,3 +1997,20 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
   this window).
 - Forward 2026-10-02..2026-11-13: S5 a/b/c +29,107 / +28,628 / +28,711 (19 trades); S6 a/b/c −11,003 / −6,279 /
   −936 (9 trades; trail10 0% wins). ≤2m exits: 0 on forward.
+
+
+## 16 Nov 2026 (evening) - S5 long trail10 follow-up (slot unchanged)
+
+- Slot 5 left as configured. Script `backend/scripts/dd_five_s5_followup.py`; report
+  `data/validation/dd_five_s5_followup_2026-11-16.md`. No backend started.
+- **Real-premium window** 2024-10-03..2026-06-30: 186 trades, win 34.4%, net ₹86,438, max DD ₹25,367;
+  real fills 368 / modelled 4 (per-leg entry+exit sources).
+- **Year/month** research 2022-01-03..2026-06-30: year nets 2022 ₹31,975 / 2023 ₹20,017 / 2024 ₹12,052 /
+  2025 ₹87,438 / 2026 ₹8,242; **25 of 54 months losing**.
+- **Leave top-N:** research full ₹159,724 → without top5 ₹76,054 / top10 ₹29,111; real-prem ₹86,438 →
+  ₹7,133 / −₹36,921; forward ₹29,107 → −₹3,253 / −₹10,632.
+- **Split-half** (mid 2024-04-01): first 310 trades, win 41.9%, net ₹63,418, DD ₹11,047; second 255,
+  win 32.9%, net ₹96,306, DD ₹25,367.
+- **Sensitivity** (report only; strike 200/250/300 × trail 8/10/12%): baseline 250/10% net ₹159,724.
+  Axis ±20%: strike 200 −15.9%, strike 300 +3.1%, trail 8% +3.6%, trail 12% −23.6%. **Plateau with soft
+  edge** (trail 12% softens; not a cliff). Slot stays at 250 / 10%.
