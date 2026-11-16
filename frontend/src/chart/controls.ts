@@ -4,7 +4,7 @@
  */
 import { initialRange, type LogicalRange } from "./view";
 
-export type MainView = "chart" | "options";
+export type MainView = "chart" | "options" | "paper";
 
 /** Bars shown on first load / Auto reset (matches ChartView). */
 export const INITIAL_VISIBLE_BARS = 150;
@@ -14,11 +14,11 @@ export const DEFAULT_BAR_SPACING = 6;
 export const DEFAULT_RIGHT_OFFSET = 5;
 
 /**
- * Options replaces the Chart *visually* only. Unmounting ChartView drops the LWC
+ * Options / Paper replace the Chart *visually* only. Unmounting ChartView drops the LWC
  * visible range and remounts into initialRange / a stale focus jump.
  */
 export function chartHidden(mainView: MainView): boolean {
-  return mainView === "options";
+  return mainView === "options" || mainView === "paper";
 }
 
 /** Default time window: last N bars plus right pad, scrolled to the live tip. */

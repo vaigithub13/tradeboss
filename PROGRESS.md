@@ -2034,3 +2034,16 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
   (EMP) vs ~72–74 (S5). Exits mostly stop (dyn 50 EMA), then square-off, then target.
 - **Sensitivity** ±20% EMA lengths / RR (research ATM): lengthening to 24/60 is a **cliff** (net −95k to
   −125k vs baseline −38k); RR ±20% milder. No slot added; no backend started.
+
+
+## 16 Nov 2026 (night) - Paper UI: compact panel + Paper dashboard tab
+
+- Frontend only. Compact Paper side panel (~360px): master ON/OFF, sounds/volume, today summary, live
+  cards for active slots **2/4/5/6** (1 and 3 Log XZ retired — history note only), “Open Paper dashboard →”.
+- New main tab **Chart | Options | Paper**: full dashboard with KPIs, slot cards, equity curve (LWC),
+  daily P&L, filterable/sortable/resizable trades + CSV, collapsible Details (params, shadow, start source,
+  sound tests). Tab + filters in localStorage (try/catch). Offline → “backend offline”.
+- Tests: `PaperPanel.test.tsx`, `PaperDashboard.test.tsx`, `dashboard.test.ts`, `slots.test.ts`; full
+  frontend suite 427 passed; typecheck clean. Screenshots under `docs/screenshots/paper-redesign/`.
+- Missing from APIs (shown —): live option LTP/bid premium; separate `trail` exit reason (trails → stop).
+  No backend / paper slots / strategies changed.

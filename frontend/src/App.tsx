@@ -15,8 +15,10 @@ import { LiveBadge } from "./panels/LiveBadge";
 import { SnapshotBadge } from "./panels/SnapshotBadge";
 import { PaperPanel } from "./panels/PaperPanel";
 import { PaperTrades } from "./panels/PaperTrades";
+import { PaperDashboard } from "./paper/PaperDashboard";
 import { usePaperTradesStore } from "./store/paperTradesStore";
 import { paperMarkers, type PaperSignal } from "./paper/present";
+import { PAPER_TAB_KEY, readJson, writeJson } from "./paper/storage";
 import { usePaperStore } from "./store/paperStore";
 import { usePaperAlerts } from "./paper/useAlerts";
 import { SessionsMenu } from "./panels/SessionsMenu";
@@ -55,7 +57,14 @@ const STATUS_UI: Record<BackendStatus, { label: string; dot: string; text: strin
 };
 
 export default function App() {
-  const [mainView, setMainView] = useState<MainView>("chart");
+  const [mainView, setMainView] = useState<MainView>(() => {
+    const saved = readJson<string>(PAPER_TAB_KEY, "chart");
+    return saved === "options" || saved === "paper" || saved === "chart" ? saved : "chart";
+  });
+  const setView = useCallback((view: MainView) => {
+    setMainView(view);
+    writeJson(PAPER_TAB_KEY, view);
+  }, []);
   const backendStatus = useBackendStore((s) => s.status);
   const poll = useBackendStore((s) => s.poll);
 
@@ -283,7 +292,7 @@ export default function App() {
             className={`rounded px-2.5 py-1 text-xs ${
               mainView === "chart" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
             }`}
-            onClick={() => setMainView("chart")}
+            onClick={() => setView("chart")}
             data-testid="tab-chart"
           >
             Chart
@@ -293,10 +302,20 @@ export default function App() {
             className={`rounded px-2.5 py-1 text-xs ${
               mainView === "options" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
             }`}
-            onClick={() => setMainView("options")}
+            onClick={() => setView("options")}
             data-testid="tab-options"
           >
             Options
+          </button>
+          <button
+            type="button"
+            className={`rounded px-2.5 py-1 text-xs ${
+              mainView === "paper" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
+            }`}
+            onClick={() => setView("paper")}
+            data-testid="tab-paper"
+          >
+            Paper
           </button>
         </div>
         {mainView === "chart" ? (
@@ -332,8 +351,11 @@ export default function App() {
         </button>
         <button
           type="button"
-          className="rounded border border-white/15 px-2 py-1 text-xs text-white/80"
+          className={`rounded border px-2 py-1 text-xs ${
+            paperOpen ? "border-sky-400/60 bg-sky-400/10 text-sky-200" : "border-white/15 text-white/80"
+          }`}
           onClick={() => setPaperOpen((open) => !open)}
+          data-testid="paper-side-toggle"
         >
           Paper
         </button>
@@ -366,8 +388,10 @@ export default function App() {
         </button>
         {status === "loading" && <span className="text-xs text-white/40">loading…</span>}
           </>
-        ) : (
+        ) : mainView === "options" ? (
           <span className="text-xs text-white/45">Nifty option chain</span>
+        ) : (
+          <span className="text-xs text-white/45">Paper forward-test desk</span>
         )}
         <div className="ml-auto flex items-center gap-2">
           <LiveBadge />
@@ -476,7 +500,14 @@ export default function App() {
           </div>
         )}
         {marketPanelOpen && <MarketViewPanel />}
-        {paperOpen && <PaperPanel />}
+        {paperOpen && (
+          <PaperPanel
+            onOpenDashboard={() => {
+              setPaperOpen(false);
+              setView("paper");
+            }}
+          />
+        )}
       </main>
       <BacktestResults />
       <PaperTrades />
@@ -493,6 +524,11 @@ export default function App() {
       {mainView === "options" && (
         <div className="absolute inset-0" data-testid="options-pane">
           <OptionsTab />
+        </div>
+      )}
+      {mainView === "paper" && (
+        <div className="absolute inset-0" data-testid="paper-pane">
+          <PaperDashboard />
         </div>
       )}
       </div>

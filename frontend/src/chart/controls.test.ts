@@ -9,10 +9,11 @@ import {
 } from "./controls";
 
 describe("chartHidden (tab switch)", () => {
-  it("hides the chart for Options without implying an unmount", () => {
+  it("hides the chart for Options and Paper without implying an unmount", () => {
     // Remounting ChartView was the root cause of jumping to a past date.
     expect(chartHidden("chart")).toBe(false);
     expect(chartHidden("options")).toBe(true);
+    expect(chartHidden("paper")).toBe(true);
   });
 });
 

@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Paper UI redesign fixtures</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font: 12px/1.4 ui-sans-serif, system-ui; background: #070a0f; color: rgba(255,255,255,0.8); }
+    .stage { display: none; min-height: 100vh; }
+    .stage.on { display: block; }
+    .bar { display: flex; gap: 8px; align-items: center; padding: 8px 12px; border-bottom: 1px solid rgba(255,255,255,0.1); }
+    .tab { padding: 4px 10px; border-radius: 4px; color: rgba(255,255,255,0.55); }
+    .tab.on { background: rgba(255,255,255,0.1); color: #fff; }
+    .row { display: flex; height: calc(100vh - 42px); }
+    .chart { flex: 1; background: linear-gradient(180deg, #0b1018, #121820); position: relative; }
+    .chart::after { content: "Chart / price scale"; position: absolute; right: 8px; top: 40%; writing-mode: vertical-rl; color: rgba(255,255,255,0.25); }
+    .panel-before {
+      width: 220px; overflow: hidden; border-left: 1px solid rgba(255,255,255,0.1);
+      background: #0b0f14; padding: 12px; white-space: nowrap;
+    }
+    .panel-before h2 { margin: 0 0 8px; font-size: 14px; }
+    .clip { color: #fff; margin: 6px 0; }
+    .panel-after {
+      width: 360px; max-width: 360px; overflow-x: hidden; overflow-y: auto;
+      border-left: 1px solid rgba(255,255,255,0.1); background: #0b0f14; padding: 12px;
+      box-sizing: border-box;
+    }
+    .card { border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 8px; margin: 8px 0; background: rgba(255,255,255,0.03); }
+    .pill { font-size: 10px; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; background: rgba(56,189,248,0.2); color: #bae6fd; }
+    .pos { color: #34d399; } .neg { color: #f87171; }
+    .dash { padding: 16px; max-width: 1200px; margin: 0 auto; }
+    .kpis { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+    .kpi { flex: 1; min-width: 120px; border: 1px solid rgba(255,255,255,0.1); border-radius: 6px; padding: 10px 12px; background: rgba(255,255,255,0.03); }
+    .kpi .v { font: 600 20px/1.2 ui-monospace, monospace; }
+    .grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+    @media (max-width: 1100px) { .grid { grid-template-columns: repeat(2, 1fr); } }
+  </style>
+</head>
+<body>
+  <!-- BEFORE: cramped side panel -->
+  <div id="before-panel" class="stage">
+    <div class="bar"><strong>TradeBoss</strong><span class="tab on">Chart</span><span class="tab">Options</span><span>Paper</span></div>
+    <div class="row">
+      <div class="chart"></div>
+      <aside class="panel-before">
+        <h2>Live signals (paper)</h2>
+        <div class="clip">aper) · Enable sounds · Volume ████</div>
+        <div class="clip">ot 2 Price Channel waiting today −1,234.50 trades 7 wins…</div>
+        <div class="clip">ession ended · params {"length":20,"exit_rule":"premium_1to2"} resting-orders shadow…</div>
+        <div class="clip">Strategy 1 Log XZ Test entry sound Test exit sound trade table overflow…</div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- AFTER: compact panel -->
+  <div id="after-panel" class="stage">
+    <div class="bar"><strong>TradeBoss</strong><span class="tab on">Chart</span><span class="tab">Options</span><span class="tab">Paper</span><span>Paper ▾</span></div>
+    <div class="row">
+      <div class="chart"></div>
+      <aside class="panel-after">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <strong style="color:#fff">Paper</strong>
+          <span class="pill" style="background:rgba(52,211,153,0.2);color:#a7f3d0">ON</span>
+          <span style="margin-left:auto;color:#6ee7b7">sounds on</span>
+        </div>
+        <div class="card" style="display:flex;justify-content:space-between">
+          <div><div style="font-size:10px;opacity:.5">TODAY</div><div class="pos" style="font-size:16px;font-weight:600">+2,404.63</div></div>
+          <div style="text-align:right;opacity:.7">7 trades<br/>3W / 4L · 42.9%</div>
+        </div>
+        <div class="card"><div style="display:flex;justify-content:space-between"><b>2 · Price Channel</b><span class="pill">waiting</span></div><div class="neg">−593.91 · 2 trades</div></div>
+        <div class="card"><div style="display:flex;justify-content:space-between"><b>4 · Price Channel 1:2</b><span class="pill">waiting</span></div><div class="pos">+872.88 · 2 trades</div></div>
+        <div class="card">
+          <div style="display:flex;justify-content:space-between"><b>5 · DD Quantman CE</b><span class="pill" style="background:rgba(245,158,11,0.25);color:#fde68a">in trade</span></div>
+          <div class="neg">−1,797.09 · 1 trades</div>
+          <div style="margin-top:6px;background:rgba(0,0,0,.3);padding:6px;border-radius:4px;font-size:11px">
+            <div style="display:flex;justify-content:space-between"><span>CE 25050</span><span class="neg">−1,800.29</span></div>
+            <div style="display:flex;justify-content:space-between;opacity:.6"><span>Entry 262.05</span><span>LTP —</span></div>
+            <div style="display:flex;justify-content:space-between;opacity:.6"><span>SL 235.85</span><span>TG —</span></div>
+          </div>
+        </div>
+        <div class="card"><div style="display:flex;justify-content:space-between"><b>6 · DD Quantman PE</b><span class="pill">waiting</span></div><div class="pos">+0.00 · 0 trades</div></div>
+        <div style="margin-top:12px;border:1px solid rgba(56,189,248,.4);background:rgba(14,165,233,.1);padding:10px;border-radius:6px;color:#e0f2fe">Open Paper dashboard →</div>
+      </aside>
+    </div>
+  </div>
+
+  <!-- AFTER: dashboard -->
+  <div id="after-dash" class="stage">
+    <div class="bar"><strong>TradeBoss</strong><span class="tab">Chart</span><span class="tab">Options</span><span class="tab on">Paper</span><span style="opacity:.45">Paper forward-test desk</span></div>
+    <div class="dash">
+      <h1 style="margin:0;color:#fff;font-size:18px">Paper dashboard</h1>
+      <p style="opacity:.45;margin:4px 0 0">Forward-test desk · no real orders · LIVE_TRADING stays false</p>
+      <div class="kpis">
+        <div class="kpi"><div style="font-size:10px;opacity:.45">TODAY NET ₹</div><div class="v pos">+2,404.63</div></div>
+        <div class="kpi"><div style="font-size:10px;opacity:.45">THIS WEEK NET ₹</div><div class="v pos">+8,120.00</div></div>
+        <div class="kpi"><div style="font-size:10px;opacity:.45">FORWARD-TEST TOTAL ₹</div><div class="v pos">+88,529.33</div></div>
+        <div class="kpi"><div style="font-size:10px;opacity:.45">WIN %</div><div class="v">44.2%</div></div>
+        <div class="kpi"><div style="font-size:10px;opacity:.45">TRADES TODAY</div><div class="v">7</div></div>
+        <div class="kpi"><div style="font-size:10px;opacity:.45">MAX DRAWDOWN</div><div class="v neg">−12,450.00</div></div>
+      </div>
+      <div class="grid">
+        <div class="card"><b>2 · Price Channel</b> <span class="pill">waiting</span><div class="neg">Today −593.91</div></div>
+        <div class="card"><b>4 · Price Channel 1:2</b> <span class="pill">waiting</span><div class="pos">Today +872.88</div></div>
+        <div class="card"><b>5 · DD Quantman CE</b> <span class="pill" style="background:rgba(245,158,11,0.25);color:#fde68a">in trade</span><div class="neg">Today −1,797.09</div></div>
+        <div class="card"><b>6 · DD Quantman PE</b> <span class="pill">waiting</span><div>Today +0.00</div></div>
+      </div>
+      <p style="opacity:.35;font-size:11px;margin-top:10px">Retired (history only): 1 Log XZ (retired) · 3 Log XZ 1:2 (retired)</p>
+      <div class="card" style="height:160px;margin-top:12px;display:flex;align-items:center;justify-content:center;opacity:.5">Equity curve · Daily P&L · Trades table</div>
+    </div>
+  </div>
+
+  <script>
+    const id = new URLSearchParams(location.search).get("view") || "after-panel";
+    document.getElementById(id)?.classList.add("on");
+  </script>
+</body>
+</html>

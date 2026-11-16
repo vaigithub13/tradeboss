@@ -1,327 +1,178 @@
-import { Fragment, useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 
-import { PAPER_SLOTS, fetchPaperWeek, fetchRealTrades, type PaperStatus, type PaperWeek } from "../api/paper";
-import { LogRealTrade } from "../paper/LogRealTrade";
-import { OrderHelperBox } from "../paper/OrderHelper";
-import { EXIT_RULES, SLOT_DEFAULTS, exitLabel, formatRupees, markLine, paperRows, parseParams, startParams } from "../paper/present";
-import { paperTradeKey, type RealTradeLog } from "../paper/real";
-import { exitCountsLine } from "../report/present";
-import { TradeReport } from "../report/TradeReport";
+import { ACTIVE_PAPER_SLOTS } from "../paper/slots";
+import { CompactLiveCard } from "../paper/CompactLiveCard";
+import { todaySummaryFromSlots } from "../paper/dashboard";
+import { formatRupees, SLOT_DEFAULTS, startParams } from "../paper/present";
+import { playAlertSound, unlockAudio } from "../paper/sounds";
 import { useAlertStore } from "../store/alertStore";
 import { usePaperStore } from "../store/paperStore";
-import { usePaperTradesStore } from "../store/paperTradesStore";
-import { useDragResize } from "../ui/useDragResize";
-import { playAlertSound, unlockAudio } from "../paper/sounds";
 
-const maxWidth = () => Math.max(320, Math.floor(window.innerWidth * 0.7));
+const PANEL_WIDTH = 360;
 
-const STRATEGIES = [
-  { name: "log_xz", label: "Log XZ (RMA 14, 5m)" },
-  { name: "price_channel", label: "Price Channel (length 20, 5m)" },
-  { name: "dd_five_confirm", label: "DD 5-confirmation (ST 10/2, RSI 70/30, R1/S1, BB 20/2; slot 5: Quantman, 3m)" },
-];
-
-/** Live signals (paper): six strategies side by side on the live feed, each with its own position and P&L. No orders.
- * Slots 1 and 2 are the week's comparison (no exits); 3 and 4 default to the same strategies with 1:2 premium exits;
- * slots 5 (calls) and 6 (puts) run the DD 5-confirmation system as in the user's Quantman run.
- * The status poll and the trade alerts run in App (usePaperAlerts), so they go on while this panel is closed. */
-export function PaperPanel() {
+/** Compact Paper side panel: header, today summary, live cards, link to dashboard. */
+export function PaperPanel({ onOpenDashboard }: { onOpenDashboard?: () => void }) {
   const status = usePaperStore((s) => s.status);
   const pollError = usePaperStore((s) => s.errors[""] ?? null);
-
-  const disabled = status?.state === "disabled";
-  const tradesOpen = usePaperTradesStore((s) => s.open);
-  const setTradesOpen = usePaperTradesStore((s) => s.setOpen);
-  const { size, onPointerDown } = useDragResize("paper.panel.width", 384, 280, maxWidth, "x", -1);
-
-  return (
-    <aside
-      className="relative flex h-full shrink-0 flex-col gap-3 overflow-y-auto border-l border-white/10 bg-[#0b0f14] p-3 text-xs text-white/80"
-      style={{ width: size }}
-    >
-      <div
-        role="separator"
-        aria-label="Resize the paper panel"
-        className="absolute inset-y-0 left-0 w-1.5 cursor-col-resize hover:bg-sky-500/30"
-        onPointerDown={onPointerDown}
-      />
-      <div>
-        <div className="flex items-center justify-between">
-          <h2 className="text-sm font-semibold text-white">Live signals (paper)</h2>
-          <button
-            type="button"
-            className="rounded border border-white/15 px-2 py-0.5"
-            onClick={() => setTradesOpen(!tradesOpen)}
-          >
-            Trades
-          </button>
-        </div>
-        <p className="text-white/50">No orders are sent. Fills are paper: live quotes, or the model flagged as modelled.</p>
-      </div>
-      <AlertControls />
-      {pollError && <div className="text-red-400">{pollError}</div>}
-      {disabled && <div className="text-yellow-300">The live feed is off, so paper trading cannot run.</div>}
-      {PAPER_SLOTS.map((slot) => (
-        <SlotSection key={slot} slot={slot} status={status?.slots.find((x) => x.slot === slot) ?? null} disabled={disabled} />
-      ))}
-    </aside>
-  );
-}
-
-function SlotSection({ slot, status, disabled }: { slot: string; status: PaperStatus | null; disabled: boolean }) {
-  const error = usePaperStore((s) => s.errors[slot] ?? null);
   const start = usePaperStore((s) => s.start);
   const stop = usePaperStore((s) => s.stop);
-  const [strategy, setStrategy] = useState(SLOT_DEFAULTS[slot]?.strategy ?? "log_xz");
-  const [exit, setExit] = useState(SLOT_DEFAULTS[slot]?.exit ?? "");
-  const [paramsText, setParamsText] = useState(SLOT_DEFAULTS[slot]?.params ?? "");
-  const [week, setWeek] = useState<PaperWeek | null>(null);
-  const [reals, setReals] = useState<Record<string, RealTradeLog>>({});
-  const day = status?.day ?? null;
-  const closed = status?.trades?.length ?? 0;
-  useEffect(() => {
-    if (!day) return;
-    let live = true;
-    fetchPaperWeek(slot, day).then((w) => live && setWeek(w)).catch(() => live && setWeek(null));
-    return () => {
-      live = false;
-    };
-  }, [slot, day, closed]);
-  useEffect(() => {
-    if (!day) return;
-    let live = true;
-    fetchRealTrades({ slot, from: day, to: day })
-      .then((r) => {
-        if (!live) return;
-        const map: Record<string, RealTradeLog> = {};
-        for (const row of r.rows) {
-          if (row.real) map[row.paper_key] = row.real;
-        }
-        setReals(map);
-      })
-      .catch(() => live && setReals({}));
-    return () => {
-      live = false;
-    };
-  }, [slot, day, closed]);
-  const running = status?.state === "running";
-  const starting = status?.state === "starting"; // catching up from the day's recording, off the feed's loop
-  const summary = status?.summary ?? null;
-  const parsed = parseParams(paramsText);
-  const shownParams = status?.params && Object.keys(status.params).length ? JSON.stringify(status.params) : "defaults";
+  const disabled = status?.state === "disabled";
 
-  return (
-    <section className="flex flex-col gap-2 rounded border border-white/10 p-2" aria-label={`Paper strategy ${slot}`}>
-      <h3 className="font-semibold text-white">Strategy {slot}</h3>
-      <div className="flex flex-wrap items-center gap-2">
-        <select
-          aria-label={`Strategy ${slot}`}
-          className="rounded border border-white/15 bg-transparent px-2 py-1"
-          value={running && status?.strategy ? status.strategy : strategy}
-          disabled={running}
-          onChange={(e) => setStrategy(e.target.value)}
-        >
-          {STRATEGIES.map((s) => (
-            <option key={s.name} value={s.name} className="bg-[#0b0f14]">
-              {s.label}
-            </option>
-          ))}
-        </select>
-        <select
-          aria-label={`Exit rule ${slot}`}
-          className="rounded border border-white/15 bg-transparent px-2 py-1"
-          value={running ? String(status?.params?.exit_rule ?? "") : exit}
-          disabled={running}
-          onChange={(e) => setExit(e.target.value)}
-        >
-          {EXIT_RULES.map((r) => (
-            <option key={r.name} value={r.name} className="bg-[#0b0f14]">
-              {r.label}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          className="rounded border border-white/15 px-3 py-1 disabled:opacity-40"
-          disabled={disabled || starting || (!running && parsed.params === undefined)}
-          onClick={() => void (running ? stop(slot) : start(slot, strategy, startParams(parsed.params ?? {}, exit)))}
-        >
-          {running ? "Stop" : starting ? "Starting…" : "Start"}
-        </button>
-      </div>
-      {running ? (
-        <div className="text-white/50">
-          params: {shownParams}
-          {exitLabel(status?.params) ? ` · exits: ${exitLabel(status?.params)}` : ""}
-        </div>
-      ) : (
-        <input
-          aria-label={`Params ${slot}`}
-          placeholder='params, e.g. {"z_length": 20} (blank = defaults)'
-          className="rounded border border-white/15 bg-transparent px-2 py-1 font-mono"
-          value={paramsText}
-          onChange={(e) => setParamsText(e.target.value)}
-        />
-      )}
-      {parsed.error && !running && <div className="text-yellow-300">{parsed.error}</div>}
-      <div className="text-white/60">
-        state: {status?.state ?? "…"}
-        {status?.ended_by ? ` (${status.ended_by})` : ""}
-        {status?.start_source === "auto" && <span className="ml-2">started: auto</span>}
-        {status?.start_source === "hand" && <span className="ml-2">started: by hand</span>}
-        {status?.source === "replay" && (
-          <span className="ml-2 text-amber-300">replay: started after the close, kept apart, not counted</span>
-        )}
-      </div>
-      <div>Open P&amp;L: {markLine(status?.mark ?? null)}</div>
-      <div>
-        Day: net {formatRupees(summary?.net ?? null)} · trades {summary?.trades ?? 0} · wins {summary?.wins ?? 0} ·
-        modelled legs {summary?.modelled_legs ?? 0}
-      </div>
-      {summary?.shadow_net != null && (
-        <div className="text-white/60">
-          Day shadow net (resting orders): {formatRupees(summary.shadow_net)} · difference{" "}
-          {formatRupees(summary.shadow_diff ?? 0)}
-        </div>
-      )}
-      <div className="text-white/60">Day exits: {exitCountsLine(summary?.exits)}</div>
-      {week && (
-        <div className="text-white/60">
-          Week {week.week}: net {formatRupees(week.totals.net)} · trades {week.totals.trades} · exits {exitCountsLine(week.exits)}
-          {week.totals.shadow_net != null &&
-            ` · shadow net ${formatRupees(week.totals.shadow_net)} (difference ${formatRupees(week.totals.shadow_diff ?? 0)})`}
-        </div>
-      )}
-      {error && <div className="text-red-400">{error}</div>}
-      {slot === "3" && <OrderHelperBox open={status?.position ?? null} slot="3" />}
-      {(slot === "5" || slot === "6") && (
-        <OrderHelperBox
-          open={status?.position ?? null}
-          slot={slot}
-          trailing="Trailing stop: for every +15% the premium gains, move your SL up by 10% of the entry (paper's SL above updates live). Sell when paper exits."
-        />
-      )}
+  const activeStatuses = useMemo(() => {
+    const bySlot = new Map((status?.slots ?? []).map((s) => [s.slot, s]));
+    return ACTIVE_PAPER_SLOTS.map((slot) => bySlot.get(slot) ?? null);
+  }, [status]);
 
-      <table className="w-full table-fixed text-left tabular-nums">
-        <colgroup>
-          <col className="w-12" />
-          <col className="w-11" />
-          <col className="w-[4.75rem]" />
-          <col className="w-20" />
-          <col />
-        </colgroup>
-        <thead className="text-white/40">
-          <tr>
-            <th className="py-1 pr-2 font-normal">Time</th>
-            <th className="pr-2 font-normal">Side</th>
-            <th className="pr-2 text-right font-normal">Index</th>
-            <th className="pr-2 font-normal">Contract</th>
-            <th className="text-right font-normal">Fill</th>
-          </tr>
-        </thead>
-        <tbody>
-          {paperRows(status?.signals ?? []).map((r, i) => (
-            <Fragment key={i}>
-              <tr className="border-t border-white/5 align-top">
-                <td className="pt-1 pr-2">{r.time}</td>
-                <td className="pt-1 pr-2">{r.side}</td>
-                <td className="pt-1 pr-2 text-right">{r.index}</td>
-                <td className="truncate pt-1 pr-2" title={r.contract}>{r.contract}</td>
-                <td className="whitespace-nowrap pt-1 text-right">{r.fill}</td>
-              </tr>
-              <tr>
-                <td colSpan={5} className="pb-1 text-white/50">{r.note}</td>
-              </tr>
-            </Fragment>
-          ))}
-        </tbody>
-      </table>
-      <TradeReport
-        rows={status?.report ?? []}
-        counts={summary?.exits}
-        afterRow={day ? (row) => {
-          const key = paperTradeKey(slot, day, row.fill_time);
-          return (
-            <LogRealTrade
-              slot={slot}
-              day={day}
-              row={row}
-              existing={reals[key] ?? null}
-              onSaved={(trade) => setReals((m) => ({ ...m, [trade.key]: trade }))}
-            />
-          );
-        } : undefined}
-      />
-    </section>
-  );
-}
-
-/** Sound and notification alerts for live paper entries and exits. */
-function AlertControls() {
-  const soundOn = useAlertStore((s) => s.soundOn);
-  const volume = useAlertStore((s) => s.volume);
-  const slots = useAlertStore((s) => s.slots);
-  const setSoundOn = useAlertStore((s) => s.setSoundOn);
-  const setVolume = useAlertStore((s) => s.setVolume);
-  const setSlot = useAlertStore((s) => s.setSlot);
-  const [permission, setPermission] = useState<string>(() =>
-    typeof Notification === "undefined" ? "unsupported" : Notification.permission,
+  const summary = useMemo(
+    () => todaySummaryFromSlots(status?.slots?.filter((s) => ACTIVE_PAPER_SLOTS.includes(s.slot as never)) ?? []),
+    [status],
   );
 
-  const enable = async () => {
-    setSoundOn(await unlockAudio());
-    if (typeof Notification !== "undefined" && Notification.permission === "default") {
-      setPermission(await Notification.requestPermission());
+  const anyRunning = activeStatuses.some((s) => s?.state === "running" || s?.state === "starting");
+
+  const masterToggle = async () => {
+    if (anyRunning) {
+      for (const s of activeStatuses) {
+        if (s && (s.state === "running" || s.state === "starting")) await stop(s.slot);
+      }
+      return;
+    }
+    for (const slot of ACTIVE_PAPER_SLOTS) {
+      const def = SLOT_DEFAULTS[slot];
+      if (!def) continue;
+      const cur = activeStatuses.find((s) => s?.slot === slot);
+      if (cur?.state === "running" || cur?.state === "starting") continue;
+      await start(slot, def.strategy, startParams(def.params ? JSON.parse(def.params) : {}, def.exit));
     }
   };
 
   return (
-    <section className="flex flex-col gap-2 rounded border border-white/10 p-2" aria-label="Trade alerts">
-      <div className="flex flex-wrap items-center gap-2">
-        <span className="font-semibold text-white">Alerts</span>
-        {soundOn ? (
-          <span className="text-emerald-300">sounds on</span>
-        ) : (
-          <span className="rounded bg-amber-500/20 px-1.5 text-amber-300">sounds OFF</span>
-        )}
-        {!soundOn && (
-          <button type="button" className="rounded border border-amber-400/60 px-2 py-0.5 text-amber-200" onClick={() => void enable()}>
-            Enable sounds
-          </button>
-        )}
-        <span className="text-white/50">
-          notifications: {permission === "granted" ? "on" : permission === "denied" ? "blocked in the browser" : permission === "unsupported" ? "not supported" : "off"}
-        </span>
+    <aside
+      className="relative flex h-full min-w-0 shrink-0 flex-col gap-3 overflow-x-hidden overflow-y-auto border-l border-white/10 bg-[#0b0f14] p-3 text-xs text-white/80"
+      style={{ width: PANEL_WIDTH, maxWidth: PANEL_WIDTH }}
+      data-testid="paper-side-panel"
+      aria-label="Paper side panel"
+    >
+      <header className="flex min-w-0 flex-wrap items-center gap-2">
+        <h2 className="shrink-0 text-sm font-semibold text-white">Paper</h2>
+        <button
+          type="button"
+          className={`rounded border px-2 py-0.5 text-[11px] ${
+            anyRunning ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-200" : "border-white/15 text-white/70"
+          }`}
+          disabled={disabled}
+          onClick={() => void masterToggle()}
+          data-testid="paper-master-toggle"
+          title={anyRunning ? "Stop all active slots" : "Start all active slots"}
+        >
+          {anyRunning ? "ON" : "OFF"}
+        </button>
+        <AlertHeaderBits />
+      </header>
+
+      {pollError && (
+        <div className="rounded border border-red-500/30 bg-red-950/40 px-2 py-1 text-red-300" data-testid="paper-panel-error">
+          {pollError.includes("fetch") || pollError.includes("Network") || pollError.includes("Failed")
+            ? "backend offline"
+            : pollError}
+        </div>
+      )}
+      {disabled && (
+        <div className="text-yellow-300">Live feed off — paper cannot run.</div>
+      )}
+
+      <div
+        className="flex min-w-0 items-baseline justify-between gap-2 rounded border border-white/10 bg-white/[0.03] px-2 py-1.5"
+        data-testid="paper-today-summary"
+      >
+        <div className="min-w-0">
+          <div className="text-[10px] uppercase tracking-wide text-white/40">Today</div>
+          <div className={`truncate text-base font-semibold tabular-nums ${summary.net < 0 ? "text-red-400" : "text-emerald-400"}`}>
+            {formatRupees(summary.net)}
+          </div>
+        </div>
+        <div className="shrink-0 text-right text-white/55 tabular-nums">
+          <div>{summary.trades} trades</div>
+          <div>
+            {summary.wins}W / {summary.losses}L
+            {summary.winPct != null ? ` · ${summary.winPct}%` : ""}
+          </div>
+        </div>
       </div>
-      <label className="flex items-center gap-2">
-        Volume
+
+      <div className="flex min-w-0 flex-col gap-2">
+        {ACTIVE_PAPER_SLOTS.map((slot, i) => (
+          <CompactLiveCard key={slot} slot={slot} status={activeStatuses[i] ?? null} />
+        ))}
+      </div>
+
+      <button
+        type="button"
+        className="mt-auto rounded border border-sky-400/40 bg-sky-500/10 px-3 py-2 text-left text-sky-100 hover:bg-sky-500/20"
+        onClick={onOpenDashboard}
+        data-testid="open-paper-dashboard"
+      >
+        Open Paper dashboard →
+      </button>
+    </aside>
+  );
+}
+
+function AlertHeaderBits() {
+  const soundOn = useAlertStore((s) => s.soundOn);
+  const volume = useAlertStore((s) => s.volume);
+  const setSoundOn = useAlertStore((s) => s.setSoundOn);
+  const setVolume = useAlertStore((s) => s.setVolume);
+  const [busy, setBusy] = useState(false);
+
+  const enable = async () => {
+    setBusy(true);
+    try {
+      setSoundOn(await unlockAudio());
+      if (typeof Notification !== "undefined" && Notification.permission === "default") {
+        await Notification.requestPermission();
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+      {!soundOn ? (
+        <button
+          type="button"
+          className="rounded border border-amber-400/50 px-1.5 py-0.5 text-[11px] text-amber-200"
+          disabled={busy}
+          onClick={() => void enable()}
+        >
+          Enable sounds
+        </button>
+      ) : (
+        <span className="text-[11px] text-emerald-300">sounds on</span>
+      )}
+      <label className="flex items-center gap-1 text-[11px] text-white/50">
+        <span className="sr-only">Volume</span>
         <input
           type="range"
           min={0}
           max={100}
           aria-label="Alert volume"
+          className="w-16"
           value={Math.round(volume * 100)}
           onChange={(e) => setVolume(Number(e.target.value) / 100)}
         />
-        <span className="w-8 tabular-nums">{Math.round(volume * 100)}%</span>
       </label>
-      <div className="flex flex-wrap items-center gap-3">
-        {PAPER_SLOTS.map((slot) => (
-          <label key={slot} className="flex items-center gap-1">
-            <input type="checkbox" checked={slots[slot] !== false} onChange={(e) => setSlot(slot, e.target.checked)} />
-            Slot {slot}
-          </label>
-        ))}
-      </div>
-      <div className="flex flex-wrap gap-2">
-        <button type="button" className="rounded border border-white/15 px-2 py-0.5 disabled:opacity-40" disabled={!soundOn} onClick={() => playAlertSound("entry", volume)}>
-          Test entry sound
+      {soundOn && (
+        <button
+          type="button"
+          className="rounded border border-white/15 px-1 py-0.5 text-[10px] text-white/50"
+          title="Quick test (full test buttons are on the dashboard Details)"
+          onClick={() => playAlertSound("entry", volume)}
+        >
+          ♪
         </button>
-        <button type="button" className="rounded border border-white/15 px-2 py-0.5 disabled:opacity-40" disabled={!soundOn} onClick={() => playAlertSound("exit", volume)}>
-          Test exit sound
-        </button>
-      </div>
-      <div className="text-white/40">Live trades only: never a replay, or the catch-up of a late Start.</div>
-    </section>
+      )}
+    </div>
   );
 }
