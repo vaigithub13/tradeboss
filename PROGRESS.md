@@ -1889,3 +1889,79 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest):
   (`data/validation/dd_five_confirm_pe_2026-11-15.md`). The desk has 6 slots now.
 - Order helper for slots 5 and 6 (as slot 3's): a table with BUY CE/PE, strike, paper entry, lots, the current (trailing)
   stop and "no target", plus the copy fields. `contractParts` reads the strike and kind from the contract symbol.
+
+
+## 16 Nov 2026 - Daily close (Mon)
+
+Backend pid 55496 from 08:52:48 (hand / recovered after a messy launchd morning — see Automatic start) still listening
+on :8000 at 17:05; `session-stop` at 16:35 logged "no session backend" and did not SIGINT it. Slots 1–5 (and slot 6)
+warm 500 bars; slots 1–4 closed 75 5m bars, slot 5 closed 125 3m bars; 0 incomplete / late / given-up. Every signal and
+trade `live`. Settings unchanged. Nifty opened 25206.15, high 25337.60, low 25172.10, was 25220.05 at the 15:15
+square-off and closed 25291.10 (day range 165.5 points). Expiry 17 Nov (DTE 1), lot 65. Feed live 08:55–15:40, then
+15:50–16:00; 16:10 off. No reconnect warnings in the day log. Slot 6 (puts-only DD) had 0 trades — not expanded below.
+
+Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
+- Slot 1 (Log XZ): 10:45 sell → fill 10:51 at Nifty 25202.25, 25200 PE 96.60 / 97.10; reverse 11:16 at 25226.35, 80.00 /
+  80.35; net −1,139.02 / −1,148.82. 11:10 buy → 11:16 at 25226.35, 25250 CE 90.20 / 89.90; reverse 11:26 at 25215.50,
+  84.75 / 85.15; net −414.67 / −369.22. 11:20 sell → 11:26 at 25215.50, 25200 PE 84.75 / 84.35; reverse 11:41 at
+  25227.25, 77.75 / 77.45; net −514.40 / −507.84. 11:35 buy → 11:41 at 25227.25, 25250 CE 85.75 / 85.50; reverse 11:56
+  at 25235.10, 88.80 / 88.85; net +137.44 / +156.96. 11:50 sell → 11:56 at 25235.10, 25250 PE 95.50 / 95.50; reverse
+  12:06 at 25252.45, 87.30 / 87.30; net −593.91 / −593.91. 12:00 buy → 12:06 at 25252.45, 25250 CE 95.30 / 95.55;
+  reverse 13:41 at 25251.00, 91.15 / 91.15; net −331.14 / −347.40. 13:35 sell → 13:41 at 25251.00, 25250 PE 83.00 /
+  83.35; square-off 15:15 at 25217.35, 93.00 / 92.95; net +588.74 / +562.75. All legs real quotes. No stop/target
+  levels (reversal exits).
+- Slot 2 (Price Channel 20): 09:35 buy stop 25310.75, filled 09:45:25 at Nifty 25311.15, 25300 CE 114.40 / 113.03;
+  reverse 13:36:18 at 25230.65, 61.75 / 60.65; net −3,480.51 / −3,462.50. 13:30 sell stop 25230.65, filled 13:36:18,
+  25250 PE 92.00 / 93.40; square-off 15:15 at 25217.35, 93.00 / 92.95; net +3.49 / −90.80.
+- Slot 3 (Log XZ, 1:2 premium): same entries as slot 1. 25200 PE stop 77.28 / 77.68, target 135.24 / 135.94; stop hit
+  11:01:36 at Nifty 25236.75, exit 77.15 / 77.48; net −1,323.91 / −1,335.01, R −1.05 / −1.06. CE stop 72.16 / 71.92,
+  target 126.28 / 125.86; reverse 11:26, −414.67 / −369.22, R −0.35 / −0.32. PE stop 67.80 / 67.48, target 118.65 /
+  118.09; reverse 11:41, −514.40 / −507.84, R −0.47 / −0.46. CE stop 68.60 / 68.40, target 120.05 / 119.70; reverse
+  11:56, +137.44 / +156.96, R +0.12 / +0.14. PE stop 76.40 / 76.40, target 133.70 / 133.70; reverse 12:06, −593.91 /
+  −593.91, R −0.48 / −0.48. CE stop 76.24 / 76.44, target 133.42 / 133.77; target 12:10:13 at Nifty 25295.00, exit
+  136.00 / 133.57; net +2,578.52 / +2,404.63, R +2.08 / +1.94. PE stop 66.40 / 66.68, target 116.20 / 116.69; paper
+  target 13:54 at Nifty 25200.65, exit 114.00 (tick), net +1,951.13, R +1.81; shadow at 13:53 would have filled 116.20
+  (bar high 116.75), shadow net +2,093.86 (diff +142.73 vs paper). Backtest exit 13:53 at 116.49, net +2,089.92, R
+  +1.93.
+- Slot 4 (Price Channel 20, 1:2 premium): same entries as slot 2. CE stop 91.52 / 90.42, target 160.16 / 158.24; stop
+  10:24:17 at Nifty 25277.30, exit 91.50 / 90.22; net −1,550.47 / −1,544.15, R −1.04 / −1.05. PE stop 73.60 / 74.72,
+  target 128.80 / 130.76; target 14:03:59 at Nifty 25176.70, exit 130.30 / 130.56; net +2,423.35 / +2,349.16, R +2.03
+  / +1.94.
+- Slot 5 (DD 5-Confirmation Quantman, 3m, long_only, strike_premium ~250, premium_trail_10) — **first live day**:
+  09:18 buy → fill 09:22 at Nifty 25266.55, 25050 CE entry 262.35 modelled / 262.05; trail stop 236.12 / 235.85 (no
+  fixed target); stop 09:22:54 at Nifty 25240.95, exit 236.00 / 235.65; net −1,797.09 / −1,800.29, R −1.05 / −1.06.
+  One modelled entry leg. Paper eod_check: 1/1 live vs backtest trades, 0 differences, 0 fill-driven, 0 exchange-only
+  — **paper matches backtest for today** (same signal, contract, stop exit; ~₹3 net gap from modelled vs tape premium).
+- Today: slot 1 −2,266.96 (7 trades, 2 wins; reversal 6, square-off 1) / bt −2,247.48; slot 2 −3,477.02 (2, 1;
+  reversal 1, square-off 1) / bt −3,553.30; slot 3 +1,820.20 (7, 3; target 2, stop 1, reversal 4) / bt +1,845.53;
+  slot 4 +872.88 (2, 1; target 1, stop 1) / bt +805.01; slot 5 −1,797.09 (1, 0; stop 1) / bt −1,800.29.
+- Running (live days 8, 9, 12 Oct, 2–6 + 9 + 11–13 + 16 Nov; target/stop/reversal/square-off; **13 Nov** was a live
+  day with day files but no prior close note — nets −5,739.06 / −4,466.56 / −4,016.60 / −2,455.43 for slots 1–4):
+  slot 1 +31,757.26 (41 trades, 18 wins; 0/0/29/12), slot 2 +33,717.12 (27, 13; 0/0/14/13), slot 3 +14,913.10 (40, 17;
+  12/12/13/3), slot 4 +9,938.94 (26, 12; 8/8/5/5), slot 5 −1,797.09 (1, 0; 0/1/0/0; from today only). Shadow
+  difference (shadow net − paper net): slot 3 +120.68 (4 shadows; +142.73 today), slot 4 −117.43 (1, unchanged), all
+  +3.25 (5). Vacation backtest (13–30 Oct) still excluded.
+- Live vs backtest (end-of-day check; real / fill-driven / exchange-only): slots 2–5 wrote eod_check at 15:45 —
+  2/2, 7/7, 2/2, 1/1 trades; each 0 differences, 0 fill-driven; slot 3 has **1 exchange-only** (25250 PE target: bar
+  13:53 high 116.75 crossed paper target 116.20 with no feed tick; paper exited 13:54 at 114.00, shadow/backtest
+  13:53). **Slot 1 day file has no `eod_check`** (file mtime 15:30; slots 2–6 updated 15:45) — offline recompute:
+  7/7 same signals and exit times, premium-only gaps (real quote vs option bar) → treat as fill-driven, no
+  exchange-only, no structural mismatch. Ask before patching why slot 1 skipped reconcile_check.
+- Spreads 16 Nov, ATM, DTE 1: median 0.20 / p90 0.30; one-side 1-lot fill 0.10 (both), round trip ≈ ₹13.00. Since
+  6 Oct (15 days: DTE 0, 3–4, 2, 1, 1, 0, 3–4, 2, 1, 1, 0, 3–4, 3–4, 2, 1): mean one-side 0.143, round trip ₹18.63.
+  Paper's own legs today: ~0.11 (slot 1), ~0.12 (slots 2–3), 0.125 (slot 4), 0.20 (slot 5 modelled). Spread depth
+  ~44.8k ATM snapshots in the day report.
+- Reconcile: 16 Nov `intraday_reconciled` (Nifty, VIX 0 differences; 61471 1 difference, the 09:15 volume 114,465 vs
+  119,080; 16 expected). Option capture 15:45: 17 Nov expiry, 15 strikes, 30 stored, 0 empty, 0 failed. Spread report
+  written. Paper eod_check written for slots 2–6 only (slot 1 missing — above).
+- Health: one trading backend from 08:52 (pid 55496) through the session; feed as above; 0 option-cap refusals with
+  all six slots subscribed. No late / incomplete / given-up paper bars. Session gate: listed trading day. Snapshot
+  08:30 saved. `session-stop` did not clear :8000 (still up at close report time).
+- Automatic start: launchd `session-start` from 08:40 looped all day on "backend on :8000 started on an unknown day"
+  → stop failed → "port still listening, not starting a second backend" (exit 1 → retry every minute through 15:30).
+  Each attempt also spawned `paper-autostart` (hence "already running" lines until ~15:29). Actual session process
+  appeared at 08:52:48 (pid 55496); feed live 08:55. Paper slots POSTed by hand ~08:46 (early, against a prior
+  listener) and again 08:53:56 / 08:54:00 for slots 5–6 (`start_source: hand` on all day files). Autostart at 09:16
+  found all six already running. **Broken enough to ask before fixing:** (1) session_start_guard "unknown day" when
+  something listens on :8000 without a matching `app.serve` pid / parseable lstart; (2) session-stop not owning that
+  process; (3) slot 1 missing eod_check after option capture.
