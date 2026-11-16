@@ -240,6 +240,16 @@ export const CATALOG: Record<IndicatorType, IndicatorDef> = {
           { value: "off", label: "Off" },
         ],
       },
+      {
+        key: "show_past_days",
+        label: "Show past days",
+        kind: "choice",
+        default: "off",
+        options: [
+          { value: "off", label: "Off" },
+          { value: "on", label: "On" },
+        ],
+      },
     ],
     colors: [
       { key: "box", label: "Box fill", default: "#2962ff" },

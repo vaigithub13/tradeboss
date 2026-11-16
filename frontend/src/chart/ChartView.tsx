@@ -47,7 +47,18 @@ import { clipSeries, seriesThroughCursor } from "../replay/cap";
 import { fetchFvg } from "../draw/api";
 import { bindDrawings, type DrawBag } from "../draw/bind";
 import { DrawPrimitive, FirstHourBoxPrimitive, FvgPrimitive } from "../draw/primitive";
-import { FirstHourBoxHud, fhbSettings, formatBoxAxisLabel, useFirstHourBox } from "../indicators/FirstHourBoxLayer";
+import {
+  FirstHourBoxHud,
+  FirstHourBoxMarkerTip,
+  fhbSettings,
+  formatBoxAxisLabel,
+  useFirstHourBox,
+} from "../indicators/FirstHourBoxLayer";
+import {
+  markerLetter,
+  resolveSessionLineEnd,
+  selectFhbPaintBoxes,
+} from "../indicators/firstHourBox";
 import type { GexResponse } from "../api/gex";
 import { gexBars } from "./gex";
 import { GexPrimitive } from "./gexPrimitive";
@@ -364,6 +375,19 @@ export function ChartView({
   const fhbEnabled = Boolean(fhbItem);
   const fhbOpts = fhbSettings(fhbItem);
   const fhbResult = useFirstHourBox(candles, timeframe, cursor, fhbEnabled, fhbOpts.maxWidth);
+  const fhbAsOf = useMemo(() => {
+    if (!candles.length) return null;
+    const last = candles[candles.length - 1]!.time;
+    return cursor != null ? Math.min(cursor, last) : last;
+  }, [candles, cursor]);
+  const fhbPaint = useMemo(
+    () => selectFhbPaintBoxes(fhbResult.boxes, { showPastDays: fhbOpts.showPastDays, asOf: fhbAsOf }),
+    [fhbResult.boxes, fhbOpts.showPastDays, fhbAsOf],
+  );
+  const fhbHoverMarker = useMemo(() => {
+    if (!fhbEnabled || !fhbOpts.markers || hoverTime == null) return null;
+    return fhbPaint.paint.flatMap((b) => b.markers).find((m) => m.time === hoverTime) ?? null;
+  }, [fhbEnabled, fhbOpts.markers, hoverTime, fhbPaint.paint]);
 
   const mergedMarkers = useMemo(() => {
     const colorFor = (m: (typeof fhbResult.markers)[number]): string => {
@@ -373,15 +397,21 @@ export function ChartView({
       if (m.kind === "ACCEPTED") return m.side === "below" ? fhbOpts.colors.accepted_down : fhbOpts.colors.accepted_up;
       return m.color;
     };
-    const fhbMarkers: SeriesMarker<Time>[] = fhbOpts.markers
-      ? fhbResult.markers.map((m) => ({
+    const visibleMarkers = fhbPaint.paint.flatMap((b) => b.markers);
+    const fhbMarkers: SeriesMarker<Time>[] = [];
+    if (fhbOpts.markers) {
+      for (const m of visibleMarkers) {
+        const letter = markerLetter(m.kind);
+        if (!letter) continue;
+        fhbMarkers.push({
           time: m.time as UTCTimestamp,
           position: m.side === "below" || m.kind === "FAILED" ? "belowBar" : "aboveBar",
           shape: m.kind === "FAILED" ? "circle" : m.side === "below" ? "arrowDown" : "arrowUp",
           color: colorFor(m),
-          text: m.label,
-        }))
-      : [];
+          text: letter,
+        });
+      }
+    }
     const byTime = new Map<number, SeriesMarker<Time>>();
     for (const m of [...markers, ...fhbMarkers]) {
       const t = Number(m.time);
@@ -391,7 +421,7 @@ export function ChartView({
     return [...byTime.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([, m]) => m);
-  }, [markers, fhbResult.markers, fhbOpts]);
+  }, [markers, fhbPaint.paint, fhbOpts]);
 
   useEffect(() => {
     const series = candleSeriesRef.current;
@@ -407,52 +437,59 @@ export function ChartView({
       primitive.setBoxes([]);
       return;
     }
+    const currentDay = fhbPaint.current?.day;
     primitive.setBoxes(
-      fhbResult.boxes.map((box) => ({
-        startTime: box.startTime,
-        shadeEndTime: box.forming ? (cursor ?? box.shadeEndTime) : box.shadeEndTime,
-        lineEndTime: box.sessionEndTime,
-        high: box.high,
-        low: box.low,
-        mid: box.mid,
-        forming: box.forming,
-        tooWide: box.tooWide,
-        boxColor: fhbOpts.colors.box,
-        highColor: fhbOpts.colors.high,
-        lowColor: fhbOpts.colors.low,
-        midColor: fhbOpts.colors.mid,
-        formingLabel: "Box forming",
-        tooWideLabel: "Box too wide – Strategy C off",
-      })),
+      fhbPaint.paint.map((box) => {
+        const shadeEnd = box.forming
+          ? resolveSessionLineEnd(candles, box.startTime, Math.min(cursor ?? box.shadeEndTime, box.shadeEndTime))
+          : resolveSessionLineEnd(candles, box.startTime, box.shadeEndTime);
+        const lineEnd = resolveSessionLineEnd(candles, box.startTime, box.sessionEndTime);
+        return {
+          startTime: box.startTime,
+          shadeEndTime: shadeEnd,
+          lineEndTime: lineEnd,
+          high: box.high,
+          low: box.low,
+          mid: box.mid,
+          forming: box.forming,
+          opacity: box.day === currentDay ? 1 : 0.4,
+          boxColor: fhbOpts.colors.box,
+          highColor: fhbOpts.colors.high,
+          lowColor: fhbOpts.colors.low,
+          midColor: fhbOpts.colors.mid,
+          formingLabel: "Box forming",
+        };
+      }),
     );
-  }, [fhbEnabled, fhbResult.boxes, fhbOpts.colors, cursor]);
+  }, [fhbEnabled, fhbPaint, fhbOpts.colors, cursor, candles]);
 
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
     for (const line of priceLinesRef.current) series.removePriceLine(line);
     const axisLevels = [...levels];
-    if (fhbEnabled) {
-      const latest = [...fhbResult.boxes].reverse().find((b) => !b.forming) ?? fhbResult.boxes[fhbResult.boxes.length - 1];
-      if (latest) {
-        axisLevels.push(
-          { price: latest.high, title: formatBoxAxisLabel("BOX H", latest.high), color: fhbOpts.colors.high },
-          { price: latest.low, title: formatBoxAxisLabel("BOX L", latest.low), color: fhbOpts.colors.low },
-          { price: latest.mid, title: "MID", color: fhbOpts.colors.mid },
-        );
-      }
+    // Axis labels only for the current day; lineVisible false so H/L/Mid stay day-clipped in the primitive.
+    const current = fhbPaint.current;
+    if (fhbEnabled && current && !current.forming) {
+      axisLevels.push(
+        { price: current.high, title: formatBoxAxisLabel("BOX H", current.high), color: fhbOpts.colors.high },
+        { price: current.low, title: formatBoxAxisLabel("BOX L", current.low), color: fhbOpts.colors.low },
+        { price: current.mid, title: "MID", color: fhbOpts.colors.mid },
+      );
     }
-    priceLinesRef.current = axisLevels.map((level) =>
-      series.createPriceLine({
+    priceLinesRef.current = axisLevels.map((level) => {
+      const isFhb = level.title === "MID" || level.title.startsWith("BOX");
+      return series.createPriceLine({
         price: level.price,
         color: level.color,
         lineWidth: 1,
-        lineStyle: level.title === "MID" ? LineStyle.Dotted : level.title.startsWith("BOX") ? LineStyle.Solid : LineStyle.Dashed,
+        lineStyle: level.title === "MID" ? LineStyle.Dotted : isFhb ? LineStyle.Solid : LineStyle.Dashed,
+        lineVisible: !isFhb,
         axisLabelVisible: true,
         title: level.title,
-      }),
-    );
-  }, [levels, candles, fhbEnabled, fhbResult.boxes, fhbOpts.colors]);
+      });
+    });
+  }, [levels, candles, fhbEnabled, fhbPaint.current, fhbOpts.colors]);
 
   useEffect(() => {
     const primitive = gexPrimitiveRef.current;
@@ -864,7 +901,13 @@ export function ChartView({
           »
         </button>
       )}
-      <FirstHourBoxHud result={fhbResult} enabled={fhbEnabled} showPanel={fhbOpts.statusPanel} />
+      <FirstHourBoxHud
+        result={fhbResult}
+        enabled={fhbEnabled}
+        showPanel={fhbOpts.statusPanel}
+        asOf={fhbAsOf}
+      />
+      <FirstHourBoxMarkerTip marker={fhbHoverMarker} enabled={fhbEnabled && fhbOpts.markers} />
       {tradeCard}
     </div>
   );

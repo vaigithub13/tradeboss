@@ -606,22 +606,22 @@ export interface FirstHourBoxPaint {
   startTime: number;
   /** shade end (10:15 when locked; live edge while forming) */
   shadeEndTime: number;
-  /** line end (15:30 when locked) */
+  /** line end — last in-session bar that day (never past 15:30 / into next day) */
   lineEndTime: number;
   high: number;
   low: number;
   mid: number;
   forming: boolean;
-  tooWide: boolean;
+  /** 1 = current day; ~0.4 = past days when "Show past days" is on */
+  opacity: number;
   boxColor: string;
   highColor: string;
   lowColor: string;
   midColor: string;
   formingLabel: string;
-  tooWideLabel: string;
 }
 
-/** Forming dashed fade + locked 09:15–10:15 shade + H/L/Mid lines to 15:30. */
+/** Forming dashed fade + locked 09:15–10:15 shade + H/L/Mid lines clipped to that day only. */
 export class FirstHourBoxPrimitive implements ISeriesPrimitive {
   boxes: readonly FirstHourBoxPaint[] = [];
   private chart: Chart | null = null;
@@ -632,7 +632,7 @@ export class FirstHourBoxPrimitive implements ISeriesPrimitive {
   constructor() {
     const renderer: IPrimitivePaneRenderer = {
       draw: (target: CanvasRenderingTarget2D) => {
-        target.useMediaCoordinateSpace(({ context, mediaSize }) => this.paint(context, mediaSize.width));
+        target.useMediaCoordinateSpace(({ context }) => this.paint(context));
       },
     };
     this.views = [{ renderer: () => renderer }];
@@ -658,71 +658,77 @@ export class FirstHourBoxPrimitive implements ISeriesPrimitive {
     this.requestUpdate();
   }
 
-  private paint(ctx: CanvasRenderingContext2D, width: number): void {
+  private paint(ctx: CanvasRenderingContext2D): void {
     const chart = this.chart;
     const series = this.series;
     if (!chart || !series) return;
+    const xAt = (t: number): number | null => chart.timeScale().timeToCoordinate(t as UTCTimestamp);
+
     for (const box of this.boxes) {
-      const x1 = chart.timeScale().timeToCoordinate(box.startTime as UTCTimestamp);
+      const x1 = xAt(box.startTime);
       const yH = series.priceToCoordinate(box.high);
       const yL = series.priceToCoordinate(box.low);
       const yM = series.priceToCoordinate(box.mid);
       if (x1 == null || yH == null || yL == null || yM == null) continue;
-      const xShade = chart.timeScale().timeToCoordinate(box.shadeEndTime as UTCTimestamp) ?? width;
-      const xLine = chart.timeScale().timeToCoordinate(box.lineEndTime as UTCTimestamp) ?? width;
+
+      // Never fall back to pane width — that extended past-day lines across later days.
+      const xShade = xAt(box.shadeEndTime);
+      const xLine = xAt(box.lineEndTime);
+      if (xShade == null) continue;
+
       const x = Math.min(x1, xShade);
       const w = Math.max(1, Math.abs(xShade - x1));
       const y = Math.min(yH, yL);
       const h = Math.max(1, Math.abs(yL - yH));
+      const base = Math.max(0.05, Math.min(1, box.opacity));
 
       ctx.save();
-      // shaded / forming rectangle over 09:15–10:15 (or live edge)
-      ctx.globalAlpha = box.forming ? 0.08 : 0.16;
+      // shaded / forming rectangle over 09:15–10:15 (or live edge) — day-local only
+      ctx.globalAlpha = (box.forming ? 0.08 : 0.16) * base;
       ctx.fillStyle = box.boxColor;
       ctx.fillRect(x, y, w, h);
+
       if (box.forming) {
-        ctx.globalAlpha = 0.7;
+        // Dashed outline only while forming; never after 10:15 lock.
+        ctx.globalAlpha = 0.7 * base;
         ctx.strokeStyle = box.boxColor;
         ctx.setLineDash([5, 4]);
         ctx.lineWidth = 1;
         ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
         ctx.setLineDash([]);
-        ctx.globalAlpha = 0.95;
+        ctx.globalAlpha = 0.95 * base;
         ctx.fillStyle = "#fde68a";
         ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
         ctx.fillText(box.formingLabel, x + 4, y + 14);
-      } else {
-        // solid H / L and dotted mid from 10:15 → 15:30
+      } else if (xLine != null) {
+        // Solid H / L and dotted mid from 10:15 → session end of THIS day only.
         const xFrom = Math.min(xShade, xLine);
         const xTo = Math.max(xShade, xLine);
-        ctx.globalAlpha = 0.95;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([]);
-        ctx.strokeStyle = box.highColor;
-        ctx.beginPath();
-        ctx.moveTo(xFrom, yH);
-        ctx.lineTo(xTo, yH);
-        ctx.stroke();
-        ctx.strokeStyle = box.lowColor;
-        ctx.beginPath();
-        ctx.moveTo(xFrom, yL);
-        ctx.lineTo(xTo, yL);
-        ctx.stroke();
-        ctx.setLineDash([3, 3]);
-        ctx.strokeStyle = box.midColor;
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(xFrom, yM);
-        ctx.lineTo(xTo, yM);
-        ctx.stroke();
-        ctx.setLineDash([]);
+        if (xTo > xFrom) {
+          ctx.globalAlpha = 0.95 * base;
+          ctx.lineWidth = 1.5;
+          ctx.setLineDash([]);
+          ctx.strokeStyle = box.highColor;
+          ctx.beginPath();
+          ctx.moveTo(xFrom, yH);
+          ctx.lineTo(xTo, yH);
+          ctx.stroke();
+          ctx.strokeStyle = box.lowColor;
+          ctx.beginPath();
+          ctx.moveTo(xFrom, yL);
+          ctx.lineTo(xTo, yL);
+          ctx.stroke();
+          ctx.setLineDash([3, 3]);
+          ctx.strokeStyle = box.midColor;
+          ctx.lineWidth = 1;
+          ctx.beginPath();
+          ctx.moveTo(xFrom, yM);
+          ctx.lineTo(xTo, yM);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
       }
-      if (box.tooWide) {
-        ctx.globalAlpha = 0.95;
-        ctx.fillStyle = "#fbbf24";
-        ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
-        ctx.fillText(box.tooWideLabel, x + 4, y + h - 6);
-      }
+      // "Box too wide" is status-panel only — never painted on the chart.
       ctx.restore();
     }
   }

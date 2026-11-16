@@ -174,6 +174,15 @@ function markerColor(kind: FhbKind, side: FhbSide | null): string {
   return FHB_COLORS.probe;
 }
 
+/** One-letter chart marker; INSIDE → empty (no marker). */
+export function markerLetter(kind: FhbKind): string {
+  if (kind === "PROBE" || kind === "PROBE_BOTH") return "P";
+  if (kind === "BREAK") return "B";
+  if (kind === "ACCEPTED") return "A";
+  if (kind === "FAILED") return "F";
+  return "";
+}
+
 function makeMarker(time: number, kind: FhbKind, side: FhbSide | null): FhbMarker {
   let label: string;
   if (kind === "PROBE_BOTH") label = "PROBE ↕";
@@ -214,6 +223,50 @@ export function nextThirtyCloseAfter(asOf: number | null | undefined): number | 
     }
   }
   return null;
+}
+
+/** HUD next-close text. After 15:15 IST → "next: tomorrow 10:45". */
+export function formatNextCloseHint(asOf: number | null | undefined, nextClose: number | null): string | null {
+  if (nextClose == null) return null;
+  if (asOf != null && Number.isFinite(asOf)) {
+    const minute = istMinuteOfDay(asOf);
+    if (minute >= STUB_MIN || istDayKey(nextClose) !== istDayKey(asOf)) {
+      return "next: tomorrow 10:45";
+    }
+  }
+  return `next ${istHhmm(nextClose)}`;
+}
+
+/**
+ * Boxes to paint + the "current" day (axis labels / HUD).
+ * showPastDays=false → only current/replay day; past days otherwise faded in the UI.
+ */
+export function selectFhbPaintBoxes(
+  boxes: readonly FhbDayBox[],
+  opts: { showPastDays: boolean; asOf?: number | null },
+): { paint: FhbDayBox[]; current: FhbDayBox | null } {
+  if (!boxes.length) return { paint: [], current: null };
+  const asOf = opts.asOf;
+  const dayKey = asOf != null && Number.isFinite(asOf) ? istDayKey(asOf) : boxes[boxes.length - 1]!.day;
+  const current =
+    [...boxes].reverse().find((b) => b.day === dayKey) ?? boxes[boxes.length - 1] ?? null;
+  if (!opts.showPastDays) return { paint: current ? [current] : [], current };
+  return { paint: [...boxes], current };
+}
+
+/** Last bar time on the box day at or before session end — keeps LWC coords on-series. */
+export function resolveSessionLineEnd(
+  candles: readonly { time: number }[],
+  startTime: number,
+  sessionEndTime: number,
+): number {
+  let best = startTime;
+  for (const c of candles) {
+    if (!c || !Number.isFinite(c.time)) continue;
+    if (c.time < startTime || c.time > sessionEndTime) continue;
+    if (c.time > best) best = c.time;
+  }
+  return best;
 }
 
 export interface ComputeFirstHourBoxOpts {

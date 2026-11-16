@@ -7,8 +7,10 @@ import {
   firstHourBoxVisibleOn,
   formatBoxAxisLabel,
   formatInrPrice,
+  formatNextCloseHint,
   istHhmm,
   type FirstHourBoxResult,
+  type FhbMarker,
 } from "./firstHourBox";
 import type { IndicatorInstance } from "./catalog";
 
@@ -49,6 +51,7 @@ export function fhbSettings(item: IndicatorInstance | undefined): {
   maxWidth: number;
   markers: boolean;
   statusPanel: boolean;
+  showPastDays: boolean;
   colors: FhbUiColors;
 } {
   const p = item?.params ?? {};
@@ -61,6 +64,7 @@ export function fhbSettings(item: IndicatorInstance | undefined): {
     maxWidth: Number(p["max_width"] ?? 150),
     markers: p["markers"] !== "off",
     statusPanel: p["status_panel"] !== "off",
+    showPastDays: p["show_past_days"] === "on",
     colors: {
       box: pick("box", "#2962ff"),
       high: pick("high", "#16a34a"),
@@ -75,23 +79,26 @@ export function fhbSettings(item: IndicatorInstance | undefined): {
   };
 }
 
-/** Chart-corner status: H/L/Mid/Width · last status · next close. */
+/** Compact bottom-left status — never overlaps OHLC header / Bullish badge. */
 export function FirstHourBoxHud({
   result,
   enabled,
   showPanel,
+  asOf,
 }: {
   result: FirstHourBoxResult;
   enabled: boolean;
   showPanel: boolean;
+  asOf?: number | null;
 }) {
   if (!enabled || !showPanel) return null;
   const box = result.boxes[result.boxes.length - 1];
   if (!box) return null;
+  const nextHint = formatNextCloseHint(asOf ?? box.lastStatusTime, result.nextCloseTime);
   return (
     <SectionBoundary name="First Hour Box">
       <div
-        className="pointer-events-none absolute left-2 top-10 z-10 max-w-[22rem] rounded border border-white/10 bg-black/60 px-2 py-1.5 font-mono text-[11px] text-white/80 backdrop-blur-[2px]"
+        className="pointer-events-none absolute bottom-10 left-2 z-10 max-w-[18rem] rounded border border-white/10 bg-black/55 px-2 py-1 font-mono text-[10px] leading-snug text-white/80 backdrop-blur-[2px]"
         data-testid="first-hour-box-hud"
       >
         {box.forming ? (
@@ -103,7 +110,7 @@ export function FirstHourBoxHud({
           </div>
         )}
         {box.tooWide && (
-          <div className="text-amber-300" data-testid="fhb-too-wide">
+          <div className="text-orange-300" data-testid="fhb-too-wide">
             Box too wide – Strategy C off
           </div>
         )}
@@ -115,10 +122,30 @@ export function FirstHourBoxHud({
           ) : (
             box.lastStatusLabel
           )}
-          {result.nextCloseTime != null && <> · next {istHhmm(result.nextCloseTime)}</>}
+          {nextHint != null && <> · {nextHint}</>}
         </div>
       </div>
     </SectionBoundary>
+  );
+}
+
+/** Hover tooltip for a one-letter marker (full status text). */
+export function FirstHourBoxMarkerTip({
+  marker,
+  enabled,
+}: {
+  marker: FhbMarker | null;
+  enabled: boolean;
+}) {
+  if (!enabled || !marker) return null;
+  return (
+    <div
+      className="pointer-events-none absolute bottom-20 left-2 z-10 rounded border border-white/15 bg-black/70 px-2 py-0.5 font-mono text-[10px] text-white/90"
+      data-testid="fhb-marker-tip"
+      style={{ borderColor: `${marker.color}66`, color: marker.color }}
+    >
+      {marker.label}
+    </div>
   );
 }
 

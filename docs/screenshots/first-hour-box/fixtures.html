@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>First Hour Box — after cleanup</title>
+  <style>
+    html, body { margin: 0; background: #0b0e14; color: #e8eaed; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+    #wrap { position: relative; width: 1280px; height: 720px; }
+    #chart { position: relative; width: 100%; height: 100%; }
+    .ohlc {
+      position: absolute; top: 10px; left: 12px; z-index: 5;
+      font-size: 12px; color: rgba(255,255,255,0.75);
+    }
+    .badge {
+      position: absolute; top: 10px; left: 280px; z-index: 5;
+      font-size: 11px; padding: 2px 8px; border-radius: 4px;
+      background: rgba(38,166,154,0.2); color: #26a69a; border: 1px solid rgba(38,166,154,0.4);
+    }
+    .hud {
+      position: absolute; bottom: 40px; left: 12px; z-index: 5;
+      max-width: 18rem; border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(0,0,0,0.55); padding: 4px 8px; font-size: 10px;
+      color: rgba(255,255,255,0.8); border-radius: 4px; line-height: 1.35;
+    }
+    .hud .muted { color: rgba(255,255,255,0.55); margin-top: 2px; }
+    .note {
+      position: absolute; top: 10px; right: 70px; z-index: 5;
+      font-size: 11px; color: rgba(255,255,255,0.45);
+    }
+  </style>
+  <script src="../../../frontend/node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
+</head>
+<body>
+  <div id="wrap">
+    <div class="ohlc">NIFTY · 5m · O 24,312.40 H 24,358.10 L 24,298.55 C 24,341.20</div>
+    <div class="badge">Bullish</div>
+    <div class="note">Show past days: OFF · lines clipped to session</div>
+    <div id="chart"></div>
+    <div class="hud" data-testid="first-hour-box-hud">
+      <div>H 24,380.00 · L 24,300.00 · Mid 24,340.00 · W 80.00</div>
+      <div class="muted">15:15 · ACCEPTED ↑ · next: tomorrow 10:45</div>
+    </div>
+  </div>
+  <script>
+    const { createChart, CandlestickSeries, createSeriesMarkers, ColorType, CrosshairMode } = LightweightCharts;
+    const IST = 19800;
+    const OPEN = 9 * 60 + 15;
+    const CLOSE = 15 * 60 + 30;
+
+    function dayStartUnix(y, m, d) {
+      return Date.UTC(y, m - 1, d, 0, 0, 0) / 1000 - IST;
+    }
+
+    function barsForDay(y, m, d, base) {
+      const mid = dayStartUnix(y, m, d);
+      const out = [];
+      for (let min = OPEN; min < CLOSE; min += 5) {
+        const t = mid + min * 60;
+        const i = (min - OPEN) / 5;
+        const drift = Math.sin(i / 8) * 25 + (d - 13) * 8;
+        const o = base + drift;
+        const c = o + ((i % 3) - 1) * 6;
+        out.push({
+          time: t,
+          open: o,
+          high: Math.max(o, c) + 8,
+          low: Math.min(o, c) - 8,
+          close: c,
+        });
+      }
+      return out;
+    }
+
+    const days = [
+      barsForDay(2026, 11, 13, 24300),
+      barsForDay(2026, 11, 16, 24320),
+      barsForDay(2026, 11, 17, 24340),
+    ];
+    const candles = days.flat();
+
+    const day0 = dayStartUnix(2026, 11, 17);
+    const start = day0 + OPEN * 60;
+    const ready = day0 + (10 * 60 + 15) * 60;
+    const lineEnd = day0 + (15 * 60 + 25) * 60;
+    const boxHigh = 24380;
+    const boxLow = 24300;
+    const boxMid = (boxHigh + boxLow) / 2;
+
+    const el = document.getElementById("chart");
+    const chart = createChart(el, {
+      width: 1280,
+      height: 720,
+      layout: { background: { type: ColorType.Solid, color: "#0b0e14" }, textColor: "#8b93a7" },
+      grid: { vertLines: { color: "#1a1f2b" }, horzLines: { color: "#1a1f2b" } },
+      crosshair: { mode: CrosshairMode.Normal },
+      rightPriceScale: { borderColor: "#2a2e39" },
+      timeScale: { borderColor: "#2a2e39", timeVisible: true },
+    });
+    const series = chart.addSeries(CandlestickSeries, {
+      upColor: "#26a69a", downColor: "#ef5350",
+      wickUpColor: "#26a69a", wickDownColor: "#ef5350", borderVisible: false,
+    });
+    series.setData(candles);
+    chart.timeScale().fitContent();
+
+    for (const [price, title, color] of [
+      [boxHigh, "BOX H 24,380", "#16a34a"],
+      [boxLow, "BOX L 24,300", "#dc2626"],
+      [boxMid, "MID", "#94a3b8"],
+    ]) {
+      series.createPriceLine({
+        price, title, color, lineWidth: 1, lineVisible: false, axisLabelVisible: true,
+      });
+    }
+
+    const overlay = document.createElement("canvas");
+    overlay.width = 1280;
+    overlay.height = 720;
+    overlay.style.cssText = "position:absolute;inset:0;pointer-events:none;z-index:2;";
+    el.appendChild(overlay);
+
+    function drawOverlay() {
+      const ctx = overlay.getContext("2d");
+      ctx.clearRect(0, 0, overlay.width, overlay.height);
+      const x1 = chart.timeScale().timeToCoordinate(start);
+      const xShade = chart.timeScale().timeToCoordinate(ready);
+      const xLine = chart.timeScale().timeToCoordinate(lineEnd);
+      const yH = series.priceToCoordinate(boxHigh);
+      const yL = series.priceToCoordinate(boxLow);
+      const yM = series.priceToCoordinate(boxMid);
+      if ([x1, xShade, xLine, yH, yL, yM].some((v) => v == null)) return;
+      const x = Math.min(x1, xShade);
+      const w = Math.abs(xShade - x1);
+      const y = Math.min(yH, yL);
+      const h = Math.abs(yL - yH);
+      ctx.save();
+      ctx.globalAlpha = 0.16;
+      ctx.fillStyle = "#2962ff";
+      ctx.fillRect(x, y, w, h);
+      // locked: no dashed forming outline
+      ctx.globalAlpha = 0.95;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([]);
+      ctx.strokeStyle = "#16a34a";
+      ctx.beginPath(); ctx.moveTo(xShade, yH); ctx.lineTo(xLine, yH); ctx.stroke();
+      ctx.strokeStyle = "#dc2626";
+      ctx.beginPath(); ctx.moveTo(xShade, yL); ctx.lineTo(xLine, yL); ctx.stroke();
+      ctx.setLineDash([3, 3]);
+      ctx.strokeStyle = "#94a3b8";
+      ctx.lineWidth = 1;
+      ctx.beginPath(); ctx.moveTo(xShade, yM); ctx.lineTo(xLine, yM); ctx.stroke();
+      ctx.restore();
+    }
+    drawOverlay();
+    chart.timeScale().subscribeVisibleLogicalRangeChange(drawOverlay);
+
+    const markers = createSeriesMarkers(series);
+    markers.setMarkers([
+      { time: day0 + (10 * 60 + 45) * 60, position: "aboveBar", shape: "arrowUp", color: "#3b82f6", text: "B" },
+      { time: day0 + (11 * 60 + 15) * 60, position: "aboveBar", shape: "arrowUp", color: "#16a34a", text: "A" },
+      { time: day0 + (12 * 60 + 15) * 60, position: "belowBar", shape: "circle", color: "#a855f7", text: "F" },
+      { time: day0 + (13 * 60 + 15) * 60, position: "aboveBar", shape: "arrowUp", color: "#f59e0b", text: "P" },
+      { time: day0 + (14 * 60 + 45) * 60, position: "aboveBar", shape: "arrowUp", color: "#16a34a", text: "A" },
+    ]);
+  </script>
+</body>
+</html>

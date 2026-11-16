@@ -7,9 +7,14 @@ import {
   firstHourBoxVisibleOn,
   formatBoxAxisLabel,
   formatInrPrice,
+  formatNextCloseHint,
+  markerLetter,
   nextThirtyCloseAfter,
+  resolveSessionLineEnd,
+  selectFhbPaintBoxes,
   uniqueAscendingMarkers,
   type FhbCandle,
+  type FhbDayBox,
   type FhbKind,
 } from "./firstHourBox";
 
@@ -90,5 +95,39 @@ describe("firstHourBox helpers", () => {
     ]);
     expect(out.map((m) => m.time)).toEqual([1, 2]);
     expect(out[1]?.kind).toBe("FAILED");
+  });
+
+  it("markerLetter is one character; INSIDE empty", () => {
+    expect(markerLetter("PROBE")).toBe("P");
+    expect(markerLetter("PROBE_BOTH")).toBe("P");
+    expect(markerLetter("BREAK")).toBe("B");
+    expect(markerLetter("ACCEPTED")).toBe("A");
+    expect(markerLetter("FAILED")).toBe("F");
+    expect(markerLetter("INSIDE")).toBe("");
+  });
+
+  it("formatNextCloseHint says tomorrow after 15:15", () => {
+    // 2026-11-17 15:20 IST → next day 10:45
+    expect(formatNextCloseHint(1794909000, 1794978900)).toBe("next: tomorrow 10:45");
+    // 2026-11-17 10:00 IST → next 10:45 same day
+    expect(formatNextCloseHint(1794889800, 1794892500)).toBe("next 10:45");
+  });
+
+  it("selectFhbPaintBoxes defaults to current day only", () => {
+    const boxes = [
+      { day: "2026-11-13", startTime: 1 },
+      { day: "2026-11-17", startTime: 2 },
+    ] as FhbDayBox[];
+    const off = selectFhbPaintBoxes(boxes, { showPastDays: false, asOf: 1794909000 });
+    expect(off.paint.map((b) => b.day)).toEqual(["2026-11-17"]);
+    const on = selectFhbPaintBoxes(boxes, { showPastDays: true, asOf: 1794909000 });
+    expect(on.paint).toHaveLength(2);
+  });
+
+  it("resolveSessionLineEnd stays on the session, never next day", () => {
+    const start = 1_000;
+    const end = 1_000 + 6 * 3600;
+    const times = [{ time: start }, { time: start + 3600 }, { time: end - 300 }, { time: end + 86_400 }];
+    expect(resolveSessionLineEnd(times, start, end)).toBe(end - 300);
   });
 });
