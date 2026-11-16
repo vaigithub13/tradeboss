@@ -1,10 +1,8 @@
 /**
  * First Hour Box (Strategy C chart overlay).
  *
- * Box A/B = high/low of the 09:15 + 09:45 IST 30m candles (ready at 10:15).
- * Status markers on 30m closes 10:45…15:15 (bars 10:15…14:45). No status on the 15:15 stub.
- *
- * State: INSIDE → PROBE / BREAK → ACCEPTED; close back inside → FAILED (opposite edge) → INSIDE.
+ * Candles A=09:15 and B=09:45 (30m, IST). Box high/low/mid/width from those.
+ * 09:15–10:15: forming (live). At 10:15 lock; status on 30m closes 10:45…15:15.
  */
 
 export interface FhbCandle {
@@ -16,64 +14,91 @@ export interface FhbCandle {
 }
 
 export type FhbSide = "above" | "below";
-export type FhbKind = "PROBE" | "BREAK" | "ACCEPTED" | "FAILED" | "PROBE_BOTH";
+export type FhbKind = "PROBE" | "BREAK" | "ACCEPTED" | "FAILED" | "PROBE_BOTH" | "INSIDE";
 
 export interface FhbMarker {
-  /** unix seconds of the 30m bar start that produced this status */
   time: number;
   kind: FhbKind;
-  /** for PROBE_BOTH null; FAILED points at the opposite edge */
   side: FhbSide | null;
   label: string;
-  /** hex colour hint for the chart */
   color: string;
 }
 
 export interface FhbDayBox {
-  day: string; // YYYY-MM-DD IST
-  a: number; // high
-  b: number; // low
+  day: string;
+  /** Box high = max(high A, high B) */
+  high: number;
+  /** Box low = min(low A, low B) */
+  low: number;
+  mid: number;
+  width: number;
+  tooWide: boolean;
   /** 09:15 unix */
   startTime: number;
-  /** 10:15 unix — box ready */
+  /** 10:15 unix — lock / ready */
   readyTime: number;
-  /** last status bar start of the day (≤ 14:45), or readyTime if none */
-  endTime: number;
+  /** 15:30 unix of that IST day */
+  sessionEndTime: number;
+  /** shade end = readyTime (locked box covers 09:15–10:15 only) */
+  shadeEndTime: number;
   forming: boolean;
   markers: FhbMarker[];
+  /** latest status after the last closed 30m, or INSIDE / FORMING */
+  lastStatus: FhbKind | "FORMING";
+  lastStatusTime: number | null;
+  lastStatusLabel: string;
 }
 
 export interface FirstHourBoxResult {
   boxes: FhbDayBox[];
-  /** flattened markers, sorted unique ascending by time */
   markers: FhbMarker[];
+  /** next 30m bar close (unix) after asOf, or null */
+  nextCloseTime: number | null;
 }
+
+export const DEFAULT_MAX_WIDTH = 150;
 
 const IST = 19_800;
 const DAY = 86_400;
-const OPEN_MIN = 9 * 60 + 15; // 09:15
-const READY_MIN = 10 * 60 + 15; // 10:15
-const LAST_STATUS_MIN = 14 * 60 + 45; // 14:45
-const STUB_MIN = 15 * 60 + 15; // 15:15 — not a 30m status bar
+const OPEN_MIN = 9 * 60 + 15;
+const READY_MIN = 10 * 60 + 15;
+const CLOSE_MIN = 15 * 60 + 30;
+const LAST_STATUS_MIN = 14 * 60 + 45;
+const STUB_MIN = 15 * 60 + 15;
 
-const COLOR = {
-  probe: "#f59e0b", // orange
-  breakAbove: "#26a69a",
-  breakBelow: "#ef5350",
-  acceptedAbove: "#26a69a",
-  acceptedBelow: "#ef5350",
-  failed: "#94a3b8",
+/** Spec colours (overridable from indicator colours in the UI). */
+export const FHB_COLORS = {
+  probe: "#f59e0b",
+  break: "#3b82f6",
+  acceptedAbove: "#16a34a",
+  acceptedBelow: "#dc2626",
+  failed: "#a855f7",
+  inside: "#94a3b8",
+  high: "#16a34a",
+  low: "#dc2626",
+  mid: "#94a3b8",
+  box: "#2962ff",
 } as const;
 
-export function formatInrPrice(n: number): string {
+export function formatInrPrice(n: number, digits = 2): string {
   if (!Number.isFinite(n)) return "—";
-  return n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return n.toLocaleString("en-IN", { minimumFractionDigits: digits, maximumFractionDigits: digits });
+}
+
+/** Axis titles: "BOX H 24,350" (no decimals when whole). */
+export function formatBoxAxisLabel(prefix: string, n: number): string {
+  if (!Number.isFinite(n)) return prefix;
+  const rounded = Math.round(n * 100) / 100;
+  const text =
+    Number.isInteger(rounded) || Math.abs(rounded - Math.round(rounded)) < 1e-9
+      ? Math.round(rounded).toLocaleString("en-IN")
+      : formatInrPrice(rounded);
+  return `${prefix} ${text}`;
 }
 
 export function istDayKey(unix: number): string {
   const day = Math.floor((unix + IST) / DAY);
   const utc = new Date((day * DAY - IST) * 1000);
-  // format as IST calendar date via en-CA in Asia/Kolkata
   return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(utc);
 }
 
@@ -81,17 +106,22 @@ export function istMinuteOfDay(unix: number): number {
   return Math.floor(((unix + IST) % DAY) / 60);
 }
 
-/** 30m bar open containing `unix`, anchored at 09:15; null outside session / on 15:15 stub for status. */
+export function istHhmm(unix: number): string {
+  return new Intl.DateTimeFormat("en-GB", {
+    timeZone: "Asia/Kolkata",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date(unix * 1000));
+}
+
 export function thirtyOpenUnix(unix: number): number | null {
   const day = Math.floor((unix + IST) / DAY);
   const minute = istMinuteOfDay(unix);
-  if (minute < OPEN_MIN || minute >= STUB_MIN + 15) return null; // past 15:30
-  if (minute >= STUB_MIN) return null; // 15:15 stub is not a 30m bar
+  if (minute < OPEN_MIN || minute >= CLOSE_MIN) return null;
+  if (minute >= STUB_MIN) return null;
   const k = Math.floor((minute - OPEN_MIN) / 30);
   const startMin = OPEN_MIN + k * 30;
-  if (startMin > LAST_STATUS_MIN && startMin !== OPEN_MIN && startMin !== OPEN_MIN + 30) {
-    // only 09:15…14:45
-  }
   if (startMin > LAST_STATUS_MIN) return null;
   return day * DAY - IST + startMin * 60;
 }
@@ -100,11 +130,10 @@ export function isStatusBarMinute(minute: number): boolean {
   return minute >= READY_MIN && minute <= LAST_STATUS_MIN && (minute - OPEN_MIN) % 30 === 0;
 }
 
-export function isFormingBarMinute(minute: number): boolean {
-  return minute === OPEN_MIN || minute === OPEN_MIN + 30;
+export function sessionEndFromOpen(start915: number): number {
+  return start915 + (CLOSE_MIN - OPEN_MIN) * 60;
 }
 
-/** Aggregate any intraday source into 09:15-anchored 30m bars (drops 15:15 stub). */
 export function toThirtyMinuteBars(candles: readonly FhbCandle[]): FhbCandle[] {
   const buckets = new Map<number, FhbCandle>();
   for (const c of candles) {
@@ -113,13 +142,7 @@ export function toThirtyMinuteBars(candles: readonly FhbCandle[]): FhbCandle[] {
     if (open == null) continue;
     const cur = buckets.get(open);
     if (!cur) {
-      buckets.set(open, {
-        time: open,
-        open: c.open,
-        high: c.high,
-        low: c.low,
-        close: c.close,
-      });
+      buckets.set(open, { time: open, open: c.open, high: c.high, low: c.low, close: c.close });
     } else {
       cur.high = Math.max(cur.high, c.high);
       cur.low = Math.min(cur.low, c.low);
@@ -142,11 +165,13 @@ function opposite(side: FhbSide): FhbSide {
 }
 
 function markerColor(kind: FhbKind, side: FhbSide | null): string {
-  if (kind === "PROBE" || kind === "PROBE_BOTH") return COLOR.probe;
-  if (kind === "FAILED") return COLOR.failed;
-  if (side === "above") return kind === "ACCEPTED" ? COLOR.acceptedAbove : COLOR.breakAbove;
-  if (side === "below") return kind === "ACCEPTED" ? COLOR.acceptedBelow : COLOR.breakBelow;
-  return COLOR.probe;
+  if (kind === "PROBE" || kind === "PROBE_BOTH") return FHB_COLORS.probe;
+  if (kind === "FAILED") return FHB_COLORS.failed;
+  if (kind === "BREAK") return FHB_COLORS.break;
+  if (kind === "INSIDE") return FHB_COLORS.inside;
+  if (side === "above") return FHB_COLORS.acceptedAbove;
+  if (side === "below") return FHB_COLORS.acceptedBelow;
+  return FHB_COLORS.probe;
 }
 
 function makeMarker(time: number, kind: FhbKind, side: FhbSide | null): FhbMarker {
@@ -155,17 +180,17 @@ function makeMarker(time: number, kind: FhbKind, side: FhbSide | null): FhbMarke
   else if (kind === "PROBE") label = `PROBE ${arrow(side!)}`;
   else if (kind === "BREAK") label = `BREAK ${arrow(side!)}`;
   else if (kind === "ACCEPTED") label = `ACCEPTED ${arrow(side!)}`;
-  else label = `FAILED ${arrow(side!)}`;
+  else if (kind === "FAILED") label = `FAILED ${arrow(side!)}`;
+  else label = "INSIDE";
   return { time, kind, side, label, color: markerColor(kind, side) };
 }
 
-function closeSide(close: number, a: number, b: number): "above" | "below" | "inside" {
-  if (close > a) return "above";
-  if (close < b) return "below";
+function closeSide(close: number, high: number, low: number): "above" | "below" | "inside" {
+  if (close > high) return "above";
+  if (close < low) return "below";
   return "inside";
 }
 
-/** Deduplicate markers by time (last wins), keep ascending. */
 export function uniqueAscendingMarkers(markers: readonly FhbMarker[]): FhbMarker[] {
   const map = new Map<number, FhbMarker>();
   for (const m of markers) {
@@ -177,27 +202,38 @@ export function uniqueAscendingMarkers(markers: readonly FhbMarker[]): FhbMarker
     .map(([, m]) => m);
 }
 
-export interface ComputeFirstHourBoxOpts {
-  /** Replay / live cutoff: only use bars with time <= asOf (bar start). */
-  asOf?: number | null;
-  /** When true (default), skip days whose first bar is not 09:15 (muhurat / special). */
-  skipOddSessions?: boolean;
+/** Next 30m close strictly after `asOf` (closes 10:45…15:15 IST). */
+export function nextThirtyCloseAfter(asOf: number | null | undefined): number | null {
+  if (asOf == null || !Number.isFinite(asOf)) return null;
+  const day = Math.floor((asOf + IST) / DAY);
+  for (let pass = 0; pass < 5; pass++) {
+    const d = day + pass;
+    for (let minute = READY_MIN + 30; minute <= LAST_STATUS_MIN + 30; minute += 30) {
+      const close = d * DAY - IST + minute * 60;
+      if (close > asOf) return close;
+    }
+  }
+  return null;
 }
 
-/**
- * Compute first-hour boxes and status markers from candles of any supported intraday TF.
- * Pass `asOf` (replay cursor or last closed bar) so no future bars leak in.
- */
+export interface ComputeFirstHourBoxOpts {
+  asOf?: number | null;
+  skipOddSessions?: boolean;
+  maxWidth?: number;
+  /** Emit tiny INSIDE dots (default false = none). */
+  showInside?: boolean;
+}
+
 export function computeFirstHourBox(
   candles: readonly FhbCandle[],
   opts: ComputeFirstHourBoxOpts = {},
 ): FirstHourBoxResult {
   const asOf = opts.asOf;
   const skipOdd = opts.skipOddSessions !== false;
+  const maxWidth = opts.maxWidth ?? DEFAULT_MAX_WIDTH;
+  const showInside = opts.showInside === true;
   const clipped =
-    asOf == null || !Number.isFinite(asOf)
-      ? candles
-      : candles.filter((c) => c && c.time <= asOf!);
+    asOf == null || !Number.isFinite(asOf) ? candles : candles.filter((c) => c && c.time <= asOf!);
   const thirties = toThirtyMinuteBars(clipped);
 
   const byDay = new Map<string, FhbCandle[]>();
@@ -210,109 +246,137 @@ export function computeFirstHourBox(
 
   const boxes: FhbDayBox[] = [];
   for (const [day, bars] of [...byDay.entries()].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
-    const b915 = bars.find((b) => istMinuteOfDay(b.time) === OPEN_MIN);
-    const b945 = bars.find((b) => istMinuteOfDay(b.time) === OPEN_MIN + 30);
-    if (!b915 || !b945) continue; // A or B missing
+    const candleA = bars.find((b) => istMinuteOfDay(b.time) === OPEN_MIN);
+    if (!candleA) continue;
     if (skipOdd) {
       const first = bars[0];
-      if (!first || istMinuteOfDay(first.time) !== OPEN_MIN) continue; // muhurat / special
+      if (!first || istMinuteOfDay(first.time) !== OPEN_MIN) continue;
     }
 
-    const a = Math.max(b915.high, b945.high);
-    const b = Math.min(b915.low, b945.low);
-    if (!(a > b) || !Number.isFinite(a) || !Number.isFinite(b)) continue;
-
-    const startTime = b915.time;
-    /** 10:15 IST — 09:45 bar close; box is ready and status may begin. */
-    const readyTime = b945.time + 30 * 60;
+    const startTime = candleA.time;
+    const readyTime = startTime + 60 * 60; // 10:15
+    const sessionEndTime = sessionEndFromOpen(startTime);
     const now = asOf ?? (clipped.length ? clipped[clipped.length - 1]!.time : startTime);
     const forming = now < readyTime;
+    const candleB = bars.find((b) => istMinuteOfDay(b.time) === OPEN_MIN + 30);
+
+    // Locked day requires both A and B; forming may use A alone (live) or A+B.
+    if (!forming && !candleB) continue;
+
+    const parts = candleB ? [candleA, candleB] : [candleA];
+    const high = Math.max(...parts.map((p) => p.high));
+    const low = Math.min(...parts.map((p) => p.low));
+    if (!(high > low) || !Number.isFinite(high) || !Number.isFinite(low)) continue;
+    const mid = (high + low) / 2;
+    const width = high - low;
+    const tooWide = width > maxWidth;
 
     const markers: FhbMarker[] = [];
     let phase: Phase = { kind: "inside" };
-    let lastStatusStart = b945.time;
+    let lastStatus: FhbKind | "FORMING" = forming ? "FORMING" : "INSIDE";
+    let lastStatusTime: number | null = null;
 
     if (!forming) {
       for (const bar of bars) {
         const minute = istMinuteOfDay(bar.time);
         if (!isStatusBarMinute(minute)) continue;
-        // Only emit status once the 30m bar has closed (bar.time + 30m <= asOf+epsilon).
-        // Using bar start: require asOf >= bar close, or asOf is null (full history).
         const barClose = bar.time + 30 * 60;
         if (asOf != null && asOf < barClose - 1) continue;
 
-        lastStatusStart = bar.time;
-        const sideClose = closeSide(bar.close, a, b);
-        const wickAbove = bar.high > a;
-        const wickBelow = bar.low < b;
+        const sideClose = closeSide(bar.close, high, low);
+        const wickAbove = bar.high > high;
+        const wickBelow = bar.low < low;
+        let emitted: FhbMarker | null = null;
 
         if (phase.kind === "inside") {
           if (sideClose === "above") {
-            markers.push(makeMarker(bar.time, "BREAK", "above"));
+            emitted = makeMarker(bar.time, "BREAK", "above");
             phase = { kind: "break", side: "above" };
           } else if (sideClose === "below") {
-            markers.push(makeMarker(bar.time, "BREAK", "below"));
+            emitted = makeMarker(bar.time, "BREAK", "below");
             phase = { kind: "break", side: "below" };
           } else if (wickAbove && wickBelow) {
-            markers.push(makeMarker(bar.time, "PROBE_BOTH", null));
-            // dual probe: stay INSIDE
+            emitted = makeMarker(bar.time, "PROBE_BOTH", null);
           } else if (wickAbove) {
-            markers.push(makeMarker(bar.time, "PROBE", "above"));
+            emitted = makeMarker(bar.time, "PROBE", "above");
             phase = { kind: "probe", side: "above" };
           } else if (wickBelow) {
-            markers.push(makeMarker(bar.time, "PROBE", "below"));
+            emitted = makeMarker(bar.time, "PROBE", "below");
             phase = { kind: "probe", side: "below" };
+          } else if (showInside) {
+            emitted = makeMarker(bar.time, "INSIDE", null);
           }
-          continue;
-        }
-
-        // After PROBE / BREAK / ACCEPTED on a side
-        if (sideClose === "inside") {
-          const failSide = opposite(phase.side);
-          markers.push(makeMarker(bar.time, "FAILED", failSide));
+        } else if (sideClose === "inside") {
+          emitted = makeMarker(bar.time, "FAILED", opposite(phase.side));
           phase = { kind: "inside" };
-          continue;
-        }
-
-        if (sideClose === phase.side) {
+        } else if (sideClose === phase.side) {
           if (phase.kind === "break") {
-            markers.push(makeMarker(bar.time, "ACCEPTED", phase.side));
+            emitted = makeMarker(bar.time, "ACCEPTED", phase.side);
             phase = { kind: "accepted", side: phase.side };
-          }
-          // already accepted / probe with close still outside same side: keep state
-          else if (phase.kind === "probe") {
-            // close outside after probe → upgrade to BREAK
-            markers.push(makeMarker(bar.time, "BREAK", phase.side));
+          } else if (phase.kind === "probe") {
+            emitted = makeMarker(bar.time, "BREAK", phase.side);
             phase = { kind: "break", side: phase.side };
           }
-          continue;
+        } else {
+          emitted = makeMarker(bar.time, "BREAK", sideClose);
+          phase = { kind: "break", side: sideClose };
         }
 
-        // close on the opposite side → new BREAK that way
-        markers.push(makeMarker(bar.time, "BREAK", sideClose));
-        phase = { kind: "break", side: sideClose };
+        if (emitted) {
+          markers.push(emitted);
+          lastStatus = emitted.kind;
+          lastStatusTime = barClose;
+        } else {
+          lastStatus = "INSIDE";
+          lastStatusTime = barClose;
+        }
       }
     }
 
+    const uniq = uniqueAscendingMarkers(markers);
     boxes.push({
       day,
-      a,
-      b,
+      high,
+      low,
+      mid,
+      width: Math.round(width * 100) / 100,
+      tooWide,
       startTime,
       readyTime,
-      endTime: Math.max(lastStatusStart, b945.time),
+      sessionEndTime,
+      shadeEndTime: readyTime,
       forming,
-      markers: uniqueAscendingMarkers(markers),
+      markers: uniq,
+      lastStatus,
+      lastStatusTime,
+      lastStatusLabel:
+        lastStatus === "FORMING"
+          ? "Box forming"
+          : uniq.length
+            ? uniq[uniq.length - 1]!.label
+            : "INSIDE",
     });
   }
 
-  const allMarkers = uniqueAscendingMarkers(boxes.flatMap((box) => box.markers));
-  return { boxes, markers: allMarkers };
+  return {
+    boxes,
+    markers: uniqueAscendingMarkers(boxes.flatMap((box) => box.markers)),
+    nextCloseTime: nextThirtyCloseAfter(asOf ?? (clipped.length ? clipped[clipped.length - 1]!.time : null)),
+  };
 }
 
-/** Timeframes that may show the indicator. */
 export const FIRST_HOUR_BOX_TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m"] as const;
 
 export function firstHourBoxVisibleOn(tf: string): boolean {
   return (FIRST_HOUR_BOX_TIMEFRAMES as readonly string[]).includes(tf);
+}
+
+/** Alias kept for older fixtures / HUD that used a/b naming. */
+export function boxLevels(box: Pick<FhbDayBox, "high" | "low" | "mid" | "width">): {
+  a: number;
+  b: number;
+  mid: number;
+  width: number;
+} {
+  return { a: box.high, b: box.low, mid: box.mid, width: box.width };
 }

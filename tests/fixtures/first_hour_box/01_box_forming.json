@@ -1,7 +1,8 @@
 {
   "name": "box_forming_before_1015",
-  "description": "Before 10:15 the box is forming; no status markers. A/B from 09:15+09:45 highs/lows.",
+  "description": "Before 10:15 the box is forming (live); no status markers. high/low from A+B.",
   "asOf": 1794890000,
+  "maxWidth": 150,
   "candles": [
     { "time": 1794887100, "open": 24400, "high": 24450, "low": 24380, "close": 24420 },
     { "time": 1794888900, "open": 24420, "high": 24480, "low": 24400, "close": 24460 }
@@ -10,8 +11,11 @@
     "boxes": [
       {
         "day": "2026-11-17",
-        "a": 24480,
-        "b": 24380,
+        "high": 24480,
+        "low": 24380,
+        "mid": 24430,
+        "width": 100,
+        "tooWide": false,
         "forming": true,
         "markerKinds": []
       }

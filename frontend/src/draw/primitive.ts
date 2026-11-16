@@ -604,17 +604,24 @@ export interface FvgLayer {
 
 export interface FirstHourBoxPaint {
   startTime: number;
-  endTime: number;
-  a: number;
-  b: number;
+  /** shade end (10:15 when locked; live edge while forming) */
+  shadeEndTime: number;
+  /** line end (15:30 when locked) */
+  lineEndTime: number;
+  high: number;
+  low: number;
+  mid: number;
   forming: boolean;
-  color: string;
-  labelA: string;
-  labelB: string;
+  tooWide: boolean;
+  boxColor: string;
+  highColor: string;
+  lowColor: string;
+  midColor: string;
   formingLabel: string;
+  tooWideLabel: string;
 }
 
-/** Shaded first-hour range + A/B labels (reuses the FVG-style fill paint). */
+/** Forming dashed fade + locked 09:15–10:15 shade + H/L/Mid lines to 15:30. */
 export class FirstHourBoxPrimitive implements ISeriesPrimitive {
   boxes: readonly FirstHourBoxPaint[] = [];
   private chart: Chart | null = null;
@@ -657,27 +664,64 @@ export class FirstHourBoxPrimitive implements ISeriesPrimitive {
     if (!chart || !series) return;
     for (const box of this.boxes) {
       const x1 = chart.timeScale().timeToCoordinate(box.startTime as UTCTimestamp);
-      const yTop = series.priceToCoordinate(box.a);
-      const yBot = series.priceToCoordinate(box.b);
-      if (x1 == null || yTop == null || yBot == null) continue;
-      const xEnd = chart.timeScale().timeToCoordinate(box.endTime as UTCTimestamp);
-      const x2 = xEnd ?? width;
-      const x = Math.min(x1, x2);
-      const w = Math.max(1, Math.abs(x2 - x1));
-      const y = Math.min(yTop, yBot);
-      const h = Math.max(1, Math.abs(yBot - yTop));
+      const yH = series.priceToCoordinate(box.high);
+      const yL = series.priceToCoordinate(box.low);
+      const yM = series.priceToCoordinate(box.mid);
+      if (x1 == null || yH == null || yL == null || yM == null) continue;
+      const xShade = chart.timeScale().timeToCoordinate(box.shadeEndTime as UTCTimestamp) ?? width;
+      const xLine = chart.timeScale().timeToCoordinate(box.lineEndTime as UTCTimestamp) ?? width;
+      const x = Math.min(x1, xShade);
+      const w = Math.max(1, Math.abs(xShade - x1));
+      const y = Math.min(yH, yL);
+      const h = Math.max(1, Math.abs(yL - yH));
+
       ctx.save();
-      ctx.globalAlpha = box.forming ? 0.1 : 0.18;
-      ctx.fillStyle = box.color;
+      // shaded / forming rectangle over 09:15–10:15 (or live edge)
+      ctx.globalAlpha = box.forming ? 0.08 : 0.16;
+      ctx.fillStyle = box.boxColor;
       ctx.fillRect(x, y, w, h);
-      ctx.globalAlpha = 0.9;
-      ctx.fillStyle = "#e2e8f0";
-      ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
       if (box.forming) {
+        ctx.globalAlpha = 0.7;
+        ctx.strokeStyle = box.boxColor;
+        ctx.setLineDash([5, 4]);
+        ctx.lineWidth = 1;
+        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = "#fde68a";
+        ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
         ctx.fillText(box.formingLabel, x + 4, y + 14);
       } else {
-        ctx.fillText(box.labelA, x + 4, y + 12);
-        ctx.fillText(box.labelB, x + 4, y + h - 4);
+        // solid H / L and dotted mid from 10:15 → 15:30
+        const xFrom = Math.min(xShade, xLine);
+        const xTo = Math.max(xShade, xLine);
+        ctx.globalAlpha = 0.95;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([]);
+        ctx.strokeStyle = box.highColor;
+        ctx.beginPath();
+        ctx.moveTo(xFrom, yH);
+        ctx.lineTo(xTo, yH);
+        ctx.stroke();
+        ctx.strokeStyle = box.lowColor;
+        ctx.beginPath();
+        ctx.moveTo(xFrom, yL);
+        ctx.lineTo(xTo, yL);
+        ctx.stroke();
+        ctx.setLineDash([3, 3]);
+        ctx.strokeStyle = box.midColor;
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(xFrom, yM);
+        ctx.lineTo(xTo, yM);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
+      if (box.tooWide) {
+        ctx.globalAlpha = 0.95;
+        ctx.fillStyle = "#fbbf24";
+        ctx.font = "11px ui-monospace, SFMono-Regular, Menlo, monospace";
+        ctx.fillText(box.tooWideLabel, x + 4, y + h - 6);
       }
       ctx.restore();
     }

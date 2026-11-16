@@ -1,7 +1,8 @@
 {
-  "name": "break_then_accepted",
-  "description": "Close above A = BREAK ↑; next 30m still above A = ACCEPTED ↑.",
+  "name": "confirmed_upside_break_accepted",
+  "description": "Close above box high = BREAK ↑; next 30m still above = ACCEPTED ↑.",
   "asOf": null,
+  "maxWidth": 150,
   "candles": [
     { "time": 1794887100, "open": 24400, "high": 24450, "low": 24380, "close": 24420 },
     { "time": 1794888900, "open": 24420, "high": 24480, "low": 24400, "close": 24460 },
@@ -12,8 +13,11 @@
     "boxes": [
       {
         "day": "2026-11-17",
-        "a": 24480,
-        "b": 24380,
+        "high": 24480,
+        "low": 24380,
+        "mid": 24430,
+        "width": 100,
+        "tooWide": false,
         "forming": false,
         "markerKinds": ["BREAK", "ACCEPTED"]
       }

@@ -47,8 +47,7 @@ import { clipSeries, seriesThroughCursor } from "../replay/cap";
 import { fetchFvg } from "../draw/api";
 import { bindDrawings, type DrawBag } from "../draw/bind";
 import { DrawPrimitive, FirstHourBoxPrimitive, FvgPrimitive } from "../draw/primitive";
-import { FirstHourBoxHud, useFirstHourBox } from "../indicators/FirstHourBoxLayer";
-import { formatInrPrice } from "../indicators/firstHourBox";
+import { FirstHourBoxHud, fhbSettings, formatBoxAxisLabel, useFirstHourBox } from "../indicators/FirstHourBoxLayer";
 import type { GexResponse } from "../api/gex";
 import { gexBars } from "./gex";
 import { GexPrimitive } from "./gexPrimitive";
@@ -361,19 +360,28 @@ export function ChartView({
     };
   }, []);
 
-  const fhbEnabled = items.some((item) => item.type === "first_hour_box" && item.visible);
-  const fhbResult = useFirstHourBox(candles, timeframe, cursor, fhbEnabled);
-  const fhbColor =
-    items.find((item) => item.type === "first_hour_box" && item.visible)?.colors["box"] ?? "#2962ff";
+  const fhbItem = items.find((item) => item.type === "first_hour_box" && item.visible);
+  const fhbEnabled = Boolean(fhbItem);
+  const fhbOpts = fhbSettings(fhbItem);
+  const fhbResult = useFirstHourBox(candles, timeframe, cursor, fhbEnabled, fhbOpts.maxWidth);
 
   const mergedMarkers = useMemo(() => {
-    const fhbMarkers: SeriesMarker<Time>[] = fhbResult.markers.map((m) => ({
-      time: m.time as UTCTimestamp,
-      position: m.side === "below" || m.kind === "FAILED" ? "belowBar" : "aboveBar",
-      shape: m.kind === "FAILED" ? "circle" : m.side === "below" ? "arrowDown" : "arrowUp",
-      color: m.color,
-      text: m.label,
-    }));
+    const colorFor = (m: (typeof fhbResult.markers)[number]): string => {
+      if (m.kind === "PROBE" || m.kind === "PROBE_BOTH") return fhbOpts.colors.probe;
+      if (m.kind === "BREAK") return fhbOpts.colors.break;
+      if (m.kind === "FAILED") return fhbOpts.colors.failed;
+      if (m.kind === "ACCEPTED") return m.side === "below" ? fhbOpts.colors.accepted_down : fhbOpts.colors.accepted_up;
+      return m.color;
+    };
+    const fhbMarkers: SeriesMarker<Time>[] = fhbOpts.markers
+      ? fhbResult.markers.map((m) => ({
+          time: m.time as UTCTimestamp,
+          position: m.side === "below" || m.kind === "FAILED" ? "belowBar" : "aboveBar",
+          shape: m.kind === "FAILED" ? "circle" : m.side === "below" ? "arrowDown" : "arrowUp",
+          color: colorFor(m),
+          text: m.label,
+        }))
+      : [];
     const byTime = new Map<number, SeriesMarker<Time>>();
     for (const m of [...markers, ...fhbMarkers]) {
       const t = Number(m.time);
@@ -383,7 +391,7 @@ export function ChartView({
     return [...byTime.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([, m]) => m);
-  }, [markers, fhbResult.markers]);
+  }, [markers, fhbResult.markers, fhbOpts]);
 
   useEffect(() => {
     const series = candleSeriesRef.current;
@@ -402,33 +410,49 @@ export function ChartView({
     primitive.setBoxes(
       fhbResult.boxes.map((box) => ({
         startTime: box.startTime,
-        endTime: box.endTime,
-        a: box.a,
-        b: box.b,
+        shadeEndTime: box.forming ? (cursor ?? box.shadeEndTime) : box.shadeEndTime,
+        lineEndTime: box.sessionEndTime,
+        high: box.high,
+        low: box.low,
+        mid: box.mid,
         forming: box.forming,
-        color: fhbColor,
-        labelA: `A ${formatInrPrice(box.a)}`,
-        labelB: `B ${formatInrPrice(box.b)}`,
+        tooWide: box.tooWide,
+        boxColor: fhbOpts.colors.box,
+        highColor: fhbOpts.colors.high,
+        lowColor: fhbOpts.colors.low,
+        midColor: fhbOpts.colors.mid,
         formingLabel: "Box forming",
+        tooWideLabel: "Box too wide – Strategy C off",
       })),
     );
-  }, [fhbEnabled, fhbResult.boxes, fhbColor]);
+  }, [fhbEnabled, fhbResult.boxes, fhbOpts.colors, cursor]);
 
   useEffect(() => {
     const series = candleSeriesRef.current;
     if (!series) return;
     for (const line of priceLinesRef.current) series.removePriceLine(line);
-    priceLinesRef.current = levels.map((level) =>
+    const axisLevels = [...levels];
+    if (fhbEnabled) {
+      const latest = [...fhbResult.boxes].reverse().find((b) => !b.forming) ?? fhbResult.boxes[fhbResult.boxes.length - 1];
+      if (latest) {
+        axisLevels.push(
+          { price: latest.high, title: formatBoxAxisLabel("BOX H", latest.high), color: fhbOpts.colors.high },
+          { price: latest.low, title: formatBoxAxisLabel("BOX L", latest.low), color: fhbOpts.colors.low },
+          { price: latest.mid, title: "MID", color: fhbOpts.colors.mid },
+        );
+      }
+    }
+    priceLinesRef.current = axisLevels.map((level) =>
       series.createPriceLine({
         price: level.price,
         color: level.color,
         lineWidth: 1,
-        lineStyle: LineStyle.Dashed,
+        lineStyle: level.title === "MID" ? LineStyle.Dotted : level.title.startsWith("BOX") ? LineStyle.Solid : LineStyle.Dashed,
         axisLabelVisible: true,
         title: level.title,
       }),
     );
-  }, [levels, candles]);
+  }, [levels, candles, fhbEnabled, fhbResult.boxes, fhbOpts.colors]);
 
   useEffect(() => {
     const primitive = gexPrimitiveRef.current;
@@ -840,7 +864,7 @@ export function ChartView({
           »
         </button>
       )}
-      <FirstHourBoxHud result={fhbResult} enabled={fhbEnabled} />
+      <FirstHourBoxHud result={fhbResult} enabled={fhbEnabled} showPanel={fhbOpts.statusPanel} />
       {tradeCard}
     </div>
   );

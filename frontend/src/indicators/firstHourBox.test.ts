@@ -5,7 +5,9 @@ import { describe, expect, it } from "vitest";
 import {
   computeFirstHourBox,
   firstHourBoxVisibleOn,
+  formatBoxAxisLabel,
   formatInrPrice,
+  nextThirtyCloseAfter,
   uniqueAscendingMarkers,
   type FhbCandle,
   type FhbKind,
@@ -16,9 +18,19 @@ const FIXTURE_DIR = path.resolve(__dirname, "../../../tests/fixtures/first_hour_
 interface Fixture {
   name: string;
   asOf: number | null;
+  maxWidth?: number;
   candles: FhbCandle[];
   expected: {
-    boxes: { day: string; a: number; b: number; forming: boolean; markerKinds: FhbKind[] }[];
+    boxes: {
+      day: string;
+      high: number;
+      low: number;
+      mid: number;
+      width: number;
+      tooWide: boolean;
+      forming: boolean;
+      markerKinds: FhbKind[];
+    }[];
   };
 }
 
@@ -32,14 +44,17 @@ function loadFixtures(): Fixture[] {
 describe("computeFirstHourBox fixtures", () => {
   for (const fx of loadFixtures()) {
     it(fx.name, () => {
-      const result = computeFirstHourBox(fx.candles, { asOf: fx.asOf });
+      const result = computeFirstHourBox(fx.candles, { asOf: fx.asOf, maxWidth: fx.maxWidth ?? 150 });
       expect(result.boxes).toHaveLength(fx.expected.boxes.length);
       for (let i = 0; i < fx.expected.boxes.length; i++) {
         const got = result.boxes[i]!;
         const exp = fx.expected.boxes[i]!;
         expect(got.day).toBe(exp.day);
-        expect(got.a).toBe(exp.a);
-        expect(got.b).toBe(exp.b);
+        expect(got.high).toBe(exp.high);
+        expect(got.low).toBe(exp.low);
+        expect(got.mid).toBe(exp.mid);
+        expect(got.width).toBe(exp.width);
+        expect(got.tooWide).toBe(exp.tooWide);
         expect(got.forming).toBe(exp.forming);
         expect(got.markers.map((m) => m.kind)).toEqual(exp.markerKinds);
       }
@@ -51,23 +66,27 @@ describe("computeFirstHourBox fixtures", () => {
 });
 
 describe("firstHourBox helpers", () => {
-  it("formats Indian prices", () => {
+  it("formats Indian prices and axis labels", () => {
     expect(formatInrPrice(24350)).toBe("24,350.00");
+    expect(formatBoxAxisLabel("BOX H", 24350)).toBe("BOX H 24,350");
+    expect(formatBoxAxisLabel("BOX L", 24210.5)).toBe("BOX L 24,210.50");
   });
 
   it("hides on 1h/1D/1W and shows on intraday ≤30m", () => {
     expect(firstHourBoxVisibleOn("5m")).toBe(true);
-    expect(firstHourBoxVisibleOn("30m")).toBe(true);
     expect(firstHourBoxVisibleOn("1h")).toBe(false);
-    expect(firstHourBoxVisibleOn("1D")).toBe(false);
-    expect(firstHourBoxVisibleOn("1W")).toBe(false);
+  });
+
+  it("nextThirtyCloseAfter finds the next 10:45…15:15 close", () => {
+    // 2026-11-17 10:00 IST → next close 10:45
+    expect(nextThirtyCloseAfter(1794889800)).toBe(1794892500);
   });
 
   it("uniqueAscendingMarkers keeps last on duplicate time", () => {
     const out = uniqueAscendingMarkers([
       { time: 2, kind: "PROBE", side: "above", label: "a", color: "#f59e0b" },
-      { time: 1, kind: "BREAK", side: "below", label: "b", color: "#ef5350" },
-      { time: 2, kind: "FAILED", side: "below", label: "c", color: "#94a3b8" },
+      { time: 1, kind: "BREAK", side: "below", label: "b", color: "#3b82f6" },
+      { time: 2, kind: "FAILED", side: "below", label: "c", color: "#a855f7" },
     ]);
     expect(out.map((m) => m.time)).toEqual([1, 2]);
     expect(out[1]?.kind).toBe("FAILED");

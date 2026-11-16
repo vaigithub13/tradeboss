@@ -1,7 +1,8 @@
 {
-  "name": "skip_odd_session_and_missing_ab",
-  "description": "Day starting at 10:00 (special/muhurat-like) is skipped. Day missing 09:45 is skipped. Normal day kept.",
+  "name": "skip_missing_ab_and_odd_session",
+  "description": "Day starting at 10:00 skipped. Day missing 09:45 skipped when locked. Normal day kept.",
   "asOf": null,
+  "maxWidth": 150,
   "candles": [
     { "time": 1794803400, "open": 24000, "high": 24100, "low": 23900, "close": 24050 },
     { "time": 1794805200, "open": 24050, "high": 24150, "low": 24000, "close": 24100 },
@@ -15,8 +16,11 @@
     "boxes": [
       {
         "day": "2026-11-17",
-        "a": 24480,
-        "b": 24380,
+        "high": 24480,
+        "low": 24380,
+        "mid": 24430,
+        "width": 100,
+        "tooWide": false,
         "forming": false,
         "markerKinds": []
       }

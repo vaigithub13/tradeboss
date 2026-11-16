@@ -209,10 +209,48 @@ export const CATALOG: Record<IndicatorType, IndicatorDef> = {
     type: "first_hour_box",
     label: "First Hour Box",
     pane: "price",
-    params: [],
+    params: [
+      {
+        key: "max_width",
+        label: "Max width (pts)",
+        kind: "float",
+        default: 150,
+        min: 1,
+        max: 10_000,
+        step: 1,
+        inclusiveMin: true,
+      },
+      {
+        key: "markers",
+        label: "Status markers",
+        kind: "choice",
+        default: "on",
+        options: [
+          { value: "on", label: "On" },
+          { value: "off", label: "Off" },
+        ],
+      },
+      {
+        key: "status_panel",
+        label: "Status panel",
+        kind: "choice",
+        default: "on",
+        options: [
+          { value: "on", label: "On" },
+          { value: "off", label: "Off" },
+        ],
+      },
+    ],
     colors: [
       { key: "box", label: "Box fill", default: "#2962ff" },
+      { key: "high", label: "Box high", default: "#16a34a" },
+      { key: "low", label: "Box low", default: "#dc2626" },
+      { key: "mid", label: "Box mid", default: "#94a3b8" },
       { key: "probe", label: "Probe", default: "#f59e0b" },
+      { key: "break", label: "Break", default: "#3b82f6" },
+      { key: "accepted_up", label: "Accepted ↑", default: "#16a34a" },
+      { key: "accepted_down", label: "Accepted ↓", default: "#dc2626" },
+      { key: "failed", label: "Failed", default: "#a855f7" },
     ],
     outputs: [],
   },
@@ -303,7 +341,8 @@ export function createInstance(type: IndicatorType, existing: readonly Indicator
   for (const c of def.colors) {
     colors[c.key] = c.cycle ? (PALETTE[(PALETTE.indexOf(c.default) + copies) % PALETTE.length] ?? c.default) : c.default;
   }
-  return { id: nextId(type, existing), type, params: defaultParams(type), colors, visible: true };
+  // First Hour Box stays OFF until the user enables it in the panel.
+  return { id: nextId(type, existing), type, params: defaultParams(type), colors, visible: type !== "first_hour_box" };
 }
 
 const fmtNum = (v: ParamValue | undefined): string => String(v ?? "");
