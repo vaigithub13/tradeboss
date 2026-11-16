@@ -97,8 +97,8 @@ export function paperRows(signals: readonly PaperSignal[]): PaperRow[] {
 }
 
 /** "+1,234.50", "−88.00", or "—" */
-export function formatRupees(value: number | null): string {
-  if (value == null) return "—";
+export function formatRupees(value: number | null | undefined): string {
+  if (value == null || typeof value !== "number" || !Number.isFinite(value)) return "—";
   const abs = Math.abs(value).toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return value < 0 ? `−${abs}` : `+${abs}`;
 }

@@ -76,12 +76,19 @@ export function hhmmss(unixSeconds: number | null): string {
   return unixSeconds == null ? "—" : TIME.format(new Date(unixSeconds * 1000));
 }
 
+function asNum(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
 function n2(v: number | null | undefined): string {
-  return v == null ? "—" : v.toFixed(2);
+  const n = asNum(v);
+  return n == null ? "—" : n.toFixed(2);
 }
 
 function signed(v: number | null | undefined): string {
-  return v == null ? "—" : `${v > 0 ? "+" : ""}${v.toFixed(2)}`;
+  const n = asNum(v);
+  return n == null ? "—" : `${n > 0 ? "+" : ""}${n.toFixed(2)}`;
 }
 
 /** "~22571.55 / 101.00": the estimated side carries "~" */
@@ -94,21 +101,24 @@ function pair(index: number | null, premium: number | null, estimated: string[])
 
 /** The text of every cell, in COLUMNS order. */
 export function cellText(row: PaperTradeRow, key: ColumnKey): string {
+  if (!row) return "—";
+  const fromCandles = Array.isArray(row.index_from_candles) ? row.index_from_candles : [];
+  const estimated = Array.isArray(row.estimated) ? row.estimated : [];
   switch (key) {
-    case "date": return row.date;
-    case "slot": return row.slot;
-    case "direction": return row.direction;
-    case "signal": return hhmmss(row.signal_time);
+    case "date": return row.date ?? "—";
+    case "slot": return row.slot ?? "—";
+    case "direction": return row.direction ?? "—";
+    case "signal": return hhmmss(asNum(row.signal_time));
     case "trigger": return n2(row.trigger_index);
-    case "entryTime": return hhmmss(row.entry_time);
-    case "niftyEntry": return `${row.index_from_candles.includes("entry") ? "≈" : ""}${n2(row.index_entry)}`;
-    case "contract": return row.contract.replace(/^NIFTY /, "");
-    case "lots": return `${row.lots} x ${row.lot_size}`;
-    case "entryPremium": return `${n2(row.entry_premium)} ${row.entry_source}`;
-    case "stop": return pair(row.index_stop, row.premium_stop, row.estimated);
-    case "target": return pair(row.index_target, row.premium_target, row.estimated);
-    case "exitTime": return hhmmss(row.exit_time);
-    case "niftyExit": return `${row.index_from_candles.includes("exit") ? "≈" : ""}${n2(row.index_exit)}`;
+    case "entryTime": return hhmmss(asNum(row.entry_time));
+    case "niftyEntry": return `${fromCandles.includes("entry") ? "≈" : ""}${n2(row.index_entry)}`;
+    case "contract": return String(row.contract ?? "—").replace(/^NIFTY /, "") || "—";
+    case "lots": return `${row.lots ?? "—"} x ${row.lot_size ?? "—"}`;
+    case "entryPremium": return `${n2(row.entry_premium)} ${row.entry_source ?? ""}`.trim();
+    case "stop": return pair(row.index_stop, row.premium_stop, estimated);
+    case "target": return pair(row.index_target, row.premium_target, estimated);
+    case "exitTime": return hhmmss(asNum(row.exit_time));
+    case "niftyExit": return `${fromCandles.includes("exit") ? "≈" : ""}${n2(row.index_exit)}`;
     case "exitPremium": return n2(row.exit_premium);
     case "niftyPoints": return signed(row.nifty_points);
     case "premiumPoints": return signed(row.premium_points);
@@ -117,8 +127,11 @@ export function cellText(row: PaperTradeRow, key: ColumnKey): string {
     case "net": return n2(row.net);
     case "shadowNet": return row.shadow == null
       ? n2(row.shadow_net ?? row.net)
-      : `${n2(row.shadow.net)} (${hhmmss(row.shadow.exit_time)} ${row.shadow.exit_reason} ${n2(row.shadow.exit_premium)})`;
-    case "r": return row.r_multiple == null ? "—" : `${row.r_multiple >= 0 ? "+" : ""}${row.r_multiple.toFixed(2)}`;
+      : `${n2(row.shadow.net)} (${hhmmss(asNum(row.shadow.exit_time))} ${row.shadow.exit_reason ?? "—"} ${n2(row.shadow.exit_premium)})`;
+    case "r": {
+      const r = asNum(row.r_multiple);
+      return r == null ? "—" : `${r >= 0 ? "+" : ""}${r.toFixed(2)}`;
+    }
     case "reason": return row.exit_reason ?? "—";
   }
 }

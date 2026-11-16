@@ -1,8 +1,11 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import type React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { PaperDashboard } from "./PaperDashboard";
+import { REAL_DESK_STATUS, REAL_TRADE_ROWS } from "./realApiFixture";
+import { SectionBoundary } from "./SectionBoundary";
 import { useAlertStore } from "../store/alertStore";
 import { usePaperStore } from "../store/paperStore";
 import { usePaperTradesStore } from "../store/paperTradesStore";
@@ -196,5 +199,41 @@ describe("PaperDashboard", () => {
     usePaperStore.setState({ errors: { "": "Failed to fetch" } });
     render(<PaperDashboard />);
     expect(screen.getByTestId("paper-offline")).toHaveTextContent("backend offline");
+  });
+
+  it("renders with real API-shaped data (retired slots, 0-trade day, duplicate exit times, partial fields)", () => {
+    usePaperStore.setState({
+      status: REAL_DESK_STATUS,
+      errors: {},
+      refresh: async () => {},
+      start: async () => {},
+      stop: async () => {},
+    });
+    usePaperTradesStore.setState({ rows: REAL_TRADE_ROWS, loading: false, error: null });
+    render(<PaperDashboard />);
+    expect(screen.getByTestId("paper-dashboard")).toBeInTheDocument();
+    expect(screen.queryByTestId("dash-slot-1")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("dash-slot-3")).not.toBeInTheDocument();
+    expect(screen.getByTestId("dash-slot-5")).toBeInTheDocument();
+    expect(screen.getByTestId("dash-slot-6")).toBeInTheDocument();
+    expect(screen.getByTestId("dash-live-5")).toBeInTheDocument();
+    expect(screen.getByTestId("retired-note")).toBeInTheDocument();
+    // trades table must not crash on partial index_from_candles / estimated
+    expect(screen.getByLabelText("Trades").textContent).toMatch(/PE|CE/);
+  });
+});
+
+describe("SectionBoundary", () => {
+  it("shows section failure card instead of crashing", () => {
+    function Boom(): React.ReactElement {
+      throw new Error("boom-equity");
+    }
+    render(
+      <SectionBoundary name="Equity curve">
+        <Boom />
+      </SectionBoundary>,
+    );
+    expect(screen.getByTestId("section-error")).toHaveTextContent("this section failed: Equity curve");
+    expect(screen.getByTestId("section-error")).toHaveTextContent("boom-equity");
   });
 });

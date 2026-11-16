@@ -16,6 +16,7 @@ import { SnapshotBadge } from "./panels/SnapshotBadge";
 import { PaperPanel } from "./panels/PaperPanel";
 import { PaperTrades } from "./panels/PaperTrades";
 import { PaperDashboard } from "./paper/PaperDashboard";
+import { SectionBoundary } from "./paper/SectionBoundary";
 import { usePaperTradesStore } from "./store/paperTradesStore";
 import { paperMarkers, type PaperSignal } from "./paper/present";
 import { PAPER_TAB_KEY, readJson, writeJson } from "./paper/storage";
@@ -527,8 +528,10 @@ export default function App() {
         </div>
       )}
       {mainView === "paper" && (
-        <div className="absolute inset-0" data-testid="paper-pane">
-          <PaperDashboard />
+        <div className="absolute inset-0 bg-[#070a0f]" data-testid="paper-pane">
+          <SectionBoundary name="Paper dashboard">
+            <PaperDashboard />
+          </SectionBoundary>
         </div>
       )}
       </div>

@@ -49,19 +49,24 @@ export function todayIst(): string {
 
 export function filterDashboardRows(rows: readonly PaperTradeRow[], f: DashboardFilters): PaperTradeRow[] {
   return rows.filter((r) => {
+    if (!r) return false;
     if (f.slot && r.slot !== f.slot) return false;
-    if (f.from && r.date < f.from) return false;
-    if (f.to && r.date > f.to) return false;
+    const date = r.date ?? "";
+    if (f.from && (!date || date < f.from)) return false;
+    if (f.to && (!date || date > f.to)) return false;
     if (f.side && r.direction !== f.side) return false;
-    if (f.outcome === "win" && !((r.net ?? 0) > 0)) return false;
-    if (f.outcome === "loss" && !((r.net ?? 0) <= 0)) return false;
+    const net = numOr(r.net, 0);
+    if (f.outcome === "win" && !(net > 0)) return false;
+    if (f.outcome === "loss" && !(net <= 0)) return false;
     return true;
   });
 }
 
 export function holdMinutes(row: PaperTradeRow): number | null {
-  if (row.exit_time == null || row.entry_time == null) return null;
-  return Math.max(0, (row.exit_time - row.entry_time) / 60);
+  const entry = numOrNull(row.entry_time);
+  const exit = numOrNull(row.exit_time);
+  if (entry == null || exit == null) return null;
+  return Math.max(0, (exit - entry) / 60);
 }
 
 /** Max drawdown of a cumulative equity path (peak-to-trough of running net). */
@@ -82,22 +87,22 @@ export function computeKpis(
   rows: readonly PaperTradeRow[],
   opts: { today: string; weekNets?: Record<string, number> },
 ): PaperKpis {
-  const active = rows.filter((r) => isActivePaperSlot(r.slot));
+  const active = (rows ?? []).filter((r) => r && isActivePaperSlot(String(r.slot ?? "")));
   const todayRows = active.filter((r) => r.date === opts.today);
-  const todayNet = round2(todayRows.reduce((s, r) => s + (r.net ?? 0), 0));
+  const todayNet = round2(todayRows.reduce((s, r) => s + numOr(r.net, 0), 0));
   const tradesToday = todayRows.length;
-  const wins = active.filter((r) => (r.net ?? 0) > 0).length;
-  const forwardNet = round2(active.reduce((s, r) => s + (r.net ?? 0), 0));
+  const wins = active.filter((r) => numOr(r.net, 0) > 0).length;
+  const forwardNet = round2(active.reduce((s, r) => s + numOr(r.net, 0), 0));
   const winPct = active.length ? round2((100 * wins) / active.length) : null;
-  const ordered = [...active].sort((a, b) => a.entry_time - b.entry_time);
-  const dd = maxDrawdown(ordered.map((r) => r.net ?? 0));
+  const ordered = [...active].sort((a, b) => numOr(a.entry_time, 0) - numOr(b.entry_time, 0));
+  const dd = maxDrawdown(ordered.map((r) => numOr(r.net, 0)));
   const weekKey = istWeekKey(opts.today);
   let weekNet = 0;
   if (opts.weekNets) {
-    weekNet = round2(Object.values(opts.weekNets).reduce((s, v) => s + v, 0));
+    weekNet = round2(Object.values(opts.weekNets).reduce((s, v) => s + numOr(v, 0), 0));
   } else {
     weekNet = round2(
-      active.filter((r) => istWeekKey(r.date) === weekKey).reduce((s, r) => s + (r.net ?? 0), 0),
+      active.filter((r) => r.date && istWeekKey(r.date) === weekKey).reduce((s, r) => s + numOr(r.net, 0), 0),
     );
   }
   return { todayNet, weekNet, forwardNet, winPct, tradesToday, maxDrawdown: dd };
@@ -112,10 +117,10 @@ export interface DailyCell {
 /** Daily P&L matrix for active slots (dates descending). */
 export function dailyPnLMatrix(rows: readonly PaperTradeRow[], slots: readonly string[] = ACTIVE_PAPER_SLOTS): DailyCell[] {
   const map = new Map<string, Record<string, number>>();
-  for (const r of rows) {
-    if (!slots.includes(r.slot)) continue;
+  for (const r of rows ?? []) {
+    if (!r || !slots.includes(r.slot) || !r.date) continue;
     const row = map.get(r.date) ?? Object.fromEntries(slots.map((s) => [s, 0]));
-    row[r.slot] = round2((row[r.slot] ?? 0) + (r.net ?? 0));
+    row[r.slot] = round2((row[r.slot] ?? 0) + numOr(r.net, 0));
     map.set(r.date, row);
   }
   return [...map.entries()]
@@ -133,20 +138,33 @@ export interface EquityPoint {
   bySlot: Record<string, number>;
 }
 
-/** Cumulative net ₹ per slot over time (one point per trade exit). */
+/** Trade timestamp for equity (exit preferred). Null when missing/NaN. */
+export function tradeEquityTime(row: Pick<PaperTradeRow, "exit_time" | "entry_time">): number | null {
+  return numOrNull(row.exit_time) ?? numOrNull(row.entry_time);
+}
+
+/** Cumulative net ₹ per slot over time. Same-second exits are merged (LWC needs unique ascending times). */
 export function equitySeries(rows: readonly PaperTradeRow[], slots: readonly string[] = ACTIVE_PAPER_SLOTS): EquityPoint[] {
-  const ordered = [...rows]
-    .filter((r) => slots.includes(r.slot))
-    .sort((a, b) => (a.exit_time ?? a.entry_time) - (b.exit_time ?? b.entry_time));
+  const ordered = [...(rows ?? [])]
+    .filter((r) => r && slots.includes(r.slot) && tradeEquityTime(r) != null)
+    .sort((a, b) => (tradeEquityTime(a) ?? 0) - (tradeEquityTime(b) ?? 0));
   const running: Record<string, number> = Object.fromEntries(slots.map((s) => [s, 0]));
   const out: EquityPoint[] = [];
   for (const r of ordered) {
-    running[r.slot] = round2((running[r.slot] ?? 0) + (r.net ?? 0));
-    out.push({
-      time: r.exit_time ?? r.entry_time,
-      date: r.date,
+    const time = tradeEquityTime(r);
+    if (time == null) continue;
+    running[r.slot] = round2((running[r.slot] ?? 0) + numOr(r.net, 0));
+    const point: EquityPoint = {
+      time,
+      date: r.date ?? "",
       bySlot: { ...running },
-    });
+    };
+    const last = out[out.length - 1];
+    if (last && last.time === time) {
+      out[out.length - 1] = point;
+    } else {
+      out.push(point);
+    }
   }
   return out;
 }
@@ -164,24 +182,26 @@ export interface SlotStats {
 }
 
 export function slotStats(rows: readonly PaperTradeRow[], slot: string, today: string): SlotStats {
-  const all = rows.filter((r) => r.slot === slot);
+  const all = (rows ?? []).filter((r) => r && r.slot === slot);
   const todayRows = all.filter((r) => r.date === today);
-  const wins = all.filter((r) => (r.net ?? 0) > 0);
-  const losses = all.filter((r) => (r.net ?? 0) <= 0);
+  const wins = all.filter((r) => numOr(r.net, 0) > 0);
+  const losses = all.filter((r) => numOr(r.net, 0) <= 0);
   const exits: Record<string, number> = {};
   for (const r of all) {
-    const key = r.exit_reason ?? "other";
+    const raw = r.exit_reason ?? "other";
+    // trail fills still report as stop from the API; keep trail chip if ever present
+    const key = raw === "trail" ? "trail" : raw;
     exits[key] = (exits[key] ?? 0) + 1;
   }
   return {
     slot,
-    todayNet: round2(todayRows.reduce((s, r) => s + (r.net ?? 0), 0)),
-    totalNet: round2(all.reduce((s, r) => s + (r.net ?? 0), 0)),
+    todayNet: round2(todayRows.reduce((s, r) => s + numOr(r.net, 0), 0)),
+    totalNet: round2(all.reduce((s, r) => s + numOr(r.net, 0), 0)),
     trades: all.length,
     wins: wins.length,
     winPct: all.length ? round2((100 * wins.length) / all.length) : null,
-    avgWin: wins.length ? round2(wins.reduce((s, r) => s + (r.net ?? 0), 0) / wins.length) : null,
-    avgLoss: losses.length ? round2(losses.reduce((s, r) => s + (r.net ?? 0), 0) / losses.length) : null,
+    avgWin: wins.length ? round2(wins.reduce((s, r) => s + numOr(r.net, 0), 0) / wins.length) : null,
+    avgLoss: losses.length ? round2(losses.reduce((s, r) => s + numOr(r.net, 0), 0) / losses.length) : null,
     exits,
   };
 }
@@ -196,11 +216,11 @@ export function todaySummaryFromSlots(slots: readonly PaperStatus[]): {
   let net = 0;
   let trades = 0;
   let wins = 0;
-  for (const s of slots) {
-    if (!isActivePaperSlot(s.slot)) continue;
-    net += s.summary?.net ?? 0;
-    trades += s.summary?.trades ?? 0;
-    wins += s.summary?.wins ?? 0;
+  for (const s of slots ?? []) {
+    if (!s || !isActivePaperSlot(String(s.slot ?? ""))) continue;
+    net += numOr(s.summary?.net, 0);
+    trades += numOr(s.summary?.trades, 0);
+    wins += numOr(s.summary?.wins, 0);
   }
   const losses = Math.max(0, trades - wins);
   return {
@@ -216,6 +236,16 @@ function round2(v: number): number {
   return Math.round(v * 100) / 100;
 }
 
+function numOr(v: unknown, fallback: number): number {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function numOrNull(v: unknown): number | null {
+  const n = typeof v === "number" ? v : typeof v === "string" && v.trim() !== "" ? Number(v) : Number.NaN;
+  return Number.isFinite(n) ? n : null;
+}
+
 /** Live position fields for cards; missing LTP shows null (API does not expose bid). */
 export function livePositionView(status: PaperStatus | null | undefined): {
   side: string;
@@ -229,18 +259,25 @@ export function livePositionView(status: PaperStatus | null | undefined): {
 } | null {
   const pos = status?.position;
   if (!pos) return null;
-  const contract = pos.symbol ?? pos.contract ?? status?.mark?.symbol ?? "";
-  const parts = contract.split(" ");
+  const contract = String(pos.symbol ?? pos.contract ?? status?.mark?.symbol ?? "");
+  const parts = contract.split(/\s+/).filter(Boolean);
   const strike = parts.length >= 2 ? parts[1] ?? "—" : "—";
   const side = parts.length >= 3 ? parts[2] ?? "—" : "—";
+  const entryRaw = pos.entry && typeof pos.entry === "object" ? pos.entry.price : undefined;
   return {
     side,
     strike,
-    entry: pos.entry?.price ?? pos.entry_price ?? null,
+    entry: numOrNull(entryRaw ?? pos.entry_price),
     ltp: null, // not on PaperMark / open position — show "—" in UI
-    unrealised: status?.mark?.net ?? null,
-    stop: pos.levels?.premium_stop ?? null,
-    target: pos.levels?.premium_target ?? null,
+    unrealised: numOrNull(status?.mark?.net),
+    stop: numOrNull(pos.levels?.premium_stop),
+    target: numOrNull(pos.levels?.premium_target),
     contract,
   };
+}
+
+/** Safe money/number display helper for dashboard cells. */
+export function fmtNum(v: unknown, digits = 2): string {
+  const n = numOrNull(v);
+  return n == null ? "—" : n.toFixed(digits);
 }

@@ -100,6 +100,35 @@ describe("dashboard helpers", () => {
     expect(eq.at(-1)?.bySlot["2"]).toBe(30);
   });
 
+  it("merges same-second exits so equity times are unique and ascending (LWC requirement)", () => {
+    const rows = [
+      row({ slot: "2", date: "2026-11-11", net: -200, entry_time: 100, exit_time: 500 }),
+      row({ slot: "4", date: "2026-11-11", net: 300, entry_time: 110, exit_time: 500 }),
+      row({ slot: "5", date: "2026-11-11", net: 50, entry_time: 120, exit_time: 500 }),
+      row({ slot: "2", date: "2026-11-12", net: 10, entry_time: 200, exit_time: 600 }),
+    ];
+    const eq = equitySeries(rows);
+    const times = eq.map((p) => p.time);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    expect(new Set(times).size).toBe(times.length);
+    expect(eq).toHaveLength(2);
+    expect(eq[0]?.bySlot["2"]).toBe(-200);
+    expect(eq[0]?.bySlot["4"]).toBe(300);
+    expect(eq[0]?.bySlot["5"]).toBe(50);
+    expect(eq[1]?.bySlot["2"]).toBe(-190);
+  });
+
+  it("skips rows with invalid times and nullish nets when building equity", () => {
+    const rows = [
+      row({ slot: "2", date: "2026-11-11", net: 10, entry_time: Number.NaN, exit_time: Number.NaN }),
+      row({ slot: "2", date: "2026-11-11", net: null as unknown as number, entry_time: 10, exit_time: 20 }),
+      row({ slot: "4", date: "2026-11-11", net: 5, entry_time: 15, exit_time: 25 }),
+    ];
+    const eq = equitySeries(rows);
+    expect(eq.every((p) => Number.isFinite(p.time))).toBe(true);
+    expect(new Set(eq.map((p) => p.time)).size).toBe(eq.length);
+  });
+
   it("maxDrawdown and holdMinutes", () => {
     expect(maxDrawdown([100, -50, -80, 20])).toBe(130);
     expect(holdMinutes(row({ slot: "2", date: "2026-11-16", net: 1, entry_time: 1000, exit_time: 1600 }))).toBe(10);

@@ -9,6 +9,7 @@ import {
   dailyPnLMatrix,
   equitySeries,
   filterDashboardRows,
+  fmtNum,
   holdMinutes,
   livePositionView,
   slotStats,
@@ -17,6 +18,7 @@ import {
 } from "./dashboard";
 import { PaperEquityChart } from "./PaperEquityChart";
 import { ResizableTable } from "./ResizableTable";
+import { SectionBoundary } from "./SectionBoundary";
 import {
   ACTIVE_PAPER_SLOTS,
   RETIRED_PAPER_SLOTS,
@@ -120,28 +122,35 @@ export function PaperDashboard() {
     };
   }, [desk, today]);
 
-  const allRows = tradeRows;
-  const activeRows = useMemo(() => allRows.filter((r) => isActivePaperSlot(r.slot)), [allRows]);
+  const allRows = tradeRows ?? [];
+  const activeRows = useMemo(
+    () => allRows.filter((r) => r && isActivePaperSlot(String(r.slot ?? ""))),
+    [allRows],
+  );
   const filtered = useMemo(() => filterDashboardRows(activeRows, filters), [activeRows, filters]);
   const sorted = useMemo(() => sortRows(filtered, sort.key, sort.dir), [filtered, sort]);
   const kpis = useMemo(() => computeKpis(activeRows, { today, weekNets }), [activeRows, today, weekNets]);
   const daily = useMemo(() => dailyPnLMatrix(activeRows), [activeRows]);
   const equity = useMemo(() => equitySeries(activeRows), [activeRows]);
   const bySlot = useMemo(() => {
-    const map = new Map((desk?.slots ?? []).map((s) => [s.slot, s]));
+    const map = new Map((desk?.slots ?? []).filter(Boolean).map((s) => [String(s.slot), s]));
     return ACTIVE_PAPER_SLOTS.map((slot) => map.get(slot) ?? null);
   }, [desk]);
 
   const offline = Boolean(pollError) || tradesError != null;
 
   const download = () => {
-    const blob = new Blob([toCsv(sorted)], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = "paper-dashboard-trades.csv";
-    a.click();
-    URL.revokeObjectURL(url);
+    try {
+      const blob = new Blob([toCsv(sorted)], { type: "text/csv" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "paper-dashboard-trades.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      /* ignore */
+    }
   };
 
   return (
@@ -159,33 +168,35 @@ export function PaperDashboard() {
           )}
         </div>
 
-        {/* KPIs */}
-        <section className="flex flex-wrap gap-2" aria-label="Paper KPIs">
-          <Kpi label="Today net ₹" value={formatRupees(kpis.todayNet)} tone={toneOf(kpis.todayNet)} />
-          <Kpi label="This week net ₹" value={formatRupees(kpis.weekNet)} tone={toneOf(kpis.weekNet)} />
-          <Kpi label="Forward-test total ₹" value={formatRupees(kpis.forwardNet)} tone={toneOf(kpis.forwardNet)} />
-          <Kpi label="Win %" value={kpis.winPct == null ? "—" : `${kpis.winPct}%`} tone="neutral" />
-          <Kpi label="Trades today" value={String(kpis.tradesToday)} tone="neutral" />
-          <Kpi
-            label="Max drawdown (forward)"
-            value={kpis.maxDrawdown == null ? "—" : formatRupees(-Math.abs(kpis.maxDrawdown))}
-            tone={kpis.maxDrawdown ? "neg" : "neutral"}
-          />
-        </section>
-
-        {/* Slot cards */}
-        <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Active paper slots">
-          {ACTIVE_PAPER_SLOTS.map((slot, i) => (
-            <SlotCard
-              key={slot}
-              slot={slot}
-              status={bySlot[i] ?? null}
-              stats={slotStats(activeRows, slot, today)}
-              onStart={(strategy, params) => void start(slot, strategy, params)}
-              onStop={() => void stop(slot)}
+        <SectionBoundary name="KPIs">
+          <section className="flex flex-wrap gap-2" aria-label="Paper KPIs">
+            <Kpi label="Today net ₹" value={formatRupees(kpis.todayNet)} tone={toneOf(kpis.todayNet)} />
+            <Kpi label="This week net ₹" value={formatRupees(kpis.weekNet)} tone={toneOf(kpis.weekNet)} />
+            <Kpi label="Forward-test total ₹" value={formatRupees(kpis.forwardNet)} tone={toneOf(kpis.forwardNet)} />
+            <Kpi label="Win %" value={kpis.winPct == null ? "—" : `${kpis.winPct}%`} tone="neutral" />
+            <Kpi label="Trades today" value={String(kpis.tradesToday)} tone="neutral" />
+            <Kpi
+              label="Max drawdown (forward)"
+              value={kpis.maxDrawdown == null ? "—" : formatRupees(-Math.abs(kpis.maxDrawdown))}
+              tone={kpis.maxDrawdown ? "neg" : "neutral"}
             />
-          ))}
-        </section>
+          </section>
+        </SectionBoundary>
+
+        <SectionBoundary name="Slot cards">
+          <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Active paper slots">
+            {ACTIVE_PAPER_SLOTS.map((slot, i) => (
+              <SlotCard
+                key={slot}
+                slot={slot}
+                status={bySlot[i] ?? null}
+                stats={slotStats(activeRows, slot, today)}
+                onStart={(strategy, params) => void start(slot, strategy, params)}
+                onStop={() => void stop(slot)}
+              />
+            ))}
+          </section>
+        </SectionBoundary>
 
         {RETIRED_PAPER_SLOTS.length > 0 && (
           <p className="text-[11px] text-white/35" data-testid="retired-note">
@@ -194,154 +205,158 @@ export function PaperDashboard() {
           </p>
         )}
 
-        {/* Equity */}
-        <section className="rounded border border-white/10 bg-white/[0.02] p-3" aria-label="Equity curve">
-          <h2 className="mb-2 text-sm font-semibold text-white">Equity curve</h2>
-          {tradesLoading ? (
-            <div className="py-10 text-center text-white/40">Loading…</div>
-          ) : (
-            <PaperEquityChart
-              series={equity}
-              visible={legend}
-              onToggle={(slot) => {
-                setLegend((prev) => {
-                  const next = { ...prev, [slot]: prev[slot] === false };
-                  writeJson(PAPER_EQUITY_LEGEND_KEY, next);
-                  return next;
-                });
-              }}
-            />
-          )}
-        </section>
+        <SectionBoundary name="Equity curve">
+          <section className="rounded border border-white/10 bg-white/[0.02] p-3" aria-label="Equity curve">
+            <h2 className="mb-2 text-sm font-semibold text-white">Equity curve</h2>
+            {tradesLoading ? (
+              <div className="py-10 text-center text-white/40">Loading…</div>
+            ) : (
+              <PaperEquityChart
+                series={equity}
+                visible={legend}
+                onToggle={(slot) => {
+                  setLegend((prev) => {
+                    const next = { ...prev, [slot]: prev[slot] === false };
+                    writeJson(PAPER_EQUITY_LEGEND_KEY, next);
+                    return next;
+                  });
+                }}
+              />
+            )}
+          </section>
+        </SectionBoundary>
 
-        {/* Daily P&L */}
-        <section className="rounded border border-white/10 bg-white/[0.02] p-3" aria-label="Daily P&L">
-          <h2 className="mb-2 text-sm font-semibold text-white">Daily P&amp;L</h2>
-          {!daily.length ? (
-            <div className="py-6 text-center text-white/40">No days yet</div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[32rem] text-left tabular-nums">
-                <thead className="text-white/45">
-                  <tr>
-                    <th className="py-1 pr-3 font-normal">Date</th>
-                    {ACTIVE_PAPER_SLOTS.map((s) => (
-                      <th key={s} className="py-1 pr-3 text-right font-normal">
-                        {s}
-                      </th>
-                    ))}
-                    <th className="py-1 text-right font-normal">Total</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {daily.map((d) => (
-                    <tr key={d.date} className="border-t border-white/5">
-                      <td className="py-1 pr-3">{d.date}</td>
-                      {ACTIVE_PAPER_SLOTS.map((s) => {
-                        const v = d.bySlot[s] ?? 0;
-                        return (
-                          <td key={s} className={`py-1 pr-3 text-right ${v < 0 ? "text-red-400" : v > 0 ? "text-emerald-400" : "text-white/40"}`}>
-                            {v === 0 ? "—" : formatRupees(v)}
-                          </td>
-                        );
-                      })}
-                      <td className={`py-1 text-right ${d.total < 0 ? "text-red-400" : "text-emerald-400"}`}>{formatRupees(d.total)}</td>
+        <SectionBoundary name="Daily P&L">
+          <section className="rounded border border-white/10 bg-white/[0.02] p-3" aria-label="Daily P&L">
+            <h2 className="mb-2 text-sm font-semibold text-white">Daily P&amp;L</h2>
+            {!daily.length ? (
+              <div className="py-6 text-center text-white/40">No days yet</div>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[32rem] text-left tabular-nums">
+                  <thead className="text-white/45">
+                    <tr>
+                      <th className="py-1 pr-3 font-normal">Date</th>
+                      {ACTIVE_PAPER_SLOTS.map((s) => (
+                        <th key={s} className="py-1 pr-3 text-right font-normal">
+                          {s}
+                        </th>
+                      ))}
+                      <th className="py-1 text-right font-normal">Total</th>
                     </tr>
+                  </thead>
+                  <tbody>
+                    {daily.map((d) => (
+                      <tr key={d.date} className="border-t border-white/5">
+                        <td className="py-1 pr-3">{d.date}</td>
+                        {ACTIVE_PAPER_SLOTS.map((s) => {
+                          const v = d.bySlot[s] ?? 0;
+                          return (
+                            <td key={s} className={`py-1 pr-3 text-right ${v < 0 ? "text-red-400" : v > 0 ? "text-emerald-400" : "text-white/40"}`}>
+                              {v === 0 ? "—" : formatRupees(v)}
+                            </td>
+                          );
+                        })}
+                        <td className={`py-1 text-right ${d.total < 0 ? "text-red-400" : "text-emerald-400"}`}>{formatRupees(d.total)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
+        </SectionBoundary>
+
+        <SectionBoundary name="Trades table">
+          <section className="flex min-h-[20rem] flex-col rounded border border-white/10 bg-white/[0.02] p-3" aria-label="Trades">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <h2 className="text-sm font-semibold text-white">Trades</h2>
+              <label className="flex items-center gap-1">
+                Slot
+                <select
+                  aria-label="Slot filter"
+                  className="rounded border border-white/15 bg-transparent px-1 py-0.5"
+                  value={filters.slot}
+                  onChange={(e) => setFilters((f) => ({ ...f, slot: e.target.value }))}
+                >
+                  <option value="" className="bg-[#0b0e14]">all active</option>
+                  {ACTIVE_PAPER_SLOTS.map((s) => (
+                    <option key={s} value={s} className="bg-[#0b0e14]">{s}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="flex items-center gap-1">
+                From
+                <input type="date" aria-label="From date" className="rounded border border-white/15 bg-transparent px-1"
+                  value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} />
+              </label>
+              <label className="flex items-center gap-1">
+                To
+                <input type="date" aria-label="To date" className="rounded border border-white/15 bg-transparent px-1"
+                  value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} />
+              </label>
+              <label className="flex items-center gap-1">
+                Side
+                <select aria-label="Side filter" className="rounded border border-white/15 bg-transparent px-1 py-0.5"
+                  value={filters.side} onChange={(e) => setFilters((f) => ({ ...f, side: e.target.value as DashboardFilters["side"] }))}>
+                  <option value="" className="bg-[#0b0e14]">all</option>
+                  <option value="CE" className="bg-[#0b0e14]">CE</option>
+                  <option value="PE" className="bg-[#0b0e14]">PE</option>
+                </select>
+              </label>
+              <label className="flex items-center gap-1">
+                Result
+                <select aria-label="Outcome filter" className="rounded border border-white/15 bg-transparent px-1 py-0.5"
+                  value={filters.outcome} onChange={(e) => setFilters((f) => ({ ...f, outcome: e.target.value as DashboardFilters["outcome"] }))}>
+                  <option value="" className="bg-[#0b0e14]">all</option>
+                  <option value="win" className="bg-[#0b0e14]">win</option>
+                  <option value="loss" className="bg-[#0b0e14]">loss</option>
+                </select>
+              </label>
+              <button type="button" className="rounded border border-white/15 px-2 py-0.5" onClick={() => void loadTrades()}>
+                {tradesLoading ? "Loading…" : "Reload"}
+              </button>
+              <button type="button" className="rounded border border-white/15 px-2 py-0.5" disabled={!sorted.length} onClick={download}>
+                CSV
+              </button>
+            </div>
+            {!sorted.length ? (
+              <div className="py-8 text-center text-white/40">{tradesLoading ? "Loading…" : "No trades match"}</div>
+            ) : (
+              <ResizableTable
+                storageKey="paper.dashboard.colWidths"
+                columns={TRADE_COLS.map((c) => ({
+                  ...c,
+                  onSort:
+                    c.key === "hold"
+                      ? undefined
+                      : () =>
+                          setSort((s) => ({
+                            key: c.key as ColumnKey,
+                            dir: s.key === c.key && s.dir === "desc" ? "asc" : "desc",
+                          })),
+                  sorted: c.key !== "hold" && sort.key === c.key ? sort.dir : null,
+                }))}
+              >
+                <tbody>
+                  {sorted.map((row) => (
+                    <TradeRow key={`${row.slot}:${row.entry_time}`} row={row} />
                   ))}
                 </tbody>
-              </table>
-            </div>
-          )}
-        </section>
+              </ResizableTable>
+            )}
+          </section>
+        </SectionBoundary>
 
-        {/* Trades table */}
-        <section className="flex min-h-[20rem] flex-col rounded border border-white/10 bg-white/[0.02] p-3" aria-label="Trades">
-          <div className="mb-2 flex flex-wrap items-center gap-2">
-            <h2 className="text-sm font-semibold text-white">Trades</h2>
-            <label className="flex items-center gap-1">
-              Slot
-              <select
-                aria-label="Slot filter"
-                className="rounded border border-white/15 bg-transparent px-1 py-0.5"
-                value={filters.slot}
-                onChange={(e) => setFilters((f) => ({ ...f, slot: e.target.value }))}
-              >
-                <option value="" className="bg-[#0b0e14]">all active</option>
-                {ACTIVE_PAPER_SLOTS.map((s) => (
-                  <option key={s} value={s} className="bg-[#0b0e14]">{s}</option>
-                ))}
-              </select>
-            </label>
-            <label className="flex items-center gap-1">
-              From
-              <input type="date" aria-label="From date" className="rounded border border-white/15 bg-transparent px-1"
-                value={filters.from} onChange={(e) => setFilters((f) => ({ ...f, from: e.target.value }))} />
-            </label>
-            <label className="flex items-center gap-1">
-              To
-              <input type="date" aria-label="To date" className="rounded border border-white/15 bg-transparent px-1"
-                value={filters.to} onChange={(e) => setFilters((f) => ({ ...f, to: e.target.value }))} />
-            </label>
-            <label className="flex items-center gap-1">
-              Side
-              <select aria-label="Side filter" className="rounded border border-white/15 bg-transparent px-1 py-0.5"
-                value={filters.side} onChange={(e) => setFilters((f) => ({ ...f, side: e.target.value as DashboardFilters["side"] }))}>
-                <option value="" className="bg-[#0b0e14]">all</option>
-                <option value="CE" className="bg-[#0b0e14]">CE</option>
-                <option value="PE" className="bg-[#0b0e14]">PE</option>
-              </select>
-            </label>
-            <label className="flex items-center gap-1">
-              Result
-              <select aria-label="Outcome filter" className="rounded border border-white/15 bg-transparent px-1 py-0.5"
-                value={filters.outcome} onChange={(e) => setFilters((f) => ({ ...f, outcome: e.target.value as DashboardFilters["outcome"] }))}>
-                <option value="" className="bg-[#0b0e14]">all</option>
-                <option value="win" className="bg-[#0b0e14]">win</option>
-                <option value="loss" className="bg-[#0b0e14]">loss</option>
-              </select>
-            </label>
-            <button type="button" className="rounded border border-white/15 px-2 py-0.5" onClick={() => void loadTrades()}>
-              {tradesLoading ? "Loading…" : "Reload"}
-            </button>
-            <button type="button" className="rounded border border-white/15 px-2 py-0.5" disabled={!sorted.length} onClick={download}>
-              CSV
-            </button>
-          </div>
-          {!sorted.length ? (
-            <div className="py-8 text-center text-white/40">{tradesLoading ? "Loading…" : "No trades match"}</div>
-          ) : (
-            <ResizableTable
-              storageKey="paper.dashboard.colWidths"
-              columns={TRADE_COLS.map((c) => ({
-                ...c,
-                onSort:
-                  c.key === "hold"
-                    ? undefined
-                    : () =>
-                        setSort((s) => ({
-                          key: c.key as ColumnKey,
-                          dir: s.key === c.key && s.dir === "desc" ? "asc" : "desc",
-                        })),
-                sorted: c.key !== "hold" && sort.key === c.key ? sort.dir : null,
-              }))}
-            >
-              <tbody>
-                {sorted.map((row) => (
-                  <TradeRow key={`${row.slot}:${row.entry_time}`} row={row} />
-                ))}
-              </tbody>
-            </ResizableTable>
-          )}
-        </section>
-
-        {/* Details per slot */}
-        <section className="space-y-2" aria-label="Slot details">
-          <h2 className="text-sm font-semibold text-white">Details</h2>
-          {ACTIVE_PAPER_SLOTS.map((slot, i) => (
-            <SlotDetails key={slot} slot={slot} status={bySlot[i] ?? null} onStart={start} onStop={stop} />
-          ))}
-          <SoundTestRow />
-        </section>
+        <SectionBoundary name="Details">
+          <section className="space-y-2" aria-label="Slot details">
+            <h2 className="text-sm font-semibold text-white">Details</h2>
+            {ACTIVE_PAPER_SLOTS.map((slot, i) => (
+              <SlotDetails key={slot} slot={slot} status={bySlot[i] ?? null} onStart={start} onStop={stop} />
+            ))}
+            <SoundTestRow />
+          </section>
+        </SectionBoundary>
       </div>
     </div>
   );
@@ -426,12 +441,12 @@ function SlotCard({
             </span>
           </div>
           <div className="mt-0.5 flex justify-between text-white/50">
-            <span>Entry {live.entry?.toFixed(2) ?? "—"}</span>
+            <span>Entry {fmtNum(live.entry)}</span>
             <span title="LTP not in status API">LTP —</span>
           </div>
           <div className="flex justify-between text-white/50">
-            <span>SL {live.stop?.toFixed(2) ?? "—"}</span>
-            <span>TG {live.target?.toFixed(2) ?? "—"}</span>
+            <span>SL {fmtNum(live.stop)}</span>
+            <span>TG {fmtNum(live.target)}</span>
           </div>
         </div>
       )}

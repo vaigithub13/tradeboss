@@ -1,6 +1,6 @@
 import type { PaperStatus } from "../api/paper";
 import { formatRupees } from "./present";
-import { livePositionView } from "./dashboard";
+import { fmtNum, livePositionView } from "./dashboard";
 import { STATUS_PILL_CLASS, slotLabel, slotStatusPill } from "./slots";
 
 /** One compact live card for the Paper side panel. */
@@ -42,12 +42,12 @@ export function CompactLiveCard({ status }: { status: PaperStatus | null; slot: 
             </span>
           </div>
           <div className="flex justify-between text-white/50">
-            <span>Entry {live.entry != null ? live.entry.toFixed(2) : "—"}</span>
+            <span>Entry {fmtNum(live.entry)}</span>
             <span title="Live bid premium is not exposed by /api/paper/status">LTP —</span>
           </div>
           <div className="flex justify-between text-white/50">
-            <span>SL {live.stop != null ? live.stop.toFixed(2) : "—"}</span>
-            <span>TG {live.target != null ? live.target.toFixed(2) : "—"}</span>
+            <span>SL {fmtNum(live.stop)}</span>
+            <span>TG {fmtNum(live.target)}</span>
           </div>
         </div>
       )}

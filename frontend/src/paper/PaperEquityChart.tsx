@@ -11,6 +11,19 @@ const COLORS: Record<string, string> = {
   "6": "#f472b6",
 };
 
+/** Collapse duplicate times (keep last) and drop non-finite timestamps for Lightweight Charts. */
+export function linePointsForSlot(series: readonly EquityPoint[], slot: string): { time: UTCTimestamp; value: number }[] {
+  const map = new Map<number, number>();
+  for (const p of series) {
+    if (!p || !Number.isFinite(p.time)) continue;
+    const value = p.bySlot?.[slot];
+    map.set(p.time, typeof value === "number" && Number.isFinite(value) ? value : 0);
+  }
+  return [...map.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([time, value]) => ({ time: time as UTCTimestamp, value }));
+}
+
 /** Cumulative net ₹ lines for active slots. */
 export function PaperEquityChart({
   series,
@@ -28,31 +41,44 @@ export function PaperEquityChart({
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const chart = createChart(el, {
-      layout: { background: { color: "transparent" }, textColor: "rgba(255,255,255,0.55)" },
-      grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
-      rightPriceScale: { borderVisible: false },
-      timeScale: { borderVisible: false },
-      height: 240,
-      width: el.clientWidth,
-    });
-    chartRef.current = chart;
-    const lines: Record<string, ISeriesApi<"Line">> = {};
-    for (const slot of ACTIVE_PAPER_SLOTS) {
-      lines[slot] = chart.addSeries(LineSeries, {
-        color: COLORS[slot],
-        lineWidth: 2,
-        title: slotLabel(slot),
+    let chart: IChartApi | null = null;
+    try {
+      chart = createChart(el, {
+        layout: { background: { color: "transparent" }, textColor: "rgba(255,255,255,0.55)" },
+        grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+        rightPriceScale: { borderVisible: false },
+        timeScale: { borderVisible: false },
+        height: 240,
+        width: Math.max(el.clientWidth || 0, 1),
       });
+      chartRef.current = chart;
+      const lines: Record<string, ISeriesApi<"Line">> = {};
+      for (const slot of ACTIVE_PAPER_SLOTS) {
+        lines[slot] = chart.addSeries(LineSeries, {
+          color: COLORS[slot],
+          lineWidth: 2,
+          title: slotLabel(slot),
+        });
+      }
+      linesRef.current = lines;
+    } catch {
+      chartRef.current = null;
+      linesRef.current = {};
+      return;
     }
-    linesRef.current = lines;
     const ro = new ResizeObserver(() => {
-      if (host.current) chart.applyOptions({ width: host.current.clientWidth });
+      if (host.current && chartRef.current) {
+        chartRef.current.applyOptions({ width: Math.max(host.current.clientWidth || 0, 1) });
+      }
     });
     ro.observe(el);
     return () => {
       ro.disconnect();
-      chart.remove();
+      try {
+        chart?.remove();
+      } catch {
+        /* already disposed */
+      }
       chartRef.current = null;
       linesRef.current = {};
     };
@@ -62,15 +88,22 @@ export function PaperEquityChart({
     for (const slot of ACTIVE_PAPER_SLOTS) {
       const line = linesRef.current[slot];
       if (!line) continue;
-      line.applyOptions({ visible: visible[slot] !== false });
-      line.setData(
-        series.map((p) => ({
-          time: p.time as UTCTimestamp,
-          value: p.bySlot[slot] ?? 0,
-        })),
-      );
+      try {
+        line.applyOptions({ visible: visible[slot] !== false });
+        line.setData(linePointsForSlot(series, slot));
+      } catch {
+        try {
+          line.setData([]);
+        } catch {
+          /* ignore */
+        }
+      }
     }
-    chartRef.current?.timeScale().fitContent();
+    try {
+      chartRef.current?.timeScale().fitContent();
+    } catch {
+      /* ignore */
+    }
   }, [series, visible]);
 
   if (!series.length) {
