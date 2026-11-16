@@ -1982,3 +1982,18 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
   cleared on shutdown. `session_start_guard` and `scripts/session_stop` (launchd 16:35) prefer it over pgrep so a
   hand-started or oddly-named process is still recognised. Tests: `tests/test_backend_ownership.py`.
 - Slot 5 exit rule / "DD Quantman" naming: **not changed** — waiting on the user's reply (see chat).
+
+
+## 16 Nov 2026 (evening) - DD Quantman exit-rule comparison (slots 5–6 unchanged)
+
+- Slots 5–6 left exactly as configured (`premium_trail_10`, strike_premium 250, etc.).
+- Script `backend/scripts/dd_five_exit_compare.py`: dd_five_confirm 3m, real premiums, live timing, slippage 0.2;
+  long_only (slot 5) and short_only (slot 6); variants **a** trail10, **b** Supertrend only, **c** premium stop 20% /
+  no target. Report: `data/validation/dd_five_exit_compare_2026-11-16.md`.
+- Research 2022-01-03..2026-06-30 (excl. holdout): S5 a/b/c net ₹159,724 / 134,982 / 137,961 (565 trades; DD
+  25k / 43k / 42k; ≤2m exits 11 / 1.9%; top-5 share 52% / 62% / 61%). S6 a/b/c net −11,567 / −28,014 / −9,580
+  (567 trades). Trail10 wins on long net and DD; stop20 close second; ST-only weakest on long net/DD.
+- Option-history research 2024-10-03..2026-06-30: S5 a +86,438; S6 a +11,511 (trail10 flips short to positive in
+  this window).
+- Forward 2026-10-02..2026-11-13: S5 a/b/c +29,107 / +28,628 / +28,711 (19 trades); S6 a/b/c −11,003 / −6,279 /
+  −936 (9 trades; trail10 0% wins). ≤2m exits: 0 on forward.
