@@ -17,6 +17,8 @@ from app.strategies.orb import OpeningRangeBreakout
 from app.strategies.orb_plus import OrbPlus
 from app.strategies.pdh_pdl import PdhPdlBreakout
 from app.strategies.pivot_extension import PivotExtension
+from app.strategies.price_action import PriceAction
+from app.strategies.price_action_patterns import PATTERN_KINDS
 from app.strategies.price_channel import PriceChannel
 from app.strategies.supertrend_flip import SupertrendFlip
 from app.options.model import canonical_option_fill
@@ -165,6 +167,30 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "last_entry": _Field("str", "14:30"),
             "use_pivots": _Field("bool", True),
             "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "price_action": (
+        PriceAction,
+        {
+            "pattern": _Field("str", "tweezer_bottom", choices=PATTERN_KINDS),
+            "variant": _Field("str", "pattern", choices=("pattern", "box_break", "box_fail")),
+            "confluence": _Field("bool", False),
+            "rr": _Field("float", 2.0, min_value=0.1),
+            "confirm_bars": _Field("int", 3, min_value=1),
+            "atr_len": _Field("int", 14, min_value=1),
+            "avg_body_len": _Field("int", 10, min_value=1),
+            "swing_left": _Field("int", 5, min_value=1),
+            "swing_right": _Field("int", 5, min_value=1),
+            "level_pts": _Field("float", 10.0, min_value=0.0),
+            "max_width": _Field("float", 150.0, min_value=1.0),
+            "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
+            "first_entry": _Field("str", "09:20"),
+            "last_entry": _Field("str", "14:50"),
+            "box_first": _Field("str", "10:15"),
+            "box_last": _Field("str", "13:30"),
+            "lots": _Field("int", 1, min_value=1),
+            "st_atr": _Field("int", 10, min_value=1),
+            "st_mult": _Field("float", 2.0, min_value=0.1),
         },
     ),
 }
