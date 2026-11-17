@@ -12,6 +12,7 @@ from app.strategies.dd_five_confirm import DdFiveConfirm
 from app.strategies.ema_cross import EmaCrossover
 from app.strategies.ema_pivot_pullback import EmaPivotPullback
 from app.strategies.five_ema import FiveEma
+from app.strategies.gold_trend import GoldTrend2, GoldTrend9, GoldTrend14
 from app.strategies.log_xz import LogXZ
 from app.strategies.orb import OpeningRangeBreakout
 from app.strategies.orb_plus import OrbPlus
@@ -191,6 +192,53 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "lots": _Field("int", 1, min_value=1),
             "st_atr": _Field("int", 10, min_value=1),
             "st_mult": _Field("float", 2.0, min_value=0.1),
+        },
+    ),
+    # GOLD TREND research ports (AurumBoss book) — catalog only, no paper slot
+    "gold_trend_9": (
+        GoldTrend9,
+        {
+            "stop_mult": _Field("float", 1.5, min_value=0.1),
+            "tenkan": _Field("int", 9, min_value=1),
+            "kijun": _Field("int", 26, min_value=2),
+            "senkou": _Field("int", 52, min_value=2),
+            "cloud_shift": _Field("int", 26, min_value=1),
+            "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
+            "warmup_bars": _Field("int", 300, min_value=1),
+            "warmup_days": _Field("int", 25, min_value=1),
+            "first_entry": _Field("str", "09:20"),
+            "last_entry": _Field("str", "14:30"),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "gold_trend_2": (
+        GoldTrend2,
+        {
+            "stop_mult": _Field("float", 2.0, min_value=0.1),
+            "st_atr": _Field("int", 10, min_value=1),
+            "st_mult": _Field("float", 2.0, min_value=0.1),
+            "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
+            "warmup_bars": _Field("int", 300, min_value=1),
+            "warmup_days": _Field("int", 25, min_value=1),
+            "first_entry": _Field("str", "09:20"),
+            "last_entry": _Field("str", "14:30"),
+            "lots": _Field("int", 1, min_value=1),
+        },
+    ),
+    "gold_trend_14": (
+        GoldTrend14,
+        {
+            "stop_mult": _Field("float", 3.0, min_value=0.1),
+            "macd_fast": _Field("int", 12, min_value=1),
+            "macd_slow": _Field("int", 26, min_value=2),
+            "macd_signal": _Field("int", 9, min_value=1),
+            "ema_len": _Field("int", 200, min_value=1),
+            "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
+            "warmup_bars": _Field("int", 300, min_value=1),
+            "warmup_days": _Field("int", 25, min_value=1),
+            "first_entry": _Field("str", "09:20"),
+            "last_entry": _Field("str", "14:30"),
+            "lots": _Field("int", 1, min_value=1),
         },
     ),
 }

@@ -2060,3 +2060,17 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
 - Tests: liveView filter, snapMarkers, client reconnect, fhbLive boundary/toggle/forming/locked/silent;
   also aligned two stale backend assertions (6 paper slots; Upstox `option_*` read methods).
 - Full suite + typecheck pass. No backend/strategy/slot changes; backend not started.
+
+## 17 Nov 2026 (night) — GOLD TREND GT9/GT2/GT14 research port (no paper slot)
+
+- Port from AurumBoss `research/goldtrend_book.py` + `goldtrend6.py` (EA RMA/EMA/Supertrend maths).
+  Catalog-only: `gold_trend_9` (20m Ichimoku+15m ST+CPR+RSI), `gold_trend_2` (30m ST+15m ST+RSI),
+  `gold_trend_14` (20m MACD+EMA200+daily trend+day open). 5m feed, 09:15-anchored HTF bars,
+  live timing, stop k×ATR, no target, last_entry 14:30, square-off 15:15, warmup 300 bars / 25 days.
+- Script `scripts/gold_trend_backtest.py`: ATM / QM250 / QM250+trail10; long/short on QM250; vs S5-QM-long;
+  yearly; −top10; sensitivity; holdout only if gates pass.
+- **Result: no candidate passed.** Closest: GT14-QM250-orig research +₹35.5k / real-prem +₹17.7k but
+  PF 1.09 (<1.25) and −top10 deeply negative; GT14 short PF 1.33 but n=52 and −top10 fails.
+  GT14 ±20% MACD lengths is a **cliff**. S5-QM-long research +₹159.7k / real-prem +₹86.4k.
+  Holdout not run. Report under `data/validation/gold_trend_2026-11-17.md` (untracked).
+- No paper slot; slots 2/4/5/6 untouched; backend not started.
