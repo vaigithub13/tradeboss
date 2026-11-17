@@ -58,6 +58,7 @@ import {
   markerLetter,
   resolveSessionLineEnd,
   selectFhbPaintBoxes,
+  snapMarkersToCandles,
 } from "../indicators/firstHourBox";
 import type { GexResponse } from "../api/gex";
 import { gexBars } from "./gex";
@@ -68,6 +69,7 @@ import { isPositionTool } from "../draw/position";
 import { useDrawStore } from "../draw/store";
 import { usePaperTradesStore } from "../store/paperTradesStore";
 import { useChartStore } from "../store/chartStore";
+import { useLiveStore } from "../store/liveStore";
 import {
   DEFAULT_BAR_SPACING,
   DEFAULT_RIGHT_OFFSET,
@@ -161,6 +163,11 @@ export function ChartView({
   const [countdownText, setCountdownText] = useState("Closed");
   const [countdownY, setCountdownY] = useState<number | null>(null);
   const [priceScaleWidth, setPriceScaleWidth] = useState(56);
+  const [feedStale, setFeedStale] = useState(false);
+  const lastBarAt = useLiveStore((s) => s.lastBarAt);
+  const liveStatus = useLiveStore((s) => s.status);
+  const liveReconnect = useLiveStore((s) => s.reconnect);
+  const resyncTip = useChartStore((s) => s.resyncTip);
 
   const items = useIndicatorStore((s) => s.items);
   const cached = useIndicatorStore((s) => s.data[scope]);
@@ -389,6 +396,7 @@ export function ChartView({
     return fhbPaint.paint.flatMap((b) => b.markers).find((m) => m.time === hoverTime) ?? null;
   }, [fhbEnabled, fhbOpts.markers, hoverTime, fhbPaint.paint]);
 
+  const candleTimes = useMemo(() => candles.map((c) => c.time), [candles]);
   const mergedMarkers = useMemo(() => {
     const colorFor = (m: (typeof fhbResult.markers)[number]): string => {
       if (m.kind === "PROBE" || m.kind === "PROBE_BOTH") return fhbOpts.colors.probe;
@@ -397,20 +405,23 @@ export function ChartView({
       if (m.kind === "ACCEPTED") return m.side === "below" ? fhbOpts.colors.accepted_down : fhbOpts.colors.accepted_up;
       return m.color;
     };
-    const visibleMarkers = fhbPaint.paint.flatMap((b) => b.markers);
+    const snapped = fhbEnabled && fhbOpts.markers
+      ? snapMarkersToCandles(
+          fhbPaint.paint.flatMap((b) => b.markers),
+          candleTimes,
+        )
+      : [];
     const fhbMarkers: SeriesMarker<Time>[] = [];
-    if (fhbOpts.markers) {
-      for (const m of visibleMarkers) {
-        const letter = markerLetter(m.kind);
-        if (!letter) continue;
-        fhbMarkers.push({
-          time: m.time as UTCTimestamp,
-          position: m.side === "below" || m.kind === "FAILED" ? "belowBar" : "aboveBar",
-          shape: m.kind === "FAILED" ? "circle" : m.side === "below" ? "arrowDown" : "arrowUp",
-          color: colorFor(m),
-          text: letter,
-        });
-      }
+    for (const m of snapped) {
+      const letter = markerLetter(m.kind);
+      if (!letter) continue;
+      fhbMarkers.push({
+        time: m.time as UTCTimestamp,
+        position: m.side === "below" || m.kind === "FAILED" ? "belowBar" : "aboveBar",
+        shape: m.kind === "FAILED" ? "circle" : m.side === "below" ? "arrowDown" : "arrowUp",
+        color: colorFor(m),
+        text: letter,
+      });
     }
     const byTime = new Map<number, SeriesMarker<Time>>();
     for (const m of [...markers, ...fhbMarkers]) {
@@ -421,75 +432,13 @@ export function ChartView({
     return [...byTime.entries()]
       .sort((a, b) => a[0] - b[0])
       .map(([, m]) => m);
-  }, [markers, fhbPaint.paint, fhbOpts]);
+  }, [markers, fhbPaint.paint, fhbOpts, fhbEnabled, candleTimes]);
 
-  useEffect(() => {
-    const series = candleSeriesRef.current;
-    if (!series) return;
-    if (!markersRef.current) markersRef.current = createSeriesMarkers(series);
-    markersRef.current.setMarkers(mergedMarkers);
-  }, [mergedMarkers, candles]);
-
-  useEffect(() => {
-    const primitive = fhbPrimitiveRef.current;
-    if (!primitive) return;
-    if (!fhbEnabled) {
-      primitive.setBoxes([]);
-      return;
-    }
-    const currentDay = fhbPaint.current?.day;
-    primitive.setBoxes(
-      fhbPaint.paint.map((box) => {
-        const shadeEnd = box.forming
-          ? resolveSessionLineEnd(candles, box.startTime, Math.min(cursor ?? box.shadeEndTime, box.shadeEndTime))
-          : resolveSessionLineEnd(candles, box.startTime, box.shadeEndTime);
-        const lineEnd = resolveSessionLineEnd(candles, box.startTime, box.sessionEndTime);
-        return {
-          startTime: box.startTime,
-          shadeEndTime: shadeEnd,
-          lineEndTime: lineEnd,
-          high: box.high,
-          low: box.low,
-          mid: box.mid,
-          forming: box.forming,
-          opacity: box.day === currentDay ? 1 : 0.4,
-          boxColor: fhbOpts.colors.box,
-          highColor: fhbOpts.colors.high,
-          lowColor: fhbOpts.colors.low,
-          midColor: fhbOpts.colors.mid,
-          formingLabel: "Box forming",
-        };
-      }),
-    );
-  }, [fhbEnabled, fhbPaint, fhbOpts.colors, cursor, candles]);
-
-  useEffect(() => {
-    const series = candleSeriesRef.current;
-    if (!series) return;
-    for (const line of priceLinesRef.current) series.removePriceLine(line);
-    const axisLevels = [...levels];
-    // Axis labels only for the current day; lineVisible false so H/L/Mid stay day-clipped in the primitive.
-    const current = fhbPaint.current;
-    if (fhbEnabled && current && !current.forming) {
-      axisLevels.push(
-        { price: current.high, title: formatBoxAxisLabel("BOX H", current.high), color: fhbOpts.colors.high },
-        { price: current.low, title: formatBoxAxisLabel("BOX L", current.low), color: fhbOpts.colors.low },
-        { price: current.mid, title: "MID", color: fhbOpts.colors.mid },
-      );
-    }
-    priceLinesRef.current = axisLevels.map((level) => {
-      const isFhb = level.title === "MID" || level.title.startsWith("BOX");
-      return series.createPriceLine({
-        price: level.price,
-        color: level.color,
-        lineWidth: 1,
-        lineStyle: level.title === "MID" ? LineStyle.Dotted : isFhb ? LineStyle.Solid : LineStyle.Dashed,
-        lineVisible: !isFhb,
-        axisLabelVisible: true,
-        title: level.title,
-      });
-    });
-  }, [levels, candles, fhbEnabled, fhbPaint.current, fhbOpts.colors]);
+  const fhbAxisKey = useMemo(() => {
+    const c = fhbPaint.current;
+    if (!fhbEnabled || !c || c.forming) return "";
+    return `${c.day}:${c.high}:${c.low}:${c.mid}:${fhbOpts.colors.high}:${fhbOpts.colors.low}:${fhbOpts.colors.mid}`;
+  }, [fhbEnabled, fhbPaint.current, fhbOpts.colors]);
 
   useEffect(() => {
     const primitive = gexPrimitiveRef.current;
@@ -497,7 +446,7 @@ export function ChartView({
     primitive.setBars(gex?.available && gex.spot ? gexBars(gex.strikes, gex.spot) : []);
   }, [gex]);
 
-  // ---- push data whenever candles change
+  // ---- push candle data first (never blocked by indicators)
   useEffect(() => {
     const chart = chartRef.current;
     const candleSeries = candleSeriesRef.current;
@@ -586,6 +535,140 @@ export function ChartView({
     }
     syncChrome();
   }, [candles, timeframe, scope, volumeVisible]);
+
+  // ---- indicators AFTER candles (isolated; never throw into the candle path)
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    try {
+      if (!markersRef.current) markersRef.current = createSeriesMarkers(series);
+      markersRef.current.setMarkers(mergedMarkers);
+    } catch (err) {
+      console.error("[fhb] setMarkers failed", err);
+    }
+  }, [mergedMarkers]);
+
+  useEffect(() => {
+    const primitive = fhbPrimitiveRef.current;
+    if (!primitive) return;
+    try {
+      if (!fhbEnabled) {
+        primitive.setBoxes([]);
+        return;
+      }
+      const currentDay = fhbPaint.current?.day;
+      primitive.setBoxes(
+        fhbPaint.paint.map((box) => {
+          const shadeEnd = box.forming
+            ? resolveSessionLineEnd(candles, box.startTime, Math.min(cursor ?? box.shadeEndTime, box.shadeEndTime))
+            : resolveSessionLineEnd(candles, box.startTime, box.shadeEndTime);
+          const lineEnd = resolveSessionLineEnd(candles, box.startTime, box.sessionEndTime);
+          return {
+            startTime: box.startTime,
+            shadeEndTime: shadeEnd,
+            lineEndTime: lineEnd,
+            high: box.high,
+            low: box.low,
+            mid: box.mid,
+            forming: box.forming,
+            opacity: box.day === currentDay ? 1 : 0.4,
+            boxColor: fhbOpts.colors.box,
+            highColor: fhbOpts.colors.high,
+            lowColor: fhbOpts.colors.low,
+            midColor: fhbOpts.colors.mid,
+            formingLabel: "Box forming",
+          };
+        }),
+      );
+    } catch (err) {
+      console.error("[fhb] setBoxes failed", err);
+    }
+  }, [fhbEnabled, fhbPaint, fhbOpts.colors, cursor, candles]);
+
+  useEffect(() => {
+    const series = candleSeriesRef.current;
+    if (!series) return;
+    try {
+      for (const line of priceLinesRef.current) series.removePriceLine(line);
+      const axisLevels = [...levels];
+      const current = fhbPaint.current;
+      if (fhbEnabled && current && !current.forming) {
+        axisLevels.push(
+          { price: current.high, title: formatBoxAxisLabel("BOX H", current.high), color: fhbOpts.colors.high },
+          { price: current.low, title: formatBoxAxisLabel("BOX L", current.low), color: fhbOpts.colors.low },
+          { price: current.mid, title: "MID", color: fhbOpts.colors.mid },
+        );
+      }
+      priceLinesRef.current = axisLevels.map((level) => {
+        const isFhb = level.title === "MID" || level.title.startsWith("BOX");
+        return series.createPriceLine({
+          price: level.price,
+          color: level.color,
+          lineWidth: 1,
+          lineStyle: level.title === "MID" ? LineStyle.Dotted : isFhb ? LineStyle.Solid : LineStyle.Dashed,
+          lineVisible: !isFhb,
+          axisLabelVisible: true,
+          title: level.title,
+        });
+      });
+    } catch (err) {
+      console.error("[fhb] price lines failed", err);
+    }
+  }, [levels, fhbAxisKey, fhbEnabled, fhbOpts.colors, fhbPaint.current]);
+
+  // Stale-feed safety: 15s without a bar during market hours → pill + reconnect + tip resync.
+  const staleRecoveryAt = useRef(0);
+  useEffect(() => {
+    const STALE_MS = 15_000;
+    const RECOVERY_COOLDOWN_MS = 20_000;
+    const tick = (): void => {
+      const marketOpen = liveStatus?.market === "open";
+      if (!marketOpen || cursor != null) {
+        setFeedStale(false);
+        return;
+      }
+      const last = lastBarAt ?? 0;
+      // No bar yet this session: wait until we have seen at least one before declaring stale.
+      if (last <= 0) {
+        setFeedStale(false);
+        return;
+      }
+      const stale = Date.now() - last >= STALE_MS;
+      setFeedStale(stale);
+      if (stale && Date.now() - staleRecoveryAt.current >= RECOVERY_COOLDOWN_MS) {
+        staleRecoveryAt.current = Date.now();
+        liveReconnect();
+        void resyncTip();
+      }
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, [lastBarAt, liveStatus?.market, cursor, liveReconnect, resyncTip]);
+
+  useEffect(() => {
+    const RESYNC_COOLDOWN_MS = 10_000;
+    let lastAt = 0;
+    const resync = (): void => {
+      const now = Date.now();
+      if (now - lastAt < RESYNC_COOLDOWN_MS) return;
+      lastAt = now;
+      liveReconnect();
+      void resyncTip();
+    };
+    const onVisible = (): void => {
+      if (document.visibilityState !== "visible") return;
+      resync();
+    };
+    window.addEventListener("focus", onVisible);
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("online", resync);
+    return () => {
+      window.removeEventListener("focus", onVisible);
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("online", resync);
+    };
+  }, [liveReconnect, resyncTip]);
 
   const appliedFocus = useRef(0);
   useEffect(() => {
@@ -772,6 +855,11 @@ export function ChartView({
   // Candle close countdown under the last-price axis label (NSE session / holidays).
   useEffect(() => {
     const tick = (): void => {
+      if (feedStale) {
+        setCountdownText("waiting for data");
+        syncChrome();
+        return;
+      }
       const nowSec = Math.floor(Date.now() / 1000);
       const next = candleCountdown(nowSec, timeframe, { holidays, weekendSessions });
       setCountdownText(next.text);
@@ -780,7 +868,7 @@ export function ChartView({
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [timeframe, holidays, weekendSessions, candles, hasMoreNewer]);
+  }, [timeframe, holidays, weekendSessions, candles, hasMoreNewer, feedStale]);
 
   const onScrollToLive = async (): Promise<void> => {
     if (hasMoreNewer) {
@@ -859,6 +947,14 @@ export function ChartView({
           </div>
         )}
       </div>
+      {feedStale && (
+        <div
+          className="absolute left-1/2 top-2 z-20 -translate-x-1/2 rounded-full border border-amber-400/50 bg-amber-500/20 px-3 py-0.5 font-mono text-[11px] text-amber-200"
+          data-testid="feed-stale-pill"
+        >
+          feed stale
+        </div>
+      )}
       {countdownY != null && (
         <div
           className="pointer-events-none absolute z-10 select-none text-center font-mono text-[10px] leading-none"
@@ -866,7 +962,7 @@ export function ChartView({
             top: countdownY + 14,
             right: 0,
             width: priceScaleWidth,
-            color: priceLabelColor,
+            color: feedStale ? "#fbbf24" : priceLabelColor,
           }}
           data-testid="candle-countdown"
         >

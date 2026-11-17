@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { indicatorKey, scopeKey } from "../indicators/cache";
+import { CLIENT_ONLY_INDICATORS, type IndicatorType } from "../indicators/catalog";
 import { LiveClient, type LinkState, type SocketLike } from "../live/client";
 import type { BarMessage, LiveStatus, LiveView } from "../live/protocol";
 import { useChartStore } from "./chartStore";
@@ -11,11 +12,15 @@ interface LiveState {
   status: LiveStatus | null;
   /** local time (ms) the last status message arrived */
   statusAt: number | null;
+  /** local time (ms) the last bar message was applied */
+  lastBarAt: number | null;
   /** last server-side problem message (unknown symbol, ...) */
   lastError: string | null;
   start: () => void;
   stop: () => void;
   setView: (view: LiveView | null) => void;
+  /** Close the socket so the client reconnects and re-sends the current view. */
+  reconnect: () => void;
 }
 
 let client: LiveClient | null = null;
@@ -25,6 +30,7 @@ export const liveUrl = (loc: Pick<Location, "protocol" | "host">): string =>
 
 /** Fold one `bar` message into the chart and indicator stores. */
 export function applyBar(msg: BarMessage): void {
+  useLiveStore.setState({ lastBarAt: Date.now() });
   const chart = useChartStore.getState();
   const changed = chart.applyLive(msg.symbol, msg.timeframe, msg.candles);
   const loaded = useChartStore.getState().loaded;
@@ -38,6 +44,7 @@ export const useLiveStore = create<LiveState>((set) => ({
   link: "closed",
   status: null,
   statusAt: null,
+  lastBarAt: null,
   lastError: null,
 
   start: () => {
@@ -57,7 +64,10 @@ export const useLiveStore = create<LiveState>((set) => ({
         onStatus: (status, at) => set({ status, statusAt: at }),
         onBar: applyBar,
         onReload: (symbol) => void useChartStore.getState().refreshSymbols(symbol),
-        onError: (message) => set({ lastError: message }),
+        onError: (message) => {
+          console.error("[live]", message);
+          set({ lastError: message });
+        },
       },
     );
     client.start();
@@ -66,10 +76,14 @@ export const useLiveStore = create<LiveState>((set) => ({
   stop: () => {
     client?.stop();
     client = null;
-    set({ link: "closed", status: null, statusAt: null });
+    set({ link: "closed", status: null, statusAt: null, lastBarAt: null });
   },
 
   setView: (view) => client?.setView(view),
+
+  reconnect: () => {
+    client?.reconnect();
+  },
 }));
 
 /** The view to tell the server about: what is loaded + the visible indicators (deduplicated by key). */
@@ -82,6 +96,9 @@ export function liveView(
   const indicators: LiveView["indicators"] = [];
   for (const it of items) {
     if (!it.visible) continue;
+    // Client-only overlays (e.g. first_hour_box) must never reach the backend — an unknown
+    // type rejects the whole view and stops live bar pushes after reconnect.
+    if (CLIENT_ONLY_INDICATORS.has(it.type as IndicatorType)) continue;
     const id = indicatorKey(it.type as never, it.params as never);
     if (seen.has(id)) continue;
     seen.add(id);

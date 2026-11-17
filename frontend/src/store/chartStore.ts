@@ -170,6 +170,11 @@ interface ChartState {
    * the candles changed.
    */
   applyLive: (symbol: string, timeframe: string, incoming: readonly Candle[]) => boolean;
+  /**
+   * Refetch the newest tip bars and merge without duplicate times (stale-feed recovery).
+   * No-op while the window is scrolled away from live or replay is on.
+   */
+  resyncTip: () => Promise<void>;
 }
 
 let requestSeq = 0;
@@ -439,6 +444,18 @@ export const useChartStore = create<ChartState>((set, get) => ({
     cachePut(key, { candles: joined.candles, hasMore: (base?.hasMore ?? get().hasMoreOlder) || joined.droppedOlder, hasMoreNewer: false });
     set({ candles: joined.candles, hasMoreOlder: get().hasMoreOlder || joined.droppedOlder });
     return true;
+  },
+
+  resyncTip: async () => {
+    if (replayCursor() != null) return;
+    const { loaded, symbol, timeframe, sessions, hasMoreNewer } = get();
+    if (!loaded || !symbol || hasMoreNewer) return;
+    try {
+      const res = await fetchCandles({ symbol, timeframe, sessions, limit: 4 });
+      get().applyLive(symbol, timeframe, res.candles);
+    } catch (e) {
+      if (!isAbort(e)) console.error("[chart] resyncTip failed", e);
+    }
   },
 
   showRange: async (from, to) => {

@@ -159,6 +159,19 @@ describe("LiveClient connection", () => {
     expect(sockets).toHaveLength(2);
   });
 
+  it("reconnect() closes the socket and schedules a new one with the same view", () => {
+    const { clock, sockets, client } = setup();
+    client.start();
+    sockets[0]!.open();
+    client.setView(VIEW);
+    client.reconnect();
+    expect(sockets[0]!.closed).toBe(true);
+    clock.advance(1000);
+    expect(sockets).toHaveLength(2);
+    sockets[1]!.open();
+    expect(JSON.parse(sockets[1]!.sent[0]!).type).toBe("view");
+  });
+
   it("stop() closes the socket and never reconnects", () => {
     const { clock, sockets, links, client } = setup();
     client.start();

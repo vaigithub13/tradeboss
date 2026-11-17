@@ -12,10 +12,12 @@ import {
   nextThirtyCloseAfter,
   resolveSessionLineEnd,
   selectFhbPaintBoxes,
+  snapMarkersToCandles,
   uniqueAscendingMarkers,
   type FhbCandle,
   type FhbDayBox,
   type FhbKind,
+  type FhbMarker,
 } from "./firstHourBox";
 
 const FIXTURE_DIR = path.resolve(__dirname, "../../../tests/fixtures/first_hour_box");
@@ -129,5 +131,14 @@ describe("firstHourBox helpers", () => {
     const end = 1_000 + 6 * 3600;
     const times = [{ time: start }, { time: start + 3600 }, { time: end - 300 }, { time: end + 86_400 }];
     expect(resolveSessionLineEnd(times, start, end)).toBe(end - 300);
+  });
+
+  it("snapMarkersToCandles drops times that are not on the series", () => {
+    const markers: FhbMarker[] = [
+      { time: 100, kind: "BREAK", side: "above", label: "B", color: "#3b82f6" },
+      { time: 999, kind: "PROBE", side: "above", label: "P", color: "#f59e0b" },
+      { time: 200, kind: "ACCEPTED", side: "above", label: "A", color: "#16a34a" },
+    ];
+    expect(snapMarkersToCandles(markers, [100, 200, 300]).map((m) => m.time)).toEqual([100, 200]);
   });
 });

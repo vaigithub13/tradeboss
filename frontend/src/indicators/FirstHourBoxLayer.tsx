@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { Candle, Timeframe } from "../api/client";
 import { SectionBoundary } from "../paper/SectionBoundary";
@@ -14,6 +14,13 @@ import {
 } from "./firstHourBox";
 import type { IndicatorInstance } from "./catalog";
 
+const EMPTY: FirstHourBoxResult = { boxes: [], markers: [], nextCloseTime: null };
+const FHB_THROTTLE_MS = 1000;
+
+/**
+ * Client-only First Hour Box. Recomputes on a new/updated bar, throttled to ≤1/s while the same
+ * bar is forming so live ticks never flood the chart path.
+ */
 export function useFirstHourBox(
   candles: readonly Candle[],
   timeframe: Timeframe,
@@ -27,12 +34,54 @@ export function useFirstHourBox(
     return cursor != null ? Math.min(cursor, last) : last;
   }, [candles, cursor]);
 
-  return useMemo(() => {
+  const [result, setResult] = useState<FirstHourBoxResult>(EMPTY);
+  const lastBarKey = useRef("");
+  const lastRunAt = useRef(0);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
     if (!enabled || !firstHourBoxVisibleOn(timeframe) || !candles.length) {
-      return { boxes: [], markers: [], nextCloseTime: null };
+      setResult(EMPTY);
+      lastBarKey.current = "";
+      return;
     }
-    return computeFirstHourBox(candles, { asOf, maxWidth });
+    const last = candles[candles.length - 1]!;
+    const barKey = `${candles.length}|${last.time}|${maxWidth}|${asOf ?? ""}`;
+    const now = Date.now();
+    const barChanged = barKey !== lastBarKey.current;
+    const run = (): void => {
+      lastBarKey.current = barKey;
+      lastRunAt.current = Date.now();
+      try {
+        setResult(computeFirstHourBox(candles, { asOf, maxWidth }));
+      } catch (err) {
+        console.error("[fhb] computeFirstHourBox failed", err);
+      }
+    };
+    if (barChanged || now - lastRunAt.current >= FHB_THROTTLE_MS) {
+      if (timer.current != null) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+      run();
+      return;
+    }
+    // Same bar tick: schedule one deferred recompute (forming box updates in place).
+    if (timer.current != null) return;
+    const wait = FHB_THROTTLE_MS - (now - lastRunAt.current);
+    timer.current = setTimeout(() => {
+      timer.current = null;
+      run();
+    }, Math.max(0, wait));
+    return () => {
+      if (timer.current != null) {
+        clearTimeout(timer.current);
+        timer.current = null;
+      }
+    };
   }, [candles, timeframe, enabled, asOf, maxWidth]);
+
+  return enabled ? result : EMPTY;
 }
 
 export interface FhbUiColors {

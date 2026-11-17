@@ -225,11 +225,15 @@ def test_routes_run_a_second_strategy_in_slot_2_beside_the_first(tmp_path) -> No
     r = c.post("/api/paper/start", json={"strategy": "log_xz", "params": {"use_target": True}, "slot": "2"})
     assert r.status_code == 200 and r.json()["slot"] == "2" and r.json()["params"] == {"use_target": True}
     body = c.get("/api/paper/status").json()
-    assert body["state"] == "running" and [s["state"] for s in body["slots"]] == ["running", "running", "stopped", "stopped"]
+    assert body["state"] == "running" and [s["state"] for s in body["slots"]] == [
+        "running", "running", "stopped", "stopped", "stopped", "stopped",
+    ]
     assert c.post("/api/paper/stop", params={"slot": "2"}).json()["state"] == "stopped"
-    assert [s["state"] for s in c.get("/api/paper/status").json()["slots"]] == ["running", "stopped", "stopped", "stopped"]
+    assert [s["state"] for s in c.get("/api/paper/status").json()["slots"]] == [
+        "running", "stopped", "stopped", "stopped", "stopped", "stopped",
+    ]
     assert c.get("/api/paper/day", params={"day": "2026-10-05", "slot": "2"}).status_code == 200
-    assert c.post("/api/paper/start", json={"strategy": "log_xz", "slot": "5"}).status_code == 400
+    assert c.post("/api/paper/start", json={"strategy": "log_xz", "slot": "7"}).status_code == 400
 
 
 def test_a_strategy_with_a_target_or_stop_is_refused_because_paper_does_not_apply_them(tmp_path) -> None:

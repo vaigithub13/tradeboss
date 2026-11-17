@@ -101,6 +101,27 @@ export class LiveClient {
     this.sendView();
   }
 
+  /** Drop the current socket so backoff reconnect runs and re-sends the view. */
+  reconnect(): void {
+    if (this.stopped) return;
+    const s = this.socket;
+    if (!s) {
+      this.scheduleReconnect();
+      return;
+    }
+    this.socket = null;
+    if (this.watchdogTimer !== null) this.opts.timers.clearTimeout(this.watchdogTimer);
+    this.watchdogTimer = null;
+    s.onopen = s.onmessage = s.onclose = s.onerror = null;
+    try {
+      s.close();
+    } catch (err) {
+      console.error("[live] reconnect close failed", err);
+    }
+    this.handlers.onLink("closed");
+    this.scheduleReconnect();
+  }
+
   private sendView(): void {
     const s = this.socket;
     if (!s || s.readyState !== OPEN || !this.view) return;

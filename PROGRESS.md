@@ -2047,3 +2047,16 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
   frontend suite 427 passed; typecheck clean. Screenshots under `docs/screenshots/paper-redesign/`.
 - Missing from APIs (shown —): live option LTP/bid premium; separate `trail` exit reason (trails → stop).
   No backend / paper slots / strategies changed.
+
+## 17 Nov 2026 — Fix: First Hour Box froze live chart updates
+
+- Root cause: `liveView` sent client-only `first_hour_box` to the WS; backend rejected the whole view, so
+  after reconnect `c.view` stayed unset and bar pushes stopped. Unguarded FHB `setMarkers`/`setBoxes`
+  on every tick compounded the freeze; toggling FHB off could not restore the corrupted live path.
+- Fix (frontend): strip `CLIENT_ONLY_INDICATORS` from `liveView`; candle `update`/`setData` runs in its
+  own effect before isolated FHB try/catch updates; throttle FHB recompute ≤1/s; snap markers to series
+  times; `LiveClient.reconnect` + `resyncTip`; 15s market-hours stale pill + reconnect/refetch;
+  focus/visible/online resync (10s cooldown); countdown shows “waiting for data” when stale.
+- Tests: liveView filter, snapMarkers, client reconnect, fhbLive boundary/toggle/forming/locked/silent;
+  also aligned two stale backend assertions (6 paper slots; Upstox `option_*` read methods).
+- Full suite + typecheck pass. No backend/strategy/slot changes; backend not started.

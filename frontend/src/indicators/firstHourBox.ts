@@ -424,6 +424,26 @@ export function firstHourBoxVisibleOn(tf: string): boolean {
   return (FIRST_HOUR_BOX_TIMEFRAMES as readonly string[]).includes(tf);
 }
 
+/**
+ * Keep only markers whose time exists on the candle series (LWC rejects unknown times and can
+ * freeze the chart). Returns markers sorted ascending with unique times.
+ */
+export function snapMarkersToCandles(
+  markers: readonly FhbMarker[],
+  candleTimes: readonly number[],
+): FhbMarker[] {
+  if (!markers.length || !candleTimes.length) return [];
+  const allowed = new Set(candleTimes);
+  const byTime = new Map<number, FhbMarker>();
+  for (const m of markers) {
+    if (!allowed.has(m.time)) continue;
+    byTime.set(m.time, m);
+  }
+  return [...byTime.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([, m]) => m);
+}
+
 /** Alias kept for older fixtures / HUD that used a/b naming. */
 export function boxLevels(box: Pick<FhbDayBox, "high" | "low" | "mid" | "width">): {
   a: number;

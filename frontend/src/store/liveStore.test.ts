@@ -123,6 +123,13 @@ describe("liveView / liveUrl", () => {
     expect(v).toMatchObject({ symbol: "NIFTY50", timeframe: "5m", sessions: ["normal"] });
   });
 
+  it("omits client-only indicators (first_hour_box) so the backend never rejects the view", () => {
+    const ema = createInstance("ema", []);
+    const fhb = { ...createInstance("first_hour_box", []), visible: true };
+    const v = liveView({ symbol: "NIFTY50", timeframe: "5m", sessions: ["normal"] }, [ema, fhb]);
+    expect(v?.indicators.map((i) => i.type)).toEqual(["ema"]);
+  });
+
   it("is null while nothing is loaded", () => {
     expect(liveView(null, [])).toBeNull();
   });
