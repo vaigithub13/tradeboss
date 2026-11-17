@@ -2074,3 +2074,15 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
   GT14 ±20% MACD lengths is a **cliff**. S5-QM-long research +₹159.7k / real-prem +₹86.4k.
   Holdout not run. Report under `data/validation/gold_trend_2026-11-17.md` (untracked).
 - No paper slot; slots 2/4/5/6 untouched; backend not started.
+
+## 17 Nov 2026 (night) — S5-QM-long edge diagnosis (slot 5 unchanged)
+
+- Script `scripts/s5_edge_diagnosis.py`: factor tables (hour, weekday, expiry, VIX, ADX15m,
+  15m ST agree, gap ±0.3%, minutes-to-+5% premium) on research + real-prem; ≤3 change tests;
+  holdout for the best accepted. Report `data/validation/s5_edge_diagnosis_2026-11-17.md`.
+- **Losing both windows:** hour **10–11**; premium **no_hit_30** (real tape). Tue / ADX_mid hurt
+  real-prem only. Day-type via ADX terciles (market-view history too sparse).
+- **Changes:** `skip_hour_10-11` ACCEPTED (research PF 1.47→1.51, DD 25.4k→19.3k; real-prem
+  1.57→1.65, same DD cut; kept 89–94%). `timestop_5pct_20m` rejected (PF down both windows).
+- **Holdout** with skip_hour_10-11: no 10–11 entries → identical to baseline (−₹1.7k, n=25).
+- Slot 5 / paper slots not modified; backend not started.
