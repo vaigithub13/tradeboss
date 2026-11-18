@@ -1,6 +1,16 @@
 import { describe, expect, it } from "vitest";
 
-import { approveEnabled, cardLines, convertEnabled, disabledReasons, replaceAsked, showBacktestCard, type PineCard } from "./present";
+import {
+  approveEnabled,
+  cardLines,
+  convertEnabled,
+  disabledReasons,
+  replaceAsked,
+  runLiveEnabled,
+  scriptTitle,
+  showBacktestCard,
+  type PineCard,
+} from "./present";
 
 describe("pine panel gates", () => {
   it("keeps conversion disabled until the report is accepted", () => {
@@ -38,6 +48,27 @@ describe("pine panel gates", () => {
   it("hides the backtest card for an indicator script", () => {
     expect(showBacktestCard("indicator")).toBe(false);
     expect(showBacktestCard("strategy")).toBe(true);
+  });
+
+  it("gates Run live on accept, unsupported calls, and the 5-script cap", () => {
+    expect(runLiveEnabled(false, 0, 0)).toBe(false);
+    expect(runLiveEnabled(true, 1, 0)).toBe(false);
+    expect(runLiveEnabled(true, 0, 5)).toBe(false);
+    expect(runLiveEnabled(true, 0, 4)).toBe(true);
+    const open = {
+      busy: false,
+      hasReport: true,
+      accepted: true,
+      ready: true,
+      approved: false,
+      errors: [],
+      scriptCount: 5,
+      unsupported: [] as string[],
+    };
+    expect(disabledReasons("runLive", open)[0]).toMatch(/Max 5/);
+    expect(scriptTitle('strategy("NIFTY EMA 9-21 PRO Intraday v6", overlay=true)')).toBe(
+      "NIFTY EMA 9-21 PRO Intraday v6",
+    );
   });
 
   it("renders the summary warnings and the overnight split", () => {

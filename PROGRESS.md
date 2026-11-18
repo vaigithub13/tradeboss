@@ -2087,6 +2087,29 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
 - **Holdout** with skip_hour_10-11: no 10–11 entries → identical to baseline (−₹1.7k, n=25).
 - Slot 5 / paper slots not modified; backend not started.
 
+## 18 Nov 2026 — Phase 2: live Pine alerts with sound (Nifty + Sensex)
+
+Client-only PineTS live alerts. Paste v5/v6 → Accept → **Run live (NIFTY|SENSEX)** →
+BUY/SELL/EXIT markers on closed candles + distinct buy/sell/exit sounds + browser
+notifications + Alerts log. Max 5 scripts; Web Worker; never on the live WS view.
+
+- **Reuse:** Pine panel Accept/Plot; `paper/sounds.ts` unlock + volume (paper still plays
+  entry/exit only — buy/sell added beside them); ChartView markers; futures-volume VWAP notice.
+- **Closed bars:** ChartView emits AFTER `series.update` via `queueMicrotask` (`pine/closedBars.ts`).
+- **Compat:** IST `time`/`input.session`; `request.security` same-symbol HTF (rewrites empty
+  `syminfo.tickerid`); `ta.vwap` injects futures volume when index volume is 0; unsupported
+  calls show `line N: <call> not supported`; lookahead_on without `[1]` / `barstate.isrealtime` /
+  `varip` → may-repaint warning.
+- **Supported (min):** ta.ema/sma/rsi/atr/dmi/crossover/crossunder/highest/lowest/vwap,
+  timeframe.change/period, barstate.isconfirmed, var/`:=`, time, input.session, request.security,
+  plotshape/plotchar/plot, alert/alertcondition, strategy.entry/close/close_all/exit,
+  strategy.position_size, strategy.closedtrades(.profit).
+- **Not supported (surfaced):** request.security_lower_tf, request.seed, ticker.modify,
+  strategy.order, runtime.error, array json helpers — plus any PineTS runtime error string.
+- **Tests:** fixture `nifty_ema_9_21_pro.pine` e2e BUY CE/PE + dedupe + tip exclusion; closed-bar
+  isolation; paper entry/exit sound snapshot unchanged. Backend + frontend suites + typecheck green.
+  Paper slots / strategies / backtest / backend pine untouched. Backend not started.
+
 ## 18 Nov 2026 — Restore holdout peeks + isolate worker-parity sqlite
 
 - Local `data/backtests.sqlite` holdout_peeks restored to **2** (2026-07-01..2026-10-01,

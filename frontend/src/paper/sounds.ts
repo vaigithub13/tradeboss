@@ -98,3 +98,26 @@ export function playPlan(plan: Tone[], volume: number): void {
 export function playAlertSound(kind: "entry" | "exit", volume: number): void {
   playPlan(kind === "entry" ? entryPlan() : exitPlan(), volume);
 }
+
+/** Pine live BUY: short bright two-note (distinct from paper entry chime). */
+export function buyPlan(): Tone[] {
+  return [
+    { at: 0, freq: 880, dur: 0.35, gain: 0.85, type: "sine" },
+    { at: 0.12, freq: 1174.66, dur: 0.4, gain: 0.7, type: "triangle" },
+  ];
+}
+
+/** Pine live SELL: descending two-note (mirror of buy). */
+export function sellPlan(): Tone[] {
+  return [
+    { at: 0, freq: 698.46, dur: 0.35, gain: 0.85, type: "sine" },
+    { at: 0.12, freq: 523.25, dur: 0.45, gain: 0.7, type: "triangle" },
+  ];
+}
+
+/** Pine live alerts: buy / sell / exit. Paper slots keep using playAlertSound(entry|exit). */
+export function playPineAlertSound(kind: "buy" | "sell" | "exit", volume: number): void {
+  if (kind === "buy") playPlan(buyPlan(), volume);
+  else if (kind === "sell") playPlan(sellPlan(), volume);
+  else playPlan(exitPlan(), volume);
+}

@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { ENTRY_LENGTH, entryPlan, exitPlan, planLength } from "./sounds";
+import { ENTRY_LENGTH, buyPlan, entryPlan, exitPlan, planLength, sellPlan } from "./sounds";
+
+/** Frozen snapshot: paper entry/exit must not change when Pine buy/sell plans are added. */
+const PAPER_ENTRY_FREQS = [523.25, 659.25, 783.99, 1046.5, 523.25, 659.25, 783.99, 1046.5];
+const PAPER_EXIT_FUNDAMENTALS = [196, 196, 147];
 
 describe("paper alert sounds", () => {
   it("entry: a rising chime of about 2 s, played twice", () => {
@@ -25,5 +29,16 @@ describe("paper alert sounds", () => {
     const f0 = fundamentals[0] ?? 1;
     const ratios = plan.filter((t) => t.at === 0).map((t) => t.freq / f0);
     expect(ratios.some((r) => Math.abs(r - Math.round(r)) > 0.2)).toBe(true);
+  });
+
+  it("paper entry/exit plans are unchanged after Pine buy/sell were added", () => {
+    const entryTri = entryPlan().filter((t) => t.type === "triangle").map((t) => t.freq);
+    expect(entryTri).toEqual(PAPER_ENTRY_FREQS);
+    const exitStrikes = [...new Set(exitPlan().map((t) => t.at))];
+    const exitFund = exitStrikes.map((at) => Math.min(...exitPlan().filter((t) => t.at === at).map((t) => t.freq)));
+    expect(exitFund).toEqual(PAPER_EXIT_FUNDAMENTALS);
+    // Pine tones are different from paper entry
+    expect(buyPlan().map((t) => t.freq)).not.toEqual(entryTri.slice(0, 2));
+    expect(sellPlan()[0]!.freq).toBeLessThan(buyPlan()[0]!.freq);
   });
 });

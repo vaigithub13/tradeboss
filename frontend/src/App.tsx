@@ -7,7 +7,11 @@ import { DrawSync, DrawToolbar } from "./draw/toolbar";
 import { TimeframeBar } from "./chart/TimeframeBar";
 import { AnalysisPanel } from "./panels/AnalysisPanel";
 import { BacktestPanel } from "./panels/BacktestPanel";
+import { PineAlertsPanel } from "./panels/PineAlertsPanel";
 import { PinePanel } from "./panels/PinePanel";
+import { pineMarkers } from "./pine/markers";
+import { usePineLiveHost } from "./pine/liveHost";
+import { usePineLiveStore } from "./store/pineLiveStore";
 import { BacktestResults, TradeCard } from "./panels/BacktestResults";
 import { IndicatorsMenu } from "./panels/IndicatorsMenu";
 import { DataTokenBadge } from "./panels/DataTokenBadge";
@@ -216,8 +220,15 @@ export default function App() {
   const replayCursorTime = useReplayStore((s) => s.cursor);
   useReplayClock();
   usePaperAlerts();
+  usePineLiveHost();
   const setPanelOpen = useBacktestStore((s) => s.setPanelOpen);
   const [pineOpen, setPineOpen] = useState(false);
+  const [pineAlertsOpen, setPineAlertsOpen] = useState(false);
+  const pineScripts = usePineLiveStore((s) => s.scripts);
+  const pineMarkersByScript = usePineLiveStore((s) => s.markersByScript);
+  const pineNiftySignals = pineScripts
+    .filter((s) => s.enabled && s.scope === "nifty")
+    .flatMap((s) => pineMarkersByScript[s.id] ?? []);
   const [analysisOpen, setAnalysisOpen] = useState(false);
   const [requestToken, setRequestToken] = useState(0);
   const [analysisLevels, setAnalysisLevels] = useState<LevelLine[]>([]);
@@ -303,6 +314,7 @@ export default function App() {
       });
     }
   }
+  markers.push(...pineMarkers(pineNiftySignals, candles.map((c) => c.time)));
   markers.sort((a, b) => Number(a.time) - Number(b.time));
   const pickTime = (time: number): void => {
     const trade = activeRun?.result?.trades.find((item) => item.entry_time === time || item.exit_time === time);
@@ -376,6 +388,14 @@ export default function App() {
           onClick={() => setPineOpen(!pineOpen)}
         >
           Pine
+        </button>
+        <button
+          type="button"
+          className="rounded border border-white/15 px-2 py-1 text-xs text-white/80"
+          onClick={() => setPineAlertsOpen(!pineAlertsOpen)}
+          data-testid="pine-alerts-toggle"
+        >
+          Alerts
         </button>
         <button
           type="button"
@@ -560,6 +580,7 @@ export default function App() {
         onLevels={onAnalysisLevels}
         open={analysisOpen}
       />
+      {pineAlertsOpen && <PineAlertsPanel />}
       </div>
       </ChartScopeProvider>
       </div>

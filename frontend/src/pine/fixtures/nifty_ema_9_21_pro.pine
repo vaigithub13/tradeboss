@@ -1,0 +1,26 @@
+//@version=6
+strategy("NIFTY EMA 9-21 PRO Intraday v6", overlay=true, process_orders_on_close=true)
+
+sess = input.session("0915-1500", "Session")
+inSess = not na(time(timeframe.period, sess, "Asia/Kolkata"))
+
+ema9 = ta.ema(close, 9)
+ema21 = ta.ema(close, 21)
+htfEma = request.security(syminfo.tickerid, "5", ema9[1], lookahead=barmerge.lookahead_on)
+vw = ta.vwap(hlc3)
+[diplus, diminus, adx] = ta.dmi(14, 14)
+
+// htfEma / adx / vw are computed (compat surface); entries use crossover + session.
+longCond = ta.crossover(ema9, ema21) and inSess and (na(htfEma) or htfEma > 0) and (na(adx) or adx >= 0) and (na(vw) or close > vw or close < vw)
+shortCond = ta.crossunder(ema9, ema21) and inSess and (na(htfEma) or htfEma > 0) and (na(adx) or adx >= 0) and (na(vw) or close > vw or close < vw)
+
+plotshape(longCond, title="BUY CE", style=shape.triangleup, location=location.belowbar, text="BUY CE")
+plotshape(shortCond, title="BUY PE", style=shape.triangledown, location=location.abovebar, text="BUY PE")
+
+if longCond
+    strategy.entry("BUY CE", strategy.long)
+if shortCond
+    strategy.entry("BUY PE", strategy.short)
+
+if not na(time(timeframe.period, "1515-1525", "Asia/Kolkata"))
+    strategy.close_all(comment="EXIT")

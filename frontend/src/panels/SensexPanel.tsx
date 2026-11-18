@@ -16,11 +16,13 @@ import { viewLevels } from "../marketView/present";
 import { ReplayBar, useReplayClock } from "../replay/ReplayBar";
 import { useSensexReplayStore } from "../replay/store";
 import { sensexReplaySession } from "../replay/session";
+import { pineMarkers } from "../pine/markers";
+import { SectionBoundary } from "../paper/SectionBoundary";
 import { SENSEX_SCOPE, ChartScopeProvider } from "../store/chartScope";
 import { useSensexChartStore } from "../store/chartStore";
 import { useChartsConfigStore } from "../store/chartsConfigStore";
 import { useSensexIndicatorStore } from "../store/indicatorStore";
-import { SectionBoundary } from "../paper/SectionBoundary";
+import { usePineLiveStore } from "../store/pineLiveStore";
 import { AnalysisPanel } from "./AnalysisPanel";
 import { IndicatorsMenu } from "./IndicatorsMenu";
 import { SensexMarketView, useSensexMarketView } from "./SensexMarketView";
@@ -122,6 +124,13 @@ export function SensexPanel({ active, backendReady }: Props) {
     setAnalysisLevels([]);
   }, [symbol]);
 
+  const pineScripts = usePineLiveStore((s) => s.scripts);
+  const pineMarkersByScript = usePineLiveStore((s) => s.markersByScript);
+  const pineSignals = pineScripts
+    .filter((s) => s.enabled && s.scope === "sensex")
+    .flatMap((s) => pineMarkersByScript[s.id] ?? []);
+  const sensexMarkers = pineMarkers(pineSignals, candles.map((c) => c.time));
+
   const info = symbols.find((s) => s.symbol === symbol);
   const marketLevels = marketView.view && showLevels && !replayActive ? viewLevels(marketView.view.levels) : [];
 
@@ -168,6 +177,7 @@ export function SensexPanel({ active, backendReady }: Props) {
                     loadingNewer={loadingNewer}
                     onNeedOlder={() => void loadOlder()}
                     onNeedNewer={() => void loadNewer()}
+                    markers={sensexMarkers}
                     levels={[...analysisLevels, ...marketLevels]}
                     cursor={replayActive ? replayCursorTime : null}
                   />

@@ -23,7 +23,24 @@ class PanelBoundary extends Component<{ children: ReactNode }, { message: string
 
 import { ApiError } from "../api/client";
 import { acceptReport, approveDraft, convertPine, reportPine, scanPine, type PineReport, type PineScan } from "../api/pine";
-import { approveEnabled, cardLines, convertEnabled, disabledReasons, replaceAsked, showBacktestCard, type PineButton, type PineCard } from "../pine/present";
+import { requestPineNotificationPermission } from "../pine/alerts";
+import { scanCompat } from "../pine/compat";
+import { runScriptHistory } from "../pine/liveHost";
+import {
+  approveEnabled,
+  cardLines,
+  convertEnabled,
+  disabledReasons,
+  replaceAsked,
+  runLiveEnabled,
+  scriptTitle,
+  showBacktestCard,
+  type PineButton,
+  type PineCard,
+} from "../pine/present";
+import { unlockAudio } from "../paper/sounds";
+import { useChartStore, useSensexChartStore } from "../store/chartStore";
+import { usePineLiveStore } from "../store/pineLiveStore";
 
 const TIMEFRAMES = ["1m", "3m", "5m", "15m", "30m", "1h"] as const;
 
@@ -81,8 +98,29 @@ function PineEditor() {
   const [plotNote, setPlotNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [compatMessages, setCompatMessages] = useState<string[]>([]);
+  const [repaintMessages, setRepaintMessages] = useState<string[]>([]);
+  const [liveNote, setLiveNote] = useState<string | null>(null);
+
+  const liveScripts = usePineLiveStore((s) => s.scripts);
+  const addScript = usePineLiveStore((s) => s.addScript);
+  const setEnabled = usePineLiveStore((s) => s.setEnabled);
+  const setMuted = usePineLiveStore((s) => s.setMuted);
+  const removeScript = usePineLiveStore((s) => s.removeScript);
+  const setSoundOn = usePineLiveStore((s) => s.setSoundOn);
+  const replaySounds = usePineLiveStore((s) => s.replaySounds);
+  const setReplaySounds = usePineLiveStore((s) => s.setReplaySounds);
+  const niftyLoaded = useChartStore((s) => s.loaded);
+  const niftySymbol = useChartStore((s) => s.symbol);
+  const niftyTf = useChartStore((s) => s.timeframe);
+  const niftyCandles = useChartStore((s) => s.candles);
+  const sensexLoaded = useSensexChartStore((s) => s.loaded);
+  const sensexSymbol = useSensexChartStore((s) => s.symbol);
+  const sensexTf = useSensexChartStore((s) => s.timeframe);
+  const sensexCandles = useSensexChartStore((s) => s.candles);
 
   const kind = scan?.kind ?? null;
+  const compat = scanCompat(source);
   const gate = {
     busy,
     hasReport: issued != null,
@@ -90,6 +128,8 @@ function PineEditor() {
     ready: Boolean(draftId && draftHash),
     approved: draftApproved,
     errors: draftErrors,
+    scriptCount: liveScripts.length,
+    unsupported: compat.unsupported.map((u) => u.message),
   };
 
   function reasons(button: PineButton): string[] {
@@ -190,6 +230,42 @@ function PineEditor() {
     }
   }
 
+  async function onRunLive(scope: "nifty" | "sensex"): Promise<void> {
+    setLiveNote(null);
+    setCompatMessages(compat.unsupported.map((u) => u.message));
+    setRepaintMessages(compat.repaint.map((r) => r.reason));
+    if (!runLiveEnabled(accepted, compat.unsupported.length, liveScripts.length)) return;
+
+    // Permission + audio only from this click; denied notifications still allow sounds + log
+    void requestPineNotificationPermission();
+    setSoundOn(await unlockAudio());
+
+    const chart =
+      scope === "nifty"
+        ? { symbol: niftySymbol, timeframe: niftyTf, candles: niftyCandles, loaded: niftyLoaded }
+        : { symbol: sensexSymbol, timeframe: sensexTf, candles: sensexCandles, loaded: sensexLoaded };
+    if (!chart.loaded || !chart.symbol || !chart.timeframe) {
+      setLiveNote(`No ${scope.toUpperCase()} chart loaded.`);
+      return;
+    }
+
+    const added = addScript({
+      name: scriptTitle(source),
+      source,
+      scope,
+      symbol: chart.symbol,
+      timeframe: chart.timeframe,
+      repaintWarnings: compat.repaint.map((r) => r.reason),
+      notices: compat.notices,
+    });
+    if (!added.ok) {
+      setLiveNote(added.error);
+      return;
+    }
+    runScriptHistory(added.id, scope, chart.symbol, chart.timeframe, chart.candles);
+    setLiveNote(`Running live on ${chart.symbol} ${chart.timeframe} (${scope}).`);
+  }
+
   return (
     <aside className="flex h-full w-96 shrink-0 flex-col gap-3 overflow-y-auto border-r border-white/10 bg-[#0b0e14] p-3 text-xs text-white/80">
       <h2 className="text-sm font-semibold text-white">Pine</h2>
@@ -260,6 +336,88 @@ function PineEditor() {
             Plot
           </button>
           {plotNote && <p>{plotNote}</p>}
+        </section>
+      )}
+      {kind != null && (
+        <section className="flex flex-col gap-2 rounded border border-white/10 p-2" data-testid="pine-live">
+          <h3 className="font-semibold text-white">Live alerts</h3>
+          <p>Markers + sound on closed candles only (NIFTY or SENSEX chart).</p>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded border border-emerald-500/40 px-2 py-1 text-emerald-200 disabled:opacity-40"
+              disabled={!runLiveEnabled(accepted, compat.unsupported.length, liveScripts.length) || busy}
+              onClick={() => void onRunLive("nifty")}
+              data-testid="pine-run-live-nifty"
+            >
+              Run live (NIFTY)
+            </button>
+            <button
+              type="button"
+              className="rounded border border-sky-500/40 px-2 py-1 text-sky-200 disabled:opacity-40"
+              disabled={!runLiveEnabled(accepted, compat.unsupported.length, liveScripts.length) || busy}
+              onClick={() => void onRunLive("sensex")}
+              data-testid="pine-run-live-sensex"
+            >
+              Run live (SENSEX)
+            </button>
+          </div>
+          {reasons("runLive").map((line) => (
+            <p key={line} className="text-amber-200">
+              {line}
+            </p>
+          ))}
+          {compatMessages.map((line) => (
+            <p key={line} className="text-red-300">
+              {line}
+            </p>
+          ))}
+          {repaintMessages.map((line) => (
+            <p key={line} className="text-amber-200">
+              may repaint: {line}
+            </p>
+          ))}
+          {liveNote && <p className="text-emerald-200">{liveNote}</p>}
+          <label className="flex items-center gap-2 text-white/70">
+            <input type="checkbox" checked={replaySounds} onChange={(e) => setReplaySounds(e.target.checked)} />
+            Sounds in Replay
+          </label>
+          <ul className="flex flex-col gap-1">
+            {liveScripts.map((s) => (
+              <li key={s.id} className="rounded border border-white/10 px-2 py-1" data-testid="pine-live-script">
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium text-white">{s.name}</span>
+                  <span className="text-white/50">
+                    {s.scope.toUpperCase()} · {s.symbol} · {s.timeframe}
+                  </span>
+                </div>
+                <div className="mt-1 flex flex-wrap gap-2">
+                  <label className="flex items-center gap-1">
+                    <input type="checkbox" checked={s.enabled} onChange={(e) => setEnabled(s.id, e.target.checked)} />
+                    on
+                  </label>
+                  <label className="flex items-center gap-1">
+                    <input type="checkbox" checked={s.muted} onChange={(e) => setMuted(s.id, e.target.checked)} />
+                    mute
+                  </label>
+                  <button type="button" className="text-red-300" onClick={() => removeScript(s.id)}>
+                    remove
+                  </button>
+                </div>
+                {s.error && <p className="text-red-300">{s.error}</p>}
+                {s.repaintWarnings.map((w) => (
+                  <p key={w} className="text-amber-200">
+                    {w}
+                  </p>
+                ))}
+                {s.notices.map((n) => (
+                  <p key={n} className="text-white/50">
+                    {n}
+                  </p>
+                ))}
+              </li>
+            ))}
+          </ul>
         </section>
       )}
       {kind != null && showBacktestCard(kind) && (

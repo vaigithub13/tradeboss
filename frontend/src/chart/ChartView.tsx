@@ -67,6 +67,7 @@ import { loadOptionNotes, loadPositionLots, loadPositionMinutes, positionViews, 
 import { isPositionTool } from "../draw/position";
 import { useDrawStore } from "../draw/store";
 import { usePaperTradesStore } from "../store/paperTradesStore";
+import { closedTimeOnAppend, scheduleClosedBar } from "../pine/closedBars";
 import { useChartScope } from "../store/chartScope";
 import { useLiveStore } from "../store/liveStore";
 import {
@@ -478,6 +479,18 @@ export function ChartView({
         });
       }
       snapshotRef.current = snapshotOf(scope, candles);
+      // AFTER series.update: closed-bar for Pine (async — never blocks the candle path)
+      const closedTime = closedTimeOnAppend(prevCandles, candles);
+      if (closedTime != null) {
+        scheduleClosedBar({
+          scope: scopeId,
+          symbol,
+          timeframe,
+          closedTime,
+          candles,
+          history: false,
+        });
+      }
       return;
     }
 
@@ -485,6 +498,7 @@ export function ChartView({
     // keep the same bars on screen, no jump.
     const shift = windowShift(snapshotRef.current, scope, candles);
     const savedRange = shift !== null ? chart.timeScale().getVisibleLogicalRange() : null;
+    const pineHistory = snapshotRef.current?.scope !== scope || prevCandles.length === 0;
     snapshotRef.current = snapshotOf(scope, candles);
 
     candleSeries.setData(
@@ -541,7 +555,31 @@ export function ChartView({
       performance.mark("chart:data-set");
     }
     syncChrome();
-  }, [candles, timeframe, scope, volumeVisible]);
+    // AFTER setData: warm Pine history on fresh scope; replay step = closed-bar append
+    if (pineHistory && candles.length > 0) {
+      const tip = candles[candles.length - 1]!;
+      scheduleClosedBar({
+        scope: scopeId,
+        symbol,
+        timeframe,
+        closedTime: tip.time,
+        candles,
+        history: true,
+      });
+    } else {
+      const closedTime = closedTimeOnAppend(prevCandles, candles);
+      if (closedTime != null) {
+        scheduleClosedBar({
+          scope: scopeId,
+          symbol,
+          timeframe,
+          closedTime,
+          candles,
+          history: false,
+        });
+      }
+    }
+  }, [candles, timeframe, scope, volumeVisible, scopeId, symbol]);
 
   // ---- indicators AFTER candles (isolated; never throw into the candle path)
   useEffect(() => {
