@@ -31,12 +31,14 @@ export function analyseSymbol(
   symbol: string,
   sessions: readonly SessionType[],
   imageBase64?: string,
+  /** replay cursor of the chart being analysed (default: the main chart's replay) */
+  cursor: number | null = replayCursor(),
 ): Promise<AnalyseResult> {
   return postJson<AnalyseResult>("/api/ai/analyse", {
     symbol,
     sessions,
     image_base64: imageBase64 ?? null,
-    cursor: replayCursor(),
+    cursor,
   });
 }
 

@@ -13,8 +13,7 @@ import {
   type IndicatorType,
   type ParamDef,
 } from "../indicators/catalog";
-import { useChartStore } from "../store/chartStore";
-import { useIndicatorStore } from "../store/indicatorStore";
+import { useChartScope } from "../store/chartScope";
 
 function ParamField({
   def,
@@ -99,6 +98,7 @@ function ParamField({
 }
 
 function Row({ item, reason }: { item: IndicatorInstance; reason: string | null }) {
+  const useIndicatorStore = useChartScope().indicators;
   const [open, setOpen] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const update = useIndicatorStore((s) => s.update);
@@ -173,6 +173,7 @@ function Row({ item, reason }: { item: IndicatorInstance; reason: string | null 
 }
 
 export function IndicatorsMenu() {
+  const { chart: useChartStore, indicators: useIndicatorStore } = useChartScope();
   const items = useIndicatorStore((s) => s.items);
   const add = useIndicatorStore((s) => s.add);
   const status = useIndicatorStore((s) => s.status);

@@ -14,9 +14,13 @@ interface Props {
   onLevels: (lines: LevelLine[]) => void;
   /** The panel stays mounted while this is false so the auto timer can run. */
   open?: boolean;
+  /** replay cursor of the chart being analysed; default = the main chart's replay */
+  getCursor?: () => number | null;
+  /** false: never start the timed auto-analysis from this panel (the Sensex tab is manual only) */
+  autoEnabled?: boolean;
 }
 
-export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open = true }: Props) {
+export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open = true, getCursor, autoEnabled = true }: Props) {
   const [track, setTrack] = useState<TrackResult | null>(null);
   const [result, setResult] = useState<AnalyseResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -70,19 +74,19 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open =
     const id = window.setInterval(() => {
       const current = settings;
       if (!current || runningRef.current) return;
-      if (!autoDue(new Date(), last, current.auto_minutes, current.auto, current, marketRef.current)) return;
+      if (!autoDue(new Date(), last, current.auto_minutes, current.auto && autoEnabled, current, marketRef.current)) return;
       last = Date.now();
       setAutoToken((token) => token + 1);
     }, 15_000);
     return () => window.clearInterval(id);
-  }, [settings, symbol]);
+  }, [settings, symbol, autoEnabled]);
 
   useEffect(() => {
     if ((requestToken === 0 && autoToken === 0) || !symbol) return;
     const controller = new AbortController();
     setRunning(true);
     setError(null);
-    void analyseSymbol(symbol, sessions)
+    void (getCursor ? analyseSymbol(symbol, sessions, undefined, getCursor()) : analyseSymbol(symbol, sessions))
       .then((next) => {
         if (controller.signal.aborted) return;
         setResult(next);
@@ -97,7 +101,7 @@ export function AnalysisPanel({ symbol, sessions, requestToken, onLevels, open =
         if (!controller.signal.aborted) setRunning(false);
       });
     return () => controller.abort();
-  }, [requestToken, autoToken, symbol, sessions, onLevels]);
+  }, [requestToken, autoToken, symbol, sessions, onLevels, getCursor]);
 
   const analysis = result?.analysis;
 

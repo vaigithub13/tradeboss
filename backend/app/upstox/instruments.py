@@ -26,13 +26,16 @@ from app.data.publish import publish_file
 
 IST = timezone(timedelta(hours=5, minutes=30))
 NSE_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/NSE.json.gz"
+BSE_INSTRUMENTS_URL = "https://assets.upstox.com/market-quote/instruments/exchange/BSE.json.gz"
 SNAPSHOT_FILE = "NSE.json.gz"
+BSE_SNAPSHOT_FILE = "BSE.json.gz"
 #: the file is refreshed around 6 AM IST; do not snapshot earlier than this (it would be yesterday's)
 SNAPSHOT_AFTER = time(6, 30)
 _DATE_DIR = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 NIFTY_INDEX_KEY = "NSE_INDEX|Nifty 50"
 VIX_KEY = "NSE_INDEX|India VIX"
+SENSEX_INDEX_KEY = "BSE_INDEX|SENSEX"
 
 Kind = Literal["index", "equity", "future", "option"]
 KINDS: tuple[Kind, ...] = ("index", "equity", "future", "option")
@@ -47,22 +50,22 @@ class SnapshotError(RuntimeError):
 DOWNLOAD_BACKOFF_S = (5.0, 20.0, 60.0)
 
 
-def download_nse(
+def download_instruments(
     http: httpx.Client | None = None,
     url: str = NSE_INSTRUMENTS_URL,
     *,
     sleep: Callable[[float], None] = _time.sleep,
 ) -> bytes:
-    """The raw NSE.json.gz bytes. Public file: no Authorization header is ever sent.
+    """Raw exchange instrument gzip bytes. Public file: no Authorization header is ever sent.
 
     A transport error (the connection cut mid-body, a timeout) or a 5xx is retried after each wait in
-    `DOWNLOAD_BACKOFF_S`. On 6 Oct 2026 a single cut connection during an early wake lost the day's job."""
+    `DOWNLOAD_BACKOFF_S`."""
     own = http is None
     client = http or httpx.Client(timeout=60.0, follow_redirects=True)
     try:
         for attempt in range(len(DOWNLOAD_BACKOFF_S) + 1):
             try:
-                resp = client.get(url, headers={"Accept": "*/*"})
+                resp = client.get(url, headers={"Accept": "*/*", "User-Agent": "TradeBoss/1.0"})
                 resp.raise_for_status()
                 return resp.content
             except (httpx.TransportError, httpx.HTTPStatusError) as exc:
@@ -76,16 +79,36 @@ def download_nse(
             client.close()
 
 
-def parse_master(raw: bytes) -> list[dict[str, Any]]:
-    """Decode + sanity-check a raw NSE.json.gz. Raises SnapshotError for anything odd."""
+def download_nse(
+    http: httpx.Client | None = None,
+    url: str = NSE_INSTRUMENTS_URL,
+    *,
+    sleep: Callable[[float], None] = _time.sleep,
+) -> bytes:
+    """The raw NSE.json.gz bytes (compat wrapper)."""
+    return download_instruments(http, url, sleep=sleep)
+
+
+def download_bse(
+    http: httpx.Client | None = None,
+    url: str = BSE_INSTRUMENTS_URL,
+    *,
+    sleep: Callable[[float], None] = _time.sleep,
+) -> bytes:
+    """The raw BSE.json.gz bytes (includes BSE_INDEX + BSE_FO Sensex F&O)."""
+    return download_instruments(http, url, sleep=sleep)
+
+
+def parse_master(raw: bytes, *, require_key: str = NIFTY_INDEX_KEY) -> list[dict[str, Any]]:
+    """Decode + sanity-check a raw instruments gzip. Raises SnapshotError for anything odd."""
     try:
         rows = json.loads(gzip.decompress(raw))
     except (OSError, EOFError, ValueError) as e:
         raise SnapshotError(f"instrument file is not valid gzip JSON: {type(e).__name__}") from None
     if not isinstance(rows, list) or len(rows) < 1000:
         raise SnapshotError("instrument file looks truncated (too few rows)")
-    if not any(isinstance(r, dict) and r.get("instrument_key") == NIFTY_INDEX_KEY for r in rows):
-        raise SnapshotError(f"instrument file does not contain {NIFTY_INDEX_KEY!r}")
+    if not any(isinstance(r, dict) and r.get("instrument_key") == require_key for r in rows):
+        raise SnapshotError(f"instrument file does not contain {require_key!r}")
     return rows
 
 
@@ -93,8 +116,12 @@ def snapshot_dir(base: Path, day: date) -> Path:
     return base / day.isoformat()
 
 
-def snapshot_path(base: Path, day: date) -> Path:
-    return snapshot_dir(base, day) / SNAPSHOT_FILE
+def snapshot_path(base: Path, day: date, filename: str = SNAPSHOT_FILE) -> Path:
+    return snapshot_dir(base, day) / filename
+
+
+def bse_snapshot_path(base: Path, day: date) -> Path:
+    return snapshot_path(base, day, BSE_SNAPSHOT_FILE)
 
 
 def list_snapshots(base: Path) -> list[date]:
@@ -267,7 +294,7 @@ def _expiry_date(ms: Any) -> date | None:
 
 def instrument_of(row: dict[str, Any]) -> Instrument | None:
     """One master row -> Instrument, or None if it is not something we offer:
-    NSE indices, NSE stocks (EQ), and Nifty 50 futures / options only."""
+    NSE indices/stocks + Nifty F&O, and BSE Sensex index + Sensex F&O (BSE_FO)."""
     seg, typ, key = row.get("segment"), row.get("instrument_type"), row.get("instrument_key")
     if not isinstance(key, str) or not key:
         return None
@@ -277,9 +304,16 @@ def instrument_of(row: dict[str, Any]) -> Instrument | None:
     lot_size = int(lot) if isinstance(lot, int | float) and not isinstance(lot, bool) else None
     if seg == "NSE_INDEX" and typ == "INDEX":
         return Instrument(key, symbol or name, name, "index", seg, typ)
+    if seg == "BSE_INDEX" and typ == "INDEX" and key == SENSEX_INDEX_KEY:
+        return Instrument(key, symbol or name, name, "index", seg, typ)
     if seg == "NSE_EQ" and typ == "EQ":
         return Instrument(key, symbol, name, "equity", seg, typ, lot_size=lot_size)
-    if seg == "NSE_FO" and typ in ("FUT", "CE", "PE") and row.get("underlying_key") == NIFTY_INDEX_KEY:
+    if seg in ("NSE_FO", "BSE_FO") and typ in ("FUT", "CE", "PE"):
+        underlying = row.get("underlying_key")
+        if seg == "NSE_FO" and underlying != NIFTY_INDEX_KEY:
+            return None
+        if seg == "BSE_FO" and underlying != SENSEX_INDEX_KEY:
+            return None
         strike = row.get("strike_price")
         return Instrument(
             key,
@@ -291,14 +325,34 @@ def instrument_of(row: dict[str, Any]) -> Instrument | None:
             expiry=_expiry_date(row.get("expiry")),
             strike=float(strike) if isinstance(strike, int | float) and typ != "FUT" else None,
             lot_size=lot_size,
-            underlying_key=NIFTY_INDEX_KEY,
+            underlying_key=str(underlying) if isinstance(underlying, str) else None,
         )
     return None
 
 
-def load_instruments(path: Path) -> list[Instrument]:
-    rows = parse_master(path.read_bytes())
-    out = [i for r in rows if isinstance(r, dict) and (i := instrument_of(r)) is not None]
+def load_instruments(path: Path, *, require_key: str = NIFTY_INDEX_KEY) -> list[Instrument]:
+    rows = parse_master(path.read_bytes(), require_key=require_key)
+    return [i for r in rows if isinstance(r, dict) and (i := instrument_of(r)) is not None]
+
+
+def load_instruments_day(base: Path, day: date) -> list[Instrument]:
+    """NSE offerings for `day`, plus BSE/Sensex when that day's BSE snapshot (or marker) exists."""
+    nse_path = snapshot_path(base, day)
+    if not nse_path.is_file():
+        nse_path = _marker_target(base, day)
+    out = load_instruments(nse_path) if nse_path.is_file() else []
+    bse_path = bse_snapshot_path(base, day)
+    if not bse_path.is_file():
+        # UNCHANGED note for BSE is stored as BSE.UNCHANGED next to BSE.json.gz
+        marker = snapshot_dir(base, day) / f"BSE.{UNCHANGED_MARKER}"
+        if marker.is_file():
+            try:
+                same = date.fromisoformat(marker.read_text().strip())
+                bse_path = bse_snapshot_path(base, same)
+            except (OSError, ValueError):
+                bse_path = Path()
+    if bse_path.is_file():
+        out.extend(load_instruments(bse_path, require_key=SENSEX_INDEX_KEY))
     return out
 
 
@@ -368,14 +422,39 @@ class InstrumentIndex:
         scored.sort(key=lambda p: p[0])
         return [i for _, i in scored[: max(1, limit)]]
 
-    def front_future(self, today: date | None = None) -> Instrument | None:
-        """The current Nifty futures contract: nearest expiry that has not passed."""
+    def front_future(
+        self,
+        today: date | None = None,
+        *,
+        underlying_key: str = NIFTY_INDEX_KEY,
+    ) -> Instrument | None:
+        """Nearest unexpired futures for `underlying_key` (Nifty by default; Sensex via SENSEX_INDEX_KEY)."""
         today = today or ist_now().date()
-        futs = [i for i in self.instruments if i.kind == "future" and i.expiry and i.expiry >= today]
+        futs = [
+            i
+            for i in self.instruments
+            if i.kind == "future"
+            and i.expiry
+            and i.expiry >= today
+            and (i.underlying_key or NIFTY_INDEX_KEY) == underlying_key
+        ]
         return min(futs, key=lambda i: i.expiry or date.max) if futs else None
 
 
-_cache: dict[tuple[Path, float], InstrumentIndex] = {}
+_cache: dict[tuple[Any, ...], InstrumentIndex] = {}
+
+
+def _day_mtime_key(base: Path, day: date) -> tuple[Any, ...]:
+    nse = snapshot_path(base, day)
+    bse = bse_snapshot_path(base, day)
+    return (
+        day,
+        nse.stat().st_mtime if nse.is_file() else 0.0,
+        bse.stat().st_mtime if bse.is_file() else 0.0,
+        (snapshot_dir(base, day) / f"BSE.{UNCHANGED_MARKER}").stat().st_mtime
+        if (snapshot_dir(base, day) / f"BSE.{UNCHANGED_MARKER}").is_file()
+        else 0.0,
+    )
 
 
 def current_index(base: Path) -> InstrumentIndex | None:
@@ -383,12 +462,12 @@ def current_index(base: Path) -> InstrumentIndex | None:
     latest = latest_snapshot(base)
     if latest is None:
         return None
-    day, path = latest
-    cache_key = (path, path.stat().st_mtime)
+    day, _path = latest
+    cache_key = _day_mtime_key(base, day)
     hit = _cache.get(cache_key)
     if hit is None:
         _cache.clear()
-        hit = InstrumentIndex(load_instruments(path), day)
+        hit = InstrumentIndex(load_instruments_day(base, day), day)
         _cache[cache_key] = hit
     return hit
 
@@ -398,4 +477,49 @@ def index_on(base: Path, day: date) -> InstrumentIndex | None:
     days = [d for d in list_snapshots(base) if d <= day]
     if not days:
         return None
-    return InstrumentIndex(load_instruments(snapshot_path(base, days[-1])), days[-1])
+    d = days[-1]
+    return InstrumentIndex(load_instruments_day(base, d), d)
+
+
+def take_bse_snapshot(
+    base: Path,
+    *,
+    now: datetime | None = None,
+    fetch: Callable[[], bytes] = download_bse,
+    force: bool = False,
+) -> SnapshotResult:
+    """Save today's BSE instrument master (Sensex index + BSE_FO) beside the NSE snapshot."""
+    day = (now or ist_now()).astimezone(IST).date()
+    path = bse_snapshot_path(base, day)
+    marker = snapshot_dir(base, day) / f"BSE.{UNCHANGED_MARKER}"
+    if not force and (path.is_file() or marker.is_file()):
+        existing = path if path.is_file() else _bse_marker_target(base, day)
+        return SnapshotResult(day, existing, "exists")
+    raw = fetch()
+    parse_master(raw, require_key=SENSEX_INDEX_KEY)
+    previous = [d for d in list_snapshots(base) if d < day and bse_snapshot_path(base, d).is_file()]
+    if not force and previous:
+        prev_day = previous[-1]
+        prev_path = bse_snapshot_path(base, prev_day)
+        if _same_content(raw, prev_path.read_bytes()):
+            note = f"{prev_day.isoformat()}\n"
+            snapshot_dir(base, day).mkdir(parents=True, exist_ok=True)
+            if not publish_file(marker, lambda tmp: tmp.write_text(note), accept=lambda tmp: tmp.stat().st_size > 0):
+                raise SnapshotError("refusing to publish an empty BSE snapshot note")
+            return SnapshotResult(day, prev_path, "unchanged", same_as=prev_day)
+    if not raw:
+        raise SnapshotError("refusing to publish an empty BSE instrument file")
+    snapshot_dir(base, day).mkdir(parents=True, exist_ok=True)
+    if not publish_file(path, lambda tmp: tmp.write_bytes(raw), accept=lambda tmp: tmp.stat().st_size == len(raw)):
+        raise SnapshotError("refusing to publish an empty BSE instrument file")
+    if marker.exists():
+        marker.unlink()
+    return SnapshotResult(day, path, "saved")
+
+
+def _bse_marker_target(base: Path, day: date) -> Path:
+    try:
+        same = date.fromisoformat((snapshot_dir(base, day) / f"BSE.{UNCHANGED_MARKER}").read_text().strip())
+        return bse_snapshot_path(base, same)
+    except (OSError, ValueError):
+        return bse_snapshot_path(base, day)

@@ -3,6 +3,7 @@
 Needs UPSTOX_ANALYTICS_TOKEN in .env. Read-only. Safe to interrupt and re-run.
 
     uv run python -m scripts.backfill --defaults            # Nifty 50 + India VIX (from Jan 2022) + current Nifty future
+    uv run python -m scripts.backfill --sensex              # SENSEX index (+ current Sensex future for volume)
     uv run python -m scripts.backfill --key "NSE_INDEX|Nifty 50" [--from 2022-01-01]
     uv run python -m scripts.backfill --symbol RELIANCE --days 90
     uv run python -m scripts.backfill --update              # bring every stored 1m symbol up to date
@@ -22,6 +23,7 @@ from app.upstox.deps import make_client
 from app.upstox.instruments import (
     IST,
     NIFTY_INDEX_KEY,
+    SENSEX_INDEX_KEY,
     VIX_KEY,
     Instrument,
     InstrumentIndex,
@@ -49,6 +51,7 @@ def _sync(client, index: InstrumentIndex, inst: Instrument, start: date) -> None
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--defaults", action="store_true", help="Nifty 50 + India VIX + current Nifty future")
+    ap.add_argument("--sensex", action="store_true", help="SENSEX index (+ current Sensex future)")
     ap.add_argument("--key", action="append", default=[], help="instrument_key (repeatable)")
     ap.add_argument("--symbol", action="append", default=[], help="exact trading symbol, e.g. RELIANCE (repeatable)")
     ap.add_argument("--update", action="store_true", help="refresh every stored symbol that has 1m data")
@@ -88,6 +91,18 @@ def main(argv: list[str] | None = None) -> int:
             print("no current Nifty future in the instrument file", file=sys.stderr)
             return 2
         wanted.append(fut)
+    if args.sensex:
+        sx_key = settings.sensex_index_key or SENSEX_INDEX_KEY
+        inst = index.get(sx_key)
+        if inst is None:
+            print(f"{sx_key} not in the instrument file (run snapshot_instruments for BSE)", file=sys.stderr)
+            return 2
+        wanted.append(inst)
+        sx_fut = index.front_future(today, underlying_key=sx_key)
+        if sx_fut is None:
+            print("no current Sensex future in the instrument file", file=sys.stderr)
+            return 2
+        wanted.append(sx_fut)
     for key in args.key:
         inst = index.get(key)
         if inst is None:
@@ -102,7 +117,7 @@ def main(argv: list[str] | None = None) -> int:
         wanted.append(hits[0])
     for inst in wanted:
         s = start_for(inst)
-        if args.defaults and inst.kind == "future" and not (args.from_date or args.days):
+        if (args.defaults or args.sensex) and inst.kind == "future" and not (args.from_date or args.days):
             s = today - timedelta(days=DEFAULT_FUTURE_DAYS)
         jobs.append((inst, s))
 

@@ -26,7 +26,7 @@ from app.routes.options import router as options_router
 from app.routes.paper import router as paper_router
 from app.routes.pine import router as pine_router
 from app.routes.upstox import router as upstox_router
-from app.upstox.instruments import snapshot_due, take_snapshot
+from app.upstox.instruments import snapshot_due, take_bse_snapshot, take_snapshot
 
 IST = ZoneInfo("Asia/Kolkata")
 log = logging.getLogger("app.startup")
@@ -38,6 +38,11 @@ def _startup_snapshot() -> None:
         log.info("instrument snapshot %s: %s", result.day, result.outcome)
     except Exception as e:  # network down etc.: the daily job / next start will retry
         log.warning("startup instrument snapshot failed: %s", type(e).__name__)
+    try:
+        bse = take_bse_snapshot(settings.instruments_dir)
+        log.info("BSE instrument snapshot %s: %s", bse.day, bse.outcome)
+    except Exception as e:
+        log.warning("startup BSE instrument snapshot failed: %s", type(e).__name__)
 
 
 @asynccontextmanager
@@ -127,4 +132,28 @@ def health() -> HealthResponse:
         version=app.version,
         time_ist=datetime.now(IST).isoformat(timespec="seconds"),
         live_trading=settings.live_trading,
+    )
+
+
+class ChartsConfigResponse(BaseModel):
+    nifty_symbol: str
+    nifty_index_key: str
+    sensex_symbol: str
+    sensex_index_key: str
+    sensex_live_enabled: bool
+
+
+@app.get("/api/config/charts", response_model=ChartsConfigResponse)
+def charts_config() -> ChartsConfigResponse:
+    """Instrument folder names / keys for chart tabs — UI must not hard-code Upstox keys."""
+    from app.data.history import symbol_dir_name
+    from app.upstox.instruments import NIFTY_INDEX_KEY, SENSEX_INDEX_KEY
+
+    sx_key = settings.sensex_index_key or SENSEX_INDEX_KEY
+    return ChartsConfigResponse(
+        nifty_symbol=symbol_dir_name(NIFTY_INDEX_KEY),
+        nifty_index_key=NIFTY_INDEX_KEY,
+        sensex_symbol=settings.sensex_symbol or symbol_dir_name(sx_key),
+        sensex_index_key=sx_key,
+        sensex_live_enabled=settings.sensex_live_enabled,
     )

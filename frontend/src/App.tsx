@@ -40,6 +40,10 @@ import { MarketViewBox, MarketViewPanel } from "./panels/MarketViewPanel";
 import { viewLevels } from "./marketView/present";
 import { gexLevels, gexSummary } from "./chart/gex";
 import { OptionsTab } from "./options/OptionsTab";
+import { SensexPanel } from "./panels/SensexPanel";
+import { ChartScopeProvider, NIFTY_SCOPE } from "./store/chartScope";
+import { useSensexChartStore } from "./store/chartStore";
+import { useSensexIndicatorStore } from "./store/indicatorStore";
 import { chartHidden, type MainView } from "./chart/controls";
 
 const POLL_INTERVAL_MS = 3000;
@@ -60,7 +64,7 @@ const STATUS_UI: Record<BackendStatus, { label: string; dot: string; text: strin
 export default function App() {
   const [mainView, setMainView] = useState<MainView>(() => {
     const saved = readJson<string>(PAPER_TAB_KEY, "chart");
-    return saved === "options" || saved === "paper" || saved === "chart" ? saved : "chart";
+    return saved === "options" || saved === "paper" || saved === "chart" || saved === "sensex" ? saved : "chart";
   });
   const setView = useCallback((view: MainView) => {
     setMainView(view);
@@ -129,25 +133,48 @@ export default function App() {
   // Live feed: one WebSocket to our own backend (it owns the single Upstox connection).
   const startLive = useLiveStore((s) => s.start);
   const stopLive = useLiveStore((s) => s.stop);
-  const setLiveView = useLiveStore((s) => s.setView);
+  const setLiveViews = useLiveStore((s) => s.setViews);
   useEffect(() => {
     startLive();
     return () => stopLive();
   }, [startLive, stopLive]);
 
-  // Tell the server what is on screen (symbol, timeframe, sessions, visible indicators).
+  // Nifty + Sensex both stay subscribed so opening the Sensex tab never drops Nifty live bars.
+  const sensexLoaded = useSensexChartStore((s) => s.loaded);
+  const sensexIndicatorItems = useSensexIndicatorStore((s) => s.items);
   const loadedSymbol = loaded?.symbol;
   const loadedTimeframe = loaded?.timeframe;
   const loadedSessions = loaded?.sessions;
+  const sensexSymbol = sensexLoaded?.symbol;
+  const sensexTimeframe = sensexLoaded?.timeframe;
+  const sensexSessions = sensexLoaded?.sessions;
   useEffect(() => {
-    const view = liveView(
-      loadedSymbol && loadedTimeframe && loadedSessions
-        ? { symbol: loadedSymbol, timeframe: loadedTimeframe, sessions: loadedSessions }
-        : null,
-      indicatorItems,
-    );
-    setLiveView(view);
-  }, [loadedSymbol, loadedTimeframe, loadedSessions, indicatorItems, setLiveView]);
+    const views = [
+      liveView(
+        loadedSymbol && loadedTimeframe && loadedSessions
+          ? { symbol: loadedSymbol, timeframe: loadedTimeframe, sessions: loadedSessions }
+          : null,
+        indicatorItems,
+      ),
+      liveView(
+        sensexSymbol && sensexTimeframe && sensexSessions
+          ? { symbol: sensexSymbol, timeframe: sensexTimeframe, sessions: sensexSessions }
+          : null,
+        sensexIndicatorItems,
+      ),
+    ].filter((v): v is NonNullable<typeof v> => v != null);
+    setLiveViews(views);
+  }, [
+    loadedSymbol,
+    loadedTimeframe,
+    loadedSessions,
+    indicatorItems,
+    sensexSymbol,
+    sensexTimeframe,
+    sensexSessions,
+    sensexIndicatorItems,
+    setLiveViews,
+  ]);
 
   const info = symbols.find((s) => s.symbol === symbol);
   const ui = STATUS_UI[backendStatus];
@@ -318,6 +345,16 @@ export default function App() {
           >
             Paper
           </button>
+          <button
+            type="button"
+            className={`rounded px-2.5 py-1 text-xs ${
+              mainView === "sensex" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
+            }`}
+            onClick={() => setView("sensex")}
+            data-testid="tab-sensex"
+          >
+            SENSEX
+          </button>
         </div>
         {mainView === "chart" ? (
           <>
@@ -391,6 +428,8 @@ export default function App() {
           </>
         ) : mainView === "options" ? (
           <span className="text-xs text-white/45">Nifty option chain</span>
+        ) : mainView === "sensex" ? (
+          <span className="text-xs text-white/45">Sensex chart</span>
         ) : (
           <span className="text-xs text-white/45">Paper forward-test desk</span>
         )}
@@ -415,6 +454,7 @@ export default function App() {
         aria-hidden={chartHidden(mainView)}
         data-testid="chart-pane"
       >
+      <ChartScopeProvider scope={NIFTY_SCOPE}>
       <div className="flex min-h-0 flex-1">
       {pineOpen && (
         <div className="h-full shrink-0">
@@ -521,6 +561,7 @@ export default function App() {
         open={analysisOpen}
       />
       </div>
+      </ChartScopeProvider>
       </div>
       {mainView === "options" && (
         <div className="absolute inset-0" data-testid="options-pane">
@@ -534,6 +575,13 @@ export default function App() {
           </SectionBoundary>
         </div>
       )}
+      {/* Sensex stays mounted (CSS-hide) so its live subscription / store keep updating. */}
+      <div
+        className={`absolute inset-0 ${mainView === "sensex" ? "" : "invisible pointer-events-none"}`}
+        aria-hidden={mainView !== "sensex"}
+      >
+        <SensexPanel active={mainView === "sensex"} backendReady={backendStatus === "connected"} />
+      </div>
       </div>
     </div>
   );

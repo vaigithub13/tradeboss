@@ -4,8 +4,8 @@ import { indicatorKey, scopeKey } from "../indicators/cache";
 import { CLIENT_ONLY_INDICATORS, type IndicatorType } from "../indicators/catalog";
 import { LiveClient, type LinkState, type SocketLike } from "../live/client";
 import type { BarMessage, LiveStatus, LiveView } from "../live/protocol";
-import { useChartStore } from "./chartStore";
-import { useIndicatorStore } from "./indicatorStore";
+import { useChartStore, useSensexChartStore } from "./chartStore";
+import { useIndicatorStore, useSensexIndicatorStore } from "./indicatorStore";
 
 interface LiveState {
   link: LinkState;
@@ -19,6 +19,8 @@ interface LiveState {
   start: () => void;
   stop: () => void;
   setView: (view: LiveView | null) => void;
+  /** Nifty + Sensex together: one WS message with `views: [...]`. */
+  setViews: (views: LiveView[]) => void;
   /** Close the socket so the client reconnects and re-sends the current view. */
   reconnect: () => void;
 }
@@ -28,16 +30,23 @@ let client: LiveClient | null = null;
 export const liveUrl = (loc: Pick<Location, "protocol" | "host">): string =>
   `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/api/live/ws`;
 
-/** Fold one `bar` message into the chart and indicator stores. */
+/** Fold one `bar` message into the matching chart and indicator stores (candles first). */
 export function applyBar(msg: BarMessage): void {
   useLiveStore.setState({ lastBarAt: Date.now() });
-  const chart = useChartStore.getState();
-  const changed = chart.applyLive(msg.symbol, msg.timeframe, msg.candles);
-  const loaded = useChartStore.getState().loaded;
-  if (!changed || !loaded || !msg.times || !msg.indicators?.length) return;
-  const byKey: Record<string, Record<string, (number | null)[]>> = {};
-  for (const ind of msg.indicators) byKey[ind.id] = ind.outputs; // ids are indicator keys (see liveView)
-  useIndicatorStore.getState().applyLiveTail(scopeKey(loaded.symbol, loaded.timeframe, loaded.sessions), msg.times, byKey);
+  const targets = [
+    { chart: useChartStore, indicators: useIndicatorStore },
+    { chart: useSensexChartStore, indicators: useSensexIndicatorStore },
+  ] as const;
+  for (const { chart, indicators } of targets) {
+    const changed = chart.getState().applyLive(msg.symbol, msg.timeframe, msg.candles);
+    if (!changed) continue;
+    const loaded = chart.getState().loaded;
+    if (!loaded || !msg.times || !msg.indicators?.length) return;
+    const byKey: Record<string, Record<string, (number | null)[]>> = {};
+    for (const ind of msg.indicators) byKey[ind.id] = ind.outputs; // ids are indicator keys (see liveView)
+    indicators.getState().applyLiveTail(scopeKey(loaded.symbol, loaded.timeframe, loaded.sessions), msg.times, byKey);
+    return;
+  }
 }
 
 export const useLiveStore = create<LiveState>((set) => ({
@@ -63,7 +72,10 @@ export const useLiveStore = create<LiveState>((set) => ({
         onLink: (link) => set({ link }),
         onStatus: (status, at) => set({ status, statusAt: at }),
         onBar: applyBar,
-        onReload: (symbol) => void useChartStore.getState().refreshSymbols(symbol),
+        onReload: (symbol) => {
+          void useChartStore.getState().refreshSymbols(symbol);
+          void useSensexChartStore.getState().refreshSymbols(symbol);
+        },
         onError: (message) => {
           console.error("[live]", message);
           set({ lastError: message });
@@ -80,6 +92,8 @@ export const useLiveStore = create<LiveState>((set) => ({
   },
 
   setView: (view) => client?.setView(view),
+
+  setViews: (views) => client?.setViews(views),
 
   reconnect: () => {
     client?.reconnect();

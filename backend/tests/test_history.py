@@ -65,6 +65,7 @@ def test_split_windows_never_exceeds_the_limit_and_covers_everything_exactly_onc
 
 def test_symbol_dir_names_are_filename_safe_and_nifty_keeps_its_existing_folder() -> None:
     assert symbol_dir_name("NSE_INDEX|Nifty 50") == "NIFTY50"
+    assert symbol_dir_name("BSE_INDEX|SENSEX") == "SENSEX"
     assert symbol_dir_name("NSE_INDEX|India VIX") == "NSE_INDEX_India_VIX"
     assert symbol_dir_name("NSE_EQ|INE002A01018") == "NSE_EQ_INE002A01018"
     assert "/" not in symbol_dir_name("NSE_FO|48704") and "|" not in symbol_dir_name("NSE_FO|48704")

@@ -49,3 +49,22 @@ export function fetchMarketView(refresh = false, signal?: AbortSignal): Promise<
 export function fetchMarketViewHistory(signal?: AbortSignal): Promise<MarketViewHistory> {
   return getJson<MarketViewHistory>("/api/market-view/history", signal);
 }
+
+export interface SensexExpectedMove {
+  atm: number;
+  call_ltp: number;
+  put_ltp: number;
+  straddle: number;
+  expected_move: number;
+  range: [number, number];
+}
+
+export interface SensexMarketView extends MarketView {
+  symbol: string;
+  instrument_key: string;
+  expected_move: SensexExpectedMove | null;
+}
+
+export function fetchSensexMarketView(refresh = false, signal?: AbortSignal): Promise<SensexMarketView> {
+  return getJson<SensexMarketView>(`/api/market-view/sensex${refresh ? "?refresh=true" : ""}`, signal);
+}

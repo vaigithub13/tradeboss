@@ -11,16 +11,36 @@ import {
 import { scopeKey } from "../indicators/cache";
 import { mergeLiveCandles } from "../live/merge";
 import { acceptBars, capCandlesQuery } from "../replay/cap";
-import { replayCursor } from "../replay/session";
+import { niftyReplaySession, sensexReplaySession, type ReplaySession } from "../replay/session";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 
 const PREFERRED_TIMEFRAME: Timeframe = "15m";
+const KNOWN_TIMEFRAMES: readonly string[] = ["1m", "3m", "5m", "15m", "30m", "1h", "1D", "1W"];
+
+/** Where the Sensex tab remembers its timeframe (separate from the Nifty chart). */
+export const SENSEX_TIMEFRAME_KEY = "chart-analyser.sensex.tf.v1";
+
+/** A saved timeframe, or null when nothing valid is stored (never throws). */
+export function loadSavedTimeframe(key: string): Timeframe | null {
+  try {
+    const raw = globalThis.localStorage?.getItem(key);
+    return raw && KNOWN_TIMEFRAMES.includes(raw) ? (raw as Timeframe) : null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveTimeframe(key: string, tf: Timeframe): void {
+  try {
+    globalThis.localStorage?.setItem(key, tf);
+  } catch {
+    // private mode / quota: the choice just lasts for this tab
+  }
+}
 const TF_SECONDS: Record<Timeframe, number> = {
   "1m": 60, "3m": 180, "5m": 300, "15m": 900, "30m": 1800, "1h": 3600, "1D": 86400, "1W": 7 * 86400,
 };
-const DEFAULT_SYMBOL = "NIFTY50";
-
 /** bars fetched when a chart opens (the newest ones) */
 export const INITIAL_BARS = 2000;
 /** smallest / largest "older" chunk fetched when the user scrolls toward the left edge */
@@ -125,7 +145,7 @@ const SESSION_ORDER: readonly SessionType[] = ["normal", "weekend_full", "specia
 const sortSessions = (list: readonly SessionType[]): SessionType[] =>
   SESSION_ORDER.filter((t) => list.includes(t));
 
-interface ChartState {
+export interface ChartState {
   symbols: SymbolInfo[];
   symbol: string | null;
   timeframe: Timeframe;
@@ -142,7 +162,8 @@ interface ChartState {
   loaded: Loaded | null;
   status: LoadStatus;
   error: string | null;
-  init: () => Promise<void>;
+  /** Read the symbol list and load the chart; `symbol` overrides the store's default symbol. */
+  init: (symbol?: string) => Promise<void>;
   load: () => Promise<void>;
   /** fetch the next older chunk and prepend it (no-op when nothing older / already loading) */
   loadOlder: () => Promise<void>;
@@ -177,16 +198,35 @@ interface ChartState {
   resyncTip: () => Promise<void>;
 }
 
-let requestSeq = 0;
-let inflight: AbortController | null = null;
-
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 const isAbort = (e: unknown): boolean => e instanceof DOMException && e.name === "AbortError";
 
-export const useChartStore = create<ChartState>((set, get) => ({
+export interface ChartStoreOptions {
+  /** the symbol `init()` opens first */
+  defaultSymbol: string;
+  /** when true, a missing default symbol is an error instead of falling back to the first stored one */
+  strictSymbol?: boolean;
+  /** the replay cursor this chart honours (default: the Nifty session) */
+  session?: ReplaySession;
+  /** localStorage key remembering the chosen timeframe (default: not persisted) */
+  timeframeStorageKey?: string;
+}
+
+/**
+ * One chart's loaded window. The Nifty chart and the Sensex tab each get their own store, so the
+ * symbol, timeframe, candles and in-flight loads of one never touch the other.
+ */
+export function createChartStore(opts: ChartStoreOptions) {
+  const { defaultSymbol, strictSymbol = false, timeframeStorageKey } = opts;
+  const session = opts.session ?? niftyReplaySession;
+  const replayCursor = (): number | null => session.get();
+  let requestSeq = 0;
+  let inflight: AbortController | null = null;
+
+  return create<ChartState>((set, get) => ({
   symbols: [],
   symbol: null,
-  timeframe: PREFERRED_TIMEFRAME,
+  timeframe: (timeframeStorageKey ? loadSavedTimeframe(timeframeStorageKey) : null) ?? PREFERRED_TIMEFRAME,
   sessions: ["normal", "weekend_full"],
   candles: [],
   hasMoreOlder: false,
@@ -197,18 +237,28 @@ export const useChartStore = create<ChartState>((set, get) => ({
   status: "idle",
   error: null,
 
-  init: async () => {
+  init: async (symbol) => {
     set({ status: "loading", error: null });
+    const target = symbol ?? defaultSymbol;
     try {
       const res = await fetchSymbols();
-      const first = res.symbols.find((s) => s.symbol === DEFAULT_SYMBOL) ?? res.symbols[0];
+      const first = res.symbols.find((s) => s.symbol === target) ?? (strictSymbol ? undefined : res.symbols[0]);
       if (!first) {
-        set({ symbols: [], status: "error", error: "No symbols with stored candles. Run the sample import." });
+        set({
+          symbols: strictSymbol ? res.symbols : [],
+          status: "error",
+          error: strictSymbol
+            ? `No stored candles for ${target}. Backfill its history first.`
+            : "No symbols with stored candles. Run the sample import.",
+        });
         return;
       }
-      const timeframe = first.available_timeframes.includes(PREFERRED_TIMEFRAME)
-        ? PREFERRED_TIMEFRAME
-        : (first.available_timeframes[0] ?? PREFERRED_TIMEFRAME);
+      const wanted = (timeframeStorageKey ? loadSavedTimeframe(timeframeStorageKey) : null) ?? PREFERRED_TIMEFRAME;
+      const timeframe = first.available_timeframes.includes(wanted)
+        ? wanted
+        : first.available_timeframes.includes(PREFERRED_TIMEFRAME)
+          ? PREFERRED_TIMEFRAME
+          : (first.available_timeframes[0] ?? PREFERRED_TIMEFRAME);
       set({
         symbols: res.symbols,
         symbol: first.symbol,
@@ -422,6 +472,7 @@ export const useChartStore = create<ChartState>((set, get) => ({
     const info = symbols.find((s) => s.symbol === symbol);
     if (!timeframeState(info, tf).enabled) return;
     set({ timeframe: tf });
+    if (timeframeStorageKey) saveTimeframe(timeframeStorageKey, tf);
     await get().load();
   },
 
@@ -532,4 +583,21 @@ export const useChartStore = create<ChartState>((set, get) => ({
     set({ sessions: sortSessions(next) });
     await get().load();
   },
-}));
+  }));
+}
+
+export type ChartStoreHook = ReturnType<typeof createChartStore>;
+
+/** The main (Nifty-first) chart. */
+export const useChartStore: ChartStoreHook = createChartStore({ defaultSymbol: "NIFTY50" });
+
+/**
+ * The Sensex tab's chart: its own symbol / timeframe / candles, its own replay cursor, and its own
+ * remembered timeframe. `init(symbol)` is called with the symbol from GET /api/config/charts.
+ */
+export const useSensexChartStore: ChartStoreHook = createChartStore({
+  defaultSymbol: "SENSEX",
+  strictSymbol: true,
+  session: sensexReplaySession,
+  timeframeStorageKey: SENSEX_TIMEFRAME_KEY,
+});

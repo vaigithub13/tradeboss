@@ -68,3 +68,24 @@ def market_view(
 @router.get("/market-view/history")
 def market_view_history(data_dir: Annotated[Path, Depends(get_mv_data_dir)]) -> dict[str, Any]:
     return service.history(data_dir)
+
+
+@router.get("/market-view/sensex")
+def market_view_sensex(
+    data_dir: Annotated[Path, Depends(get_mv_data_dir)],
+    store: Annotated[Any, Depends(get_mv_store)],
+    clock: Annotated[Callable[[], float], Depends(get_mv_clock)],
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Sensex-only market view: prior-day CPR/pivots + ATM straddle expected move."""
+    today = datetime.fromtimestamp(clock(), IST).date()
+    if not refresh:
+        saved = service.load_sensex_view(data_dir, today)
+        if saved is not None:
+            return saved
+    with _build_lock:
+        if not refresh:
+            saved = service.load_sensex_view(data_dir, today)
+            if saved is not None:
+                return saved
+        return service.build_sensex_for(today, data_dir=data_dir, store=store, clock=clock)

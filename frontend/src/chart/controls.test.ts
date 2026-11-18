@@ -14,6 +14,7 @@ describe("chartHidden (tab switch)", () => {
     expect(chartHidden("chart")).toBe(false);
     expect(chartHidden("options")).toBe(true);
     expect(chartHidden("paper")).toBe(true);
+    expect(chartHidden("sensex")).toBe(true);
   });
 });
 

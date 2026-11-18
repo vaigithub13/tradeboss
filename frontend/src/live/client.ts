@@ -51,7 +51,7 @@ const DEFAULT_BACKOFF = [1000, 2000, 4000, 8000, 10000] as const;
 
 export class LiveClient {
   private socket: SocketLike | null = null;
-  private view: LiveView | null = null;
+  private views: LiveView[] = [];
   private stopped = true;
   private attempt = 0;
   private retryTimer: unknown = null;
@@ -97,7 +97,15 @@ export class LiveClient {
 
   /** Tell the server what the tab shows; re-sent automatically after every reconnect. */
   setView(view: LiveView | null): void {
-    this.view = view;
+    this.setViews(view ? [view] : []);
+  }
+
+  /**
+   * Register every chart on screen (Nifty + Sensex). One view keeps the original single-symbol
+   * message; several go out as `{type:"view", views:[...]}` so neither chart drops the other.
+   */
+  setViews(views: readonly LiveView[]): void {
+    this.views = [...views];
     this.sendView();
   }
 
@@ -124,8 +132,9 @@ export class LiveClient {
 
   private sendView(): void {
     const s = this.socket;
-    if (!s || s.readyState !== OPEN || !this.view) return;
-    s.send(JSON.stringify({ type: "view", ...this.view }));
+    const [only, ...rest] = this.views;
+    if (!s || s.readyState !== OPEN || !only) return;
+    s.send(JSON.stringify(rest.length === 0 ? { type: "view", ...only } : { type: "view", views: this.views }));
   }
 
   private open(): void {

@@ -73,6 +73,12 @@ class Settings(BaseSettings):
     # Option book recorder. Stays off until it is turned on after the first live session.
     spread_recorder_enabled: bool = False
 
+    # SENSEX (BSE index + BSE_FO futures/options). Keys stay in config — never hard-code in UI.
+    # Upstox names the FO segment BSE_FO (often called BFO elsewhere).
+    sensex_index_key: str = "BSE_INDEX|SENSEX"
+    sensex_symbol: str = "SENSEX"
+    sensex_live_enabled: bool = True
+
     @property
     def feed_recordings_dir(self) -> Path:
         return self.data_dir / "feed-recordings"

@@ -2086,3 +2086,17 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
   1.57→1.65, same DD cut; kept 89–94%). `timestop_5pct_20m` rejected (PF down both windows).
 - **Holdout** with skip_hour_10-11: no 10–11 entries → identical to baseline (−₹1.7k, n=25).
 - Slot 5 / paper slots not modified; backend not started.
+
+## 18 Nov 2026 — Phase 1 SENSEX data + SENSEX tab (Nifty slots untouched)
+
+- Instruments: BSE master snapshot beside NSE (`BSE.json.gz`); Sensex index `BSE_INDEX|SENSEX`,
+  BSE_FO futures/options; `DIR_ALIASES` → `SENSEX`; keys in `settings` + `GET /api/config/charts`.
+- History: backfill `data/candles/SENSEX/1m.parquet` — **451,648** 1m bars,
+  **2022-01-03 09:15 → 2026-11-18 15:29 IST** (Upstox as far as allowed); front Sensex future for volume.
+- Live: Sensex (+ future) on the same feed; chart cap still 12 (Nifty/VIX first); option cap 40 unchanged;
+  hub multi-view so Nifty + Sensex bar pushes run concurrently.
+- UI: top tab **SENSEX** (Chart | Options | Paper | SENSEX); isolated chart/indicator/replay stores;
+  market view CPR/pivots + ATM-straddle EM; AI analyse; SectionBoundary; Nifty chart CSS-hidden not unmounted.
+- Tests: `tests/test_sensex.py` + controls/liveStore; typecheck clean; full suite (worker parity flake
+  cleared on retry). Paper slots 2/4/5/6, GEX, options, backtests unchanged. Backend not started.
+  `data/` and `.env` not committed.

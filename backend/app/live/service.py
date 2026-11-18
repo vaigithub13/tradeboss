@@ -48,21 +48,29 @@ from app.paper.catchup import PAPER_BAR_SOURCES, bar_minute, replay_into
 from app.paper.desk import SLOTS, PaperDesk
 from app.paper.live import PaperError, PaperRunner, session_factory
 from app.paper.pricing import VixSeries
-from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY, current_index
+from app.upstox.instruments import NIFTY_INDEX_KEY, SENSEX_INDEX_KEY, VIX_KEY, current_index
 
 log = logging.getLogger("tradeboss.live.service")
 
 
 def symbols_dirtied_by(
-    updated: set[str], *, future_dir: str | None, index_dir: str = "NIFTY50", vix_dir: str | None = None
+    updated: set[str],
+    *,
+    future_dir: str | None,
+    index_dir: str = "NIFTY50",
+    vix_dir: str | None = None,
+    sensex_future_dir: str | None = None,
+    sensex_dir: str = "SENSEX",
 ) -> set[str]:
-    """A tick on the front future also refreshes the Nifty chart, so its futures-volume VWAP moves.
-    A VIX tick refreshes the Nifty chart too, so its India VIX indicator moves."""
+    """A tick on the front future also refreshes the index chart (futures-volume VWAP).
+    A VIX tick refreshes the Nifty chart too. Sensex futures dirties the Sensex chart only."""
     out = set(updated)
     if future_dir and future_dir in updated:
         out.add(index_dir)
     if vix_dir and vix_dir in updated:
         out.add(index_dir)
+    if sensex_future_dir and sensex_future_dir in updated:
+        out.add(sensex_dir)
     return out
 
 STALE_AFTER_S = 15.0
@@ -76,7 +84,7 @@ REST_STATUS_EVERY_S = 60.0
 MAINTENANCE_EVERY_S = 5.0
 
 #: statuses the feed's market_info uses for "the market is (about to be) trading"
-MARKET_SEGMENTS = ("NSE_EQ", "NSE_FO", "NSE_INDEX")
+MARKET_SEGMENTS = ("NSE_EQ", "NSE_FO", "NSE_INDEX", "BSE_FO", "BSE_INDEX")
 
 
 def badge_state(conn_state: str, market_open: bool | None, since_last_tick_s: float | None) -> str:
@@ -110,7 +118,9 @@ class LiveConfig:
     reconcile_at: str = "15:45"
     reconcile_until: str = "16:30"
     default_sessions: tuple[str, ...] = ("normal", "weekend_full")
+    # Production wiring (build_service) appends Sensex when sensex_live_enabled; tests stay Nifty-only unless they opt in.
     base_keys: tuple[str, ...] = (NIFTY_INDEX_KEY, VIX_KEY)
+    sensex_live_enabled: bool = False
     spread_recorder_enabled: bool = False
     spreads_dir: Path | None = None
     paper_dir: Path | None = None
@@ -305,9 +315,16 @@ class LiveService:
                 self.overlay.upsert(d, bars)
             idx = current_index(self.cfg.instruments_dir)
             fut = idx.front_future() if idx is not None else None
+            sx_fut = idx.front_future(underlying_key=SENSEX_INDEX_KEY) if idx is not None else None
             future_dir = symbol_dir_name(fut.key) if fut is not None else None
+            sensex_future_dir = symbol_dir_name(sx_fut.key) if sx_fut is not None else None
             self.hub.mark_dirty(
-                symbols_dirtied_by(set(by_dir), future_dir=future_dir, vix_dir=symbol_dir_name(VIX_KEY))
+                symbols_dirtied_by(
+                    set(by_dir),
+                    future_dir=future_dir,
+                    vix_dir=symbol_dir_name(VIX_KEY),
+                    sensex_future_dir=sensex_future_dir,
+                )
             )
         if diffs and day is not None:
             append_jsonl(self.cfg.recordings_dir / f"{day.isoformat()}.overwrites.jsonl", [x.as_dict() for x in diffs])
@@ -600,6 +617,8 @@ class LiveService:
         key: str | None = None
         if symbol == symbol_dir_name(NIFTY_INDEX_KEY):
             key = NIFTY_INDEX_KEY
+        elif symbol == symbol_dir_name(SENSEX_INDEX_KEY):
+            key = SENSEX_INDEX_KEY
         else:
             with contextlib.suppress(SymbolNotFound, OSError):
                 k = self.store.meta(symbol).instrument.get("instrument_key")
@@ -613,11 +632,22 @@ class LiveService:
         return key in self._chart_keys() or is_stored(self.cfg.candles_dir, key)
 
     def _chart_keys(self) -> list[str]:
-        keys = list(self.cfg.base_keys)
+        """Nifty (+ VIX + Nifty fut) first, then Sensex (+ Sensex fut) when enabled, then watched symbols.
+        Cap is 12 chart keys so paper option keys (OPTION_CAP=40) are never crowded out."""
+        keys: list[str] = []
+        for k in self.cfg.base_keys:
+            if k == SENSEX_INDEX_KEY and not self.cfg.sensex_live_enabled:
+                continue
+            keys.append(k)
         idx = current_index(self.cfg.instruments_dir)
-        fut = idx.front_future() if idx is not None else None
-        if fut is not None:
-            keys.append(fut.key)
+        if idx is not None:
+            fut = idx.front_future()
+            if fut is not None:
+                keys.append(fut.key)
+            if self.cfg.sensex_live_enabled:
+                sx = idx.front_future(underlying_key=SENSEX_INDEX_KEY)
+                if sx is not None:
+                    keys.append(sx.key)
         for sym in sorted(self.hub.watched_symbols()):
             k = self.key_for_symbol(sym)
             if k:
@@ -732,6 +762,9 @@ def build_service() -> LiveService:
     from app.routes.candles import get_store
     from app.upstox.deps import make_client
 
+    base = (NIFTY_INDEX_KEY, VIX_KEY)
+    if settings.sensex_live_enabled:
+        base = (*base, settings.sensex_index_key or SENSEX_INDEX_KEY)
     cfg = LiveConfig(
         candles_dir=settings.candles_dir,
         recordings_dir=settings.feed_recordings_dir,
@@ -745,6 +778,8 @@ def build_service() -> LiveService:
         reconcile_at=settings.live_reconcile_at,
         reconcile_until=settings.live_reconcile_until,
         default_sessions=settings.default_sessions,
+        base_keys=base,
+        sensex_live_enabled=settings.sensex_live_enabled,
         spread_recorder_enabled=settings.spread_recorder_enabled,
         spreads_dir=settings.data_dir / "spreads",
         paper_dir=settings.data_dir / "paper",

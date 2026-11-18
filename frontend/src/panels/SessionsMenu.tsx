@@ -1,6 +1,6 @@
 import type { SessionType } from "../api/client";
 import { Popover } from "../components/Popover";
-import { useChartStore } from "../store/chartStore";
+import { useChartScope } from "../store/chartScope";
 
 const OPTIONS: { type: SessionType; label: string; hint: string }[] = [
   { type: "weekend_full", label: "Weekend (full-length)", hint: "Full-length Saturday/Sunday sessions, e.g. Budget day, 2024-01-20" },
@@ -9,8 +9,9 @@ const OPTIONS: { type: SessionType; label: string; hint: string }[] = [
 ];
 
 export function SessionsMenu() {
-  const sessions = useChartStore((s) => s.sessions);
-  const toggleSession = useChartStore((s) => s.toggleSession);
+  const useChart = useChartScope().chart;
+  const sessions = useChart((s) => s.sessions);
+  const toggleSession = useChart((s) => s.toggleSession);
 
   return (
     <Popover label="Sessions ▾" title="Which session types are shown" panelClassName="w-72">

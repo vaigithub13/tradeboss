@@ -30,6 +30,7 @@ from app.upstox.deps import (
 from app.upstox.instruments import (
     KINDS,
     NIFTY_INDEX_KEY,
+    SENSEX_INDEX_KEY,
     VIX_KEY,
     Instrument,
     InstrumentIndex,
@@ -209,7 +210,7 @@ class JobOut(BaseModel):
 
 
 def default_start(instrument: Instrument, today: date) -> date:
-    if instrument.key in (NIFTY_INDEX_KEY, VIX_KEY):
+    if instrument.key in (NIFTY_INDEX_KEY, VIX_KEY, SENSEX_INDEX_KEY):
         return MIN_HISTORY_DATE
     if instrument.kind == "future":
         return today - timedelta(days=DEFAULT_FUTURE_DAYS)

@@ -5,6 +5,10 @@ Protocol (JSON text frames)
 client -> server
     {"type": "view", "symbol": "NIFTY50", "timeframe": "5m", "sessions": ["normal"],
      "indicators": [{"id": "ema20", "type": "ema", "params": {"length": 20}}]}
+    {"type": "view", "views": [  # multi-chart: Nifty + Sensex without dropping either
+         {"symbol": "NIFTY50", "timeframe": "5m", "sessions": ["normal"], "indicators": [...]},
+         {"symbol": "SENSEX", "timeframe": "5m", "sessions": ["normal"], "indicators": [...]}
+     ]}
     {"type": "ping"}
 
 server -> client
@@ -18,6 +22,8 @@ At most `1 / push_interval` (5) `bar` messages per second per client: updates ar
 server-side. Candles come from the SAME code as /api/candles (`get_candle_page`) and indicators
 from the SAME module as /api/indicators (`compute_indicators`, tail only: warm-up history is
 loaded by the module itself), so the live view cannot drift from the REST view.
+
+Multi-view pushes run concurrently; a Sensex indicator error never blocks a Nifty bar push.
 """
 
 from __future__ import annotations
@@ -27,7 +33,7 @@ import json
 import logging
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from app.data.service import get_candle_page
@@ -40,6 +46,7 @@ log = logging.getLogger("tradeboss.live.hub")
 PUSH_INTERVAL_S = 0.2  # <= 5 bar messages per second per client
 STATUS_INTERVAL_S = 1.0
 MAX_INDICATORS = 20
+MAX_VIEWS = 4
 
 
 class Socket(Protocol):
@@ -57,7 +64,8 @@ class ClientView:
 @dataclass(eq=False)
 class Client:
     ws: Socket
-    view: ClientView | None = None
+    view: ClientView | None = None  # first view (compat with older callers / tests)
+    views: list[ClientView] = field(default_factory=list)
     dirty: bool = False
     computing: bool = False
     last_push: float = -1e9
@@ -81,6 +89,28 @@ def parse_view(msg: dict[str, Any], default_sessions: tuple[str, ...]) -> Client
         for i in raw
     )
     return ClientView(symbol, timeframe, types, specs)
+
+
+def parse_views(msg: dict[str, Any], default_sessions: tuple[str, ...]) -> list[ClientView]:
+    """One or more chart views. `views: [...]` takes precedence; else the legacy single-symbol shape."""
+    raw = msg.get("views")
+    if isinstance(raw, list):
+        if not raw or len(raw) > MAX_VIEWS:
+            raise ValueError("bad views")
+        out: list[ClientView] = []
+        seen: set[str] = set()
+        for item in raw:
+            if not isinstance(item, dict):
+                raise ValueError("bad views")
+            v = parse_view(item, default_sessions)
+            if v.symbol in seen:
+                continue
+            seen.add(v.symbol)
+            out.append(v)
+        if not out:
+            raise ValueError("view needs symbol and timeframe")
+        return out
+    return [parse_view(msg, default_sessions)]
 
 
 def compute_update(store: CandleStore, view: ClientView, volume_known: Callable[[str], bool] | None = None) -> dict[str, Any]:
@@ -151,7 +181,9 @@ class LiveHub:
             if kind == "ping":
                 await self._send(c, {"type": "pong"})
             elif kind == "view":
-                c.view = parse_view(msg, self.default_sessions())
+                views = parse_views(msg, self.default_sessions())
+                c.views = views
+                c.view = views[0]
                 c.dirty = True  # send the current tail right away
                 if self.on_views_changed:
                     self.on_views_changed()
@@ -162,18 +194,27 @@ class LiveHub:
 
     # -------------------------------------------------------------- what is being watched
     def watched_symbols(self) -> set[str]:
-        return {c.view.symbol for c in self.clients if c.view is not None}
+        out: set[str] = set()
+        for c in self.clients:
+            for v in c.views:
+                out.add(v.symbol)
+            if c.view is not None:
+                out.add(c.view.symbol)
+        return out
 
     def mark_dirty(self, symbols: set[str] | None = None) -> None:
         """Bars changed for these symbol folders (None = all)."""
         for c in self.clients:
-            if c.view is not None and (symbols is None or c.view.symbol in symbols):
+            views = c.views or ([c.view] if c.view is not None else [])
+            if any(symbols is None or v.symbol in symbols for v in views):
                 c.dirty = True
 
     async def broadcast_reload(self, symbols: set[str] | None = None) -> None:
         for c in list(self.clients):
-            if c.view is not None and (symbols is None or c.view.symbol in symbols):
-                await self._send(c, {"type": "reload", "symbol": c.view.symbol})
+            views = c.views or ([c.view] if c.view is not None else [])
+            for v in views:
+                if symbols is None or v.symbol in symbols:
+                    await self._send(c, {"type": "reload", "symbol": v.symbol})
 
     # -------------------------------------------------------------- the pump
     async def pump_once(self) -> None:
@@ -187,11 +228,19 @@ class LiveHub:
                 c.last_status = now
                 c.sent_status += 1
                 await self._send(c, {"type": "status", **status})
-            if c.dirty and not c.computing and c.view is not None and now - c.last_push >= self.push_interval:
+            views = c.views or ([c.view] if c.view is not None else [])
+            if c.dirty and not c.computing and views and now - c.last_push >= self.push_interval:
                 c.dirty = False
                 c.computing = True
                 c.last_push = now
-                asyncio.create_task(self._push(c, c.view))
+                asyncio.create_task(self._push_views(c, list(views)))
+
+    async def _push_views(self, c: Client, views: list[ClientView]) -> None:
+        """Push every watched chart concurrently so Sensex work cannot stall Nifty bars."""
+        try:
+            await asyncio.gather(*(self._push(c, v) for v in views), return_exceptions=True)
+        finally:
+            c.computing = False
 
     async def _push(self, c: Client, view: ClientView) -> None:
         try:
@@ -203,8 +252,6 @@ class LiveHub:
             self.errors += 1
             if not c.closed:
                 await self._send(c, {"type": "error", "message": f"{type(exc).__name__}: {str(exc)[:160]}", "symbol": view.symbol})
-        finally:
-            c.computing = False
 
     async def run(self) -> None:
         while True:
@@ -216,4 +263,3 @@ class LiveHub:
             await c.ws.send_text(json.dumps(msg, separators=(",", ":"), allow_nan=False, default=str))
         except Exception:  # noqa: BLE001 - the tab went away
             c.closed = True
-

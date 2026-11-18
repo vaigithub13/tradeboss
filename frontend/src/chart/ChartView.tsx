@@ -25,11 +25,10 @@ import type { Candle, Timeframe } from "../api/client";
 import { indicatorKey } from "../indicators/cache";
 import { legendRows } from "../indicators/legend";
 import { tailChange } from "../live/merge";
-import { useIndicatorStore } from "../store/indicatorStore";
 import { formatCrosshairTime, formatTick, legendValues, type TickKind } from "./format";
 import { IndicatorLayer } from "./indicatorLayer";
 import { jumpWindow } from "../backtest/present";
-import { historyForZoom, zoomLogical } from "../draw/model";
+import { historyForZoom, zoomLogical, type Drawing } from "../draw/model";
 import {
   indexOfTime,
   loadLegendCollapsed,
@@ -68,7 +67,7 @@ import { loadOptionNotes, loadPositionLots, loadPositionMinutes, positionViews, 
 import { isPositionTool } from "../draw/position";
 import { useDrawStore } from "../draw/store";
 import { usePaperTradesStore } from "../store/paperTradesStore";
-import { useChartStore } from "../store/chartStore";
+import { useChartScope } from "../store/chartScope";
 import { useLiveStore } from "../store/liveStore";
 import {
   DEFAULT_BAR_SPACING,
@@ -79,6 +78,7 @@ import {
 } from "./controls";
 import { candleCountdown } from "./countdown";
 
+const NO_DRAWINGS: Drawing[] = [];
 const UP = "#26a69a";
 const DOWN = "#ef5350";
 const BG = "#0b0e14";
@@ -126,6 +126,8 @@ export function ChartView({
   symbol, displayName, timeframe, scope, candles: loadedCandles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
   markers = [], focus = null, onPickTime, tradeCard, levels = [], cursor = null, gex = null,
 }: Props) {
+  // Nifty by default; the Sensex tab provides its own chart + indicator stores.
+  const { id: scopeId, chart: useChartStore, indicators: useIndicatorStore } = useChartScope();
   const candles = useMemo(() => seriesThroughCursor(loadedCandles, cursor).bars, [loadedCandles, cursor]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
@@ -176,7 +178,10 @@ export function ChartView({
   const goLive = useChartStore((s) => s.goLive);
   const holidays = useDrawStore((s) => s.holidays);
   const weekendSessions = useDrawStore((s) => s.weekendSessions);
-  const drawDrawings = useDrawStore((s) => s.drawings);
+  // the draw store holds ONE symbol's drawings at a time; a chart for another symbol shows none
+  const drawSymbol = useDrawStore((s) => s.symbol);
+  const storeDrawings = useDrawStore((s) => s.drawings);
+  const drawDrawings = drawSymbol === symbol ? storeDrawings : NO_DRAWINGS;
   const drawHide = useDrawStore((s) => s.hideAll);
   const drawSelected = useDrawStore((s) => s.selectedId);
   const drawDraft = useDrawStore((s) => s.draft);
@@ -333,7 +338,9 @@ export function ChartView({
     };
     el.addEventListener("pointerup", onPointerUp);
 
-    if (import.meta.env.DEV) (window as unknown as { __chart?: unknown }).__chart = { chart, candleSeries };
+    if (import.meta.env.DEV) {
+      (window as unknown as Record<string, unknown>)[scopeId === "nifty" ? "__chart" : `__chart_${scopeId}`] = { chart, candleSeries };
+    }
 
     const whitespace = chart.addSeries(LineSeries, {
       color: "rgba(0,0,0,0)",
@@ -723,8 +730,9 @@ export function ChartView({
   }, [candles, timeframe, holidays]);
 
   useEffect(() => {
+    if (drawSymbol !== symbol) return; // another chart owns the position readout
     publishPositionViews(overlay ? views.filter((view) => view.id !== overlay.drawing.id) : views);
-  }, [views, overlay]);
+  }, [views, overlay, drawSymbol, symbol]);
 
   useEffect(() => {
     if (!positionKey) {

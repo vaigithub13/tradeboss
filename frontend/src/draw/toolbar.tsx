@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 
 import { getJson, TIMEFRAMES } from "../api/client";
 import { formatCrosshairTime } from "../chart/format";
-import { useChartStore } from "../store/chartStore";
+import { useChartScope } from "../store/chartScope";
 import { measure, objectTreeRows, type Drawing, type DrawTool, type LineStyleName } from "./model";
 import { usePositionViews } from "./positionFeed";
 import { defaultPositionSettings, pointsOf, positionToolLabel, priceOf, type PositionSettings } from "./position";
@@ -40,15 +40,25 @@ const TOOLS: { id: DrawMode; label: string; title: string }[] = [
   { id: "eraser", label: "⌫", title: "Eraser" },
 ];
 
-/** Load, save, and keyboard shortcuts for the symbol on screen. */
-export function DrawSync({ symbol }: { symbol: string }) {
+/**
+ * Load, save, and keyboard shortcuts for the symbol on screen.
+ *
+ * The draw store holds one symbol's drawings at a time, and both the Nifty chart and the Sensex tab
+ * stay mounted. Only the visible chart (`active`) syncs; going inactive flushes a pending save first.
+ */
+export function DrawSync({ symbol, active = true }: { symbol: string; active?: boolean }) {
   const drawings = useDrawStore((s) => s.drawings);
   const ready = useDrawStore((s) => s.ready);
   const loaded = useDrawStore((s) => s.symbol);
 
   useEffect(() => {
+    if (!active) return;
     void useDrawStore.getState().load(symbol);
-  }, [symbol]);
+    return () => {
+      const s = useDrawStore.getState();
+      if (s.ready && s.symbol === symbol) void s.save().catch(() => {});
+    };
+  }, [symbol, active]);
 
   useEffect(() => {
     let cancel = false;
@@ -63,14 +73,15 @@ export function DrawSync({ symbol }: { symbol: string }) {
   }, []);
 
   useEffect(() => {
-    if (!ready || loaded !== symbol) return;
+    if (!active || !ready || loaded !== symbol) return;
     const timer = setTimeout(() => {
       void useDrawStore.getState().save().catch(() => {});
     }, 300);
     return () => clearTimeout(timer);
-  }, [drawings, ready, loaded, symbol]);
+  }, [drawings, ready, loaded, symbol, active]);
 
   useEffect(() => {
+    if (!active) return;
     const onKey = (ev: KeyboardEvent): void => {
       const target = ev.target;
       if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement || target instanceof HTMLSelectElement) return;
@@ -90,7 +101,7 @@ export function DrawSync({ symbol }: { symbol: string }) {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [active]);
 
   return null;
 }
@@ -105,6 +116,7 @@ export function DrawToolbar() {
   const fileRef = useRef<HTMLInputElement>(null);
   const [treeOpen, setTreeOpen] = useState(false);
   const selected = drawings.find((item) => item.id === selectedId) ?? null;
+  const useChartStore = useChartScope().chart;
   const timeframe = useChartStore((s) => s.timeframe);
 
   return (
