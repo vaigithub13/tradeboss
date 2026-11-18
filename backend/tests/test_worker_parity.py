@@ -9,8 +9,10 @@ from pathlib import Path
 import pytest
 
 from app.backtest.catalog import build_strategy
-from app.backtest.execute import _peek_count, execute_run
+from app.backtest.execute import execute_run
 from app.backtest import execute
+from app.backtest.holdout import load_holdout
+from app.backtest.runs import RunStore
 from app.config import settings
 from app.pine.isolated import IsolatedStrategy
 
@@ -91,8 +93,16 @@ def test_the_hand_port_in_the_worker_matches_in_process_on_the_committed_day() -
 
 @pytest.mark.skipif(not (settings.candles_dir / "NIFTY50" / "1m.parquet").exists(),
                     reason="no stored NIFTY 1m history in data/ (the committed-day test above still runs)")
-def test_the_hand_port_in_the_worker_matches_in_process_on_six_runs() -> None:
-    before = _peek_count()
+def test_the_hand_port_in_the_worker_matches_in_process_on_six_runs(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    """Parity on research windows. Peek audit uses a temp sqlite — never data/backtests.sqlite."""
+    store = RunStore(tmp_path / "backtests.sqlite")
+    monkeypatch.setattr(execute, "RunStore", lambda _path: store)
+    start, end = load_holdout()
+    before = store.holdout_peeks(start.isoformat(), end.isoformat())
+    assert before == 0
+
     real = build_strategy
 
     def routed(config: dict):
@@ -102,11 +112,11 @@ def test_the_hand_port_in_the_worker_matches_in_process_on_six_runs() -> None:
 
     execute.build_strategy = routed
     try:
-        for start, end, timeframe, length in RUNS:
-            label = f"{start}..{end} {timeframe} L{length}"
-            hand = execute_run(_config(start, end, timeframe, length, "price_channel"), lambda _p: None, hash_data=False)
-            worker = execute_run(_config(start, end, timeframe, length, "worker"), lambda _p: None, hash_data=False)
+        for start_s, end_s, timeframe, length in RUNS:
+            label = f"{start_s}..{end_s} {timeframe} L{length}"
+            hand = execute_run(_config(start_s, end_s, timeframe, length, "price_channel"), lambda _p: None, hash_data=False)
+            worker = execute_run(_config(start_s, end_s, timeframe, length, "worker"), lambda _p: None, hash_data=False)
             assert _fingerprint(worker) == _fingerprint(hand), label
     finally:
         execute.build_strategy = real
-    assert _peek_count() == before == 0
+    assert store.holdout_peeks(start.isoformat(), end.isoformat()) == before == 0

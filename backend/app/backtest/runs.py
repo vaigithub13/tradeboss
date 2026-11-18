@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS holdout_peeks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     holdout_start TEXT NOT NULL,
     holdout_end TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    note TEXT
 )
 """
 
@@ -75,6 +76,7 @@ class RunStore:
         self._db.row_factory = sqlite3.Row
         self._db.execute(_SCHEMA)
         self._db.execute(_PEEKS)
+        self._migrate_peeks_note()
         self._db.commit()
 
     def create(self, config: dict[str, Any], git: GitState, parent_id: str | None = None) -> str:
@@ -144,6 +146,11 @@ class RunStore:
             rows = self._db.execute("SELECT * FROM runs ORDER BY created_at DESC, id DESC").fetchall()
         return [_row_dict(row) for row in rows]
 
+    def _migrate_peeks_note(self) -> None:
+        cols = {row[1] for row in self._db.execute("PRAGMA table_info(holdout_peeks)")}
+        if "note" not in cols:
+            self._db.execute("ALTER TABLE holdout_peeks ADD COLUMN note TEXT")
+
     def holdout_peeks(self, start: str, end: str) -> int:
         with self._lock:
             row = self._db.execute(
@@ -152,13 +159,13 @@ class RunStore:
             ).fetchone()
         return int(row[0])
 
-    def accept_holdout(self, start: str, end: str) -> int:
+    def accept_holdout(self, start: str, end: str, *, note: str | None = None) -> int:
         """Record one peek and return the count for this frozen holdout. Call before the run."""
         now = datetime.now(IST).isoformat(timespec="seconds")
         with self._lock:
             self._db.execute(
-                "INSERT INTO holdout_peeks (holdout_start, holdout_end, created_at) VALUES (?, ?, ?)",
-                (start, end, now),
+                "INSERT INTO holdout_peeks (holdout_start, holdout_end, created_at, note) VALUES (?, ?, ?, ?)",
+                (start, end, now, note),
             )
             self._db.commit()
             row = self._db.execute(
@@ -166,6 +173,22 @@ class RunStore:
                 (start, end),
             ).fetchone()
         return int(row[0])
+
+    def record_holdout_peek(
+        self,
+        start: str,
+        end: str,
+        *,
+        created_at: str,
+        note: str | None = None,
+    ) -> None:
+        """Insert a historical peek row (audit restore). Does not rewrite other rows."""
+        with self._lock:
+            self._db.execute(
+                "INSERT INTO holdout_peeks (holdout_start, holdout_end, created_at, note) VALUES (?, ?, ?, ?)",
+                (start, end, created_at, note),
+            )
+            self._db.commit()
 
     def _status(self, run_id: str, status: str) -> None:
         with self._lock:

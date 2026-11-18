@@ -18,6 +18,10 @@ from app.data.store import CandleStore
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
+class RealDataWriteError(RuntimeError):
+    """Raised when a test tries to mutate the production data/ tree."""
+
+
 def ist_ts(y: int, mo: int, d: int, h: int, mi: int) -> int:
     return int(datetime(y, mo, d, h, mi, tzinfo=IST).timestamp())
 
@@ -68,6 +72,42 @@ def _no_startup_network(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(settings, "live_feed_enabled", False)
     monkeypatch.setattr(settings, "gex_recorder_enabled", False)
     monkeypatch.setattr(settings, "options_recorder_enabled", False)
+
+
+@pytest.fixture(autouse=True)
+def _forbid_writes_to_real_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail fast if a test mutates the real data/ tree (backtests.sqlite under data/).
+
+    Patches RunStore methods in place so every import sees the guard. Candle reads under
+    data/candles remain allowed (research / parity skipifs).
+    """
+    from app.backtest.runs import RunStore
+    from app.config import settings
+
+    real_data = settings.data_dir.resolve()
+    mutate = ("create", "accept_holdout", "record_holdout_peek", "finish", "fail", "progress", "mark_running")
+
+    def _under_real(path: Path) -> bool:
+        try:
+            Path(path).resolve().relative_to(real_data)
+            return True
+        except ValueError:
+            return False
+
+    for name in mutate:
+        orig = getattr(RunStore, name)
+
+        def _wrap(method=orig):  # noqa: ANN001
+            def wrapped(self, *args, **kwargs):  # noqa: ANN001
+                if _under_real(self.path):
+                    raise RealDataWriteError(
+                        f"tests must not write to the real data/ store ({self.path}); use tmp_path"
+                    )
+                return method(self, *args, **kwargs)
+
+            return wrapped
+
+        monkeypatch.setattr(RunStore, name, _wrap())
 
 
 @pytest.fixture

@@ -2087,6 +2087,15 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
 - **Holdout** with skip_hour_10-11: no 10–11 entries → identical to baseline (−₹1.7k, n=25).
 - Slot 5 / paper slots not modified; backend not started.
 
+## 18 Nov 2026 — Restore holdout peeks + isolate worker-parity sqlite
+
+- Local `data/backtests.sqlite` holdout_peeks restored to **2** (2026-07-01..2026-10-01,
+  created_at 2026-11-17T21:45:04 / 21:46:12 IST) with notes for the S5 diagnosis peeks
+  cleared during 8e0405c. `data/` not committed.
+- `test_worker_parity` six-runs uses `tmp_path` RunStore (monkeypatch); never reads/writes
+  production peeks. Autouse conftest guard raises `RealDataWriteError` on RunStore mutations
+  under real `data/`.
+
 ## 18 Nov 2026 — Sensex ATM straddle fix (market view)
 
 - Bug: Sensex view used structure `prev_close` for ATM → 82,500 when spot was 82,031.80.
