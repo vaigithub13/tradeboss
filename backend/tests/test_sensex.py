@@ -157,24 +157,111 @@ def test_multi_view_parse_keeps_nifty_and_sensex() -> None:
     assert views[1].timeframe == "15m"
 
 
-def test_atm_straddle_expected_move() -> None:
+def _chain_row(strike: float, *, ce: dict, pe: dict, spot: float | None = None) -> dict:
+    row: dict = {
+        "strike_price": strike,
+        "call_options": {"market_data": ce},
+        "put_options": {"market_data": pe},
+    }
+    if spot is not None:
+        row["underlying_spot_price"] = spot
+    return row
+
+
+def test_atm_picks_strike_nearest_spot_above_and_below() -> None:
+    """82031.80 → 82000 (not 82500); 82060 → 82100 with step-100 grid."""
+    strikes = [81900, 82000, 82100, 82500]
     chain = [
-        {
-            "strike_price": 85000,
-            "call_options": {"market_data": {"ltp": 120.5}},
-            "put_options": {"market_data": {"ltp": 110.0}},
-        },
-        {
-            "strike_price": 85100,
-            "call_options": {"market_data": {"ltp": 80.0}},
-            "put_options": {"market_data": {"ltp": 150.0}},
-        },
+        _chain_row(k, ce={"ltp": 100.0}, pe={"ltp": 100.0}, spot=82031.8) for k in strikes
     ]
-    out = _atm_straddle_move(chain, spot=85020)
+    below = _atm_straddle_move(chain, spot=82031.80, step=100, expiry=date(2026, 11, 19))
+    assert below is not None and below["atm"] == 82000
+    assert below["spot"] == 82031.8
+    assert below["expiry"] == "2026-11-19"
+    above = _atm_straddle_move(chain, spot=82060.0, step=100, expiry=date(2026, 11, 19))
+    assert above is not None and above["atm"] == 82100
+
+
+def test_atm_straddle_prefers_mid_over_ltp_and_reports_sources() -> None:
+    chain = [
+        _chain_row(
+            82000,
+            ce={"bid_price": 90, "ask_price": 110, "ltp": 130.75},
+            pe={"bid_price": 80, "ask_price": 100, "ltp": 610.05},
+            spot=82031.8,
+        ),
+        _chain_row(82500, ce={"ltp": 50}, pe={"ltp": 700}, spot=82031.8),
+    ]
+    out = _atm_straddle_move(chain, spot=82031.8, step=100, expiry=date(2026, 11, 19))
     assert out is not None
-    assert out["atm"] == 85000
-    assert out["straddle"] == 230.5
-    assert out["range"] == [84789.5, 85250.5]
+    assert out["atm"] == 82000
+    assert out["call_price"] == 100.0 and out["call_source"] == "mid"
+    assert out["put_price"] == 90.0 and out["put_source"] == "mid"
+    assert out["expected_move"] == 190.0
+    assert out["range"] == [81841.8, 82221.8]
+
+
+def test_atm_straddle_falls_back_to_ltp_when_mid_missing() -> None:
+    chain = [_chain_row(82000, ce={"ltp": 55.5}, pe={"ltp": 40.0}, spot=82000)]
+    out = _atm_straddle_move(chain, spot=82000, step=100, expiry=date(2026, 11, 19))
+    assert out is not None
+    assert out["call_source"] == "ltp" and out["put_source"] == "ltp"
+    assert out["expected_move"] == 95.5
+
+
+def test_atm_straddle_returns_none_when_quotes_missing() -> None:
+    chain = [_chain_row(82000, ce={}, pe={"ltp": 40.0}, spot=82000)]
+    assert _atm_straddle_move(chain, spot=82000, step=100, expiry=date(2026, 11, 19)) is None
+
+
+def test_sensex_view_uses_latest_close_not_prev_close_for_atm(tmp_path: Path) -> None:
+    """After hours: ATM from today's last 1m close (82031.8 → 82000), never prior-day CPR close."""
+    from datetime import timedelta, timezone
+
+    from app.data.importer import build_frame, write_parquet
+    from app.data.store import CandleStore
+
+    ist = timezone(timedelta(hours=5, minutes=30))
+    sdir = tmp_path / "candles" / "SENSEX"
+    sdir.mkdir(parents=True)
+    rows = []
+    # Prior days close near 82500 so a bug using prev_close would pick ATM 82500.
+    for i, d in enumerate([date(2026, 11, 14), date(2026, 11, 17)]):
+        t0 = int(datetime(d.year, d.month, d.day, 9, 15, tzinfo=ist).timestamp())
+        for m in range(375):
+            o = 82450.0 + i
+            rows.append({"t": (t0 + m * 60) * 1000, "open": o, "high": o + 10, "low": o - 10, "close": 82510.0, "volume": 0})
+    # Today ends at 82031.80
+    today = date(2026, 11, 18)
+    t0 = int(datetime(today.year, today.month, today.day, 9, 15, tzinfo=ist).timestamp())
+    for m in range(375):
+        close = 82031.80 if m == 374 else 82100.0
+        rows.append({"t": (t0 + m * 60) * 1000, "open": 82100.0, "high": 82150.0, "low": 82000.0, "close": close, "volume": 0})
+    df, _ = build_frame(rows, bar_minutes=1)
+    write_parquet(df, sdir / "1m.parquet")
+    (sdir / "meta.json").write_text(json.dumps({
+        "instrument": {"instrument_key": SENSEX_INDEX_KEY, "kind": "index", "symbol": "SENSEX"},
+        "covered": [["2026-11-14", "2026-11-18"]],
+        "source_empty": [],
+    }))
+    store = CandleStore(tmp_path / "candles")
+
+    def chain():
+        return (
+            date(2026, 11, 19),
+            [
+                _chain_row(82000, ce={"ltp": 200}, pe={"ltp": 180}),
+                _chain_row(82500, ce={"ltp": 130.75}, pe={"ltp": 610.05}),
+            ],
+        )
+
+    view = build_sensex_for(today, data_dir=tmp_path, store=store, chain_fetcher=chain)
+    em = view["expected_move"]
+    assert em is not None
+    assert em["atm"] == 82000
+    assert em["spot"] == 82031.8
+    assert em["expiry"] == "2026-11-19"
+    assert em["expected_move"] == 380.0  # not CE130+PE610
 
 
 def test_sensex_market_view_builds_from_daily(tmp_path: Path) -> None:
@@ -208,17 +295,23 @@ def test_sensex_market_view_builds_from_daily(tmp_path: Path) -> None:
         date(2026, 11, 1),
         data_dir=tmp_path,
         store=store,
-        chain_fetcher=lambda: [
-            {
-                "strike_price": 84200,
-                "call_options": {"market_data": {"ltp": 100}},
-                "put_options": {"market_data": {"ltp": 95}},
-            }
-        ],
+        chain_fetcher=lambda: (
+            date(2026, 11, 6),
+            [
+                {
+                    "strike_price": 84200,
+                    "call_options": {"market_data": {"ltp": 100}},
+                    "put_options": {"market_data": {"ltp": 95}},
+                    "underlying_spot_price": 84205,
+                }
+            ],
+        ),
     )
     assert view["symbol"] == "SENSEX"
     assert view["structure"] is not None
-    assert view["expected_move"]["straddle"] == 195
+    assert view["expected_move"]["atm"] == 84200
+    assert view["expected_move"]["expected_move"] == 195
+    assert view["expected_move"]["expiry"] == "2026-11-06"
     assert (tmp_path / "market-view" / "sensex" / "2026-11-01.json").is_file()
 
 

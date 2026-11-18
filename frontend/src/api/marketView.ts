@@ -52,8 +52,14 @@ export function fetchMarketViewHistory(signal?: AbortSignal): Promise<MarketView
 
 export interface SensexExpectedMove {
   atm: number;
-  call_ltp: number;
-  put_ltp: number;
+  spot: number;
+  expiry: string | null;
+  call_price: number;
+  put_price: number;
+  call_source: "mid" | "ltp";
+  put_source: "mid" | "ltp";
+  call_ltp?: number;
+  put_ltp?: number;
   straddle: number;
   expected_move: number;
   range: [number, number];

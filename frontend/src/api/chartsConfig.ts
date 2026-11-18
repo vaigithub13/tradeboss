@@ -32,8 +32,16 @@ export interface SensexLevel {
 
 export interface SensexStraddle {
   atm: number;
-  call_ltp: number;
-  put_ltp: number;
+  spot: number;
+  expiry: string | null;
+  step?: number;
+  call_price: number;
+  put_price: number;
+  call_source: "mid" | "ltp";
+  put_source: "mid" | "ltp";
+  /** Compat with the first panel build */
+  call_ltp?: number;
+  put_ltp?: number;
   straddle: number;
   expected_move: number;
   range: [number, number];

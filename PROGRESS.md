@@ -2087,6 +2087,13 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
 - **Holdout** with skip_hour_10-11: no 10–11 entries → identical to baseline (−₹1.7k, n=25).
 - Slot 5 / paper slots not modified; backend not started.
 
+## 18 Nov 2026 — Sensex ATM straddle fix (market view)
+
+- Bug: Sensex view used structure `prev_close` for ATM → 82,500 when spot was 82,031.80.
+- Fix: ATM from latest index price (chain underlying spot, else last 1m close); step 100;
+  CE+PE mid preferred over LTP; nearest weekly expiry shown. Nifty market view uses VIX range
+  (no ATM) — unchanged. Paper slots untouched.
+
 ## 18 Nov 2026 — Phase 1 SENSEX data + SENSEX tab (Nifty slots untouched)
 
 - Instruments: BSE master snapshot beside NSE (`BSE.json.gz`); Sensex index `BSE_INDEX|SENSEX`,

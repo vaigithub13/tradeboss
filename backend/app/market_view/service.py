@@ -163,11 +163,46 @@ def history(data_dir: Path, limit: int = 60) -> dict[str, Any]:
             "day_type_hit": rate("day_type_hit")}
 
 
-def _atm_straddle_move(chain: list[dict[str, Any]], spot: float) -> dict[str, Any] | None:
-    """ATM CE+PE last prices → expected one-day move (points) from the straddle."""
-    from app.options.chain_view import atm_strike
+def _leg_quote(row: dict[str, Any], side: str) -> tuple[float | None, str | None]:
+    """Prefer bid/ask mid; fall back to LTP. Returns (price, 'mid'|'ltp')."""
+    block = row.get(side) or {}
+    if not isinstance(block, dict):
+        return None, None
+    md = block.get("market_data") if isinstance(block.get("market_data"), dict) else block
+    if not isinstance(md, dict):
+        return None, None
 
-    strikes: list[float] = []
+    def _f(key: str) -> float | None:
+        raw = md.get(key)
+        try:
+            v = float(raw) if raw is not None else None
+        except (TypeError, ValueError):
+            return None
+        return v if v is not None and v > 0 else None
+
+    bid, ask, ltp = _f("bid_price"), _f("ask_price"), _f("ltp")
+    if bid is not None and ask is not None:
+        return round((bid + ask) / 2.0, 2), "mid"
+    if ltp is not None:
+        return round(ltp, 2), "ltp"
+    return None, None
+
+
+def _atm_straddle_move(
+    chain: list[dict[str, Any]],
+    spot: float,
+    *,
+    step: int = 100,
+    expiry: date | None = None,
+) -> dict[str, Any] | None:
+    """ATM CE+PE mid (else LTP) → expected one-day move from the straddle.
+
+    ATM is the listed strike nearest `spot` (tie → lower), snapped with the BSE step when a
+    matching listed strike exists. Never uses CPR / prior-day close.
+    """
+    from app.options.chain_view import atm_strike as nearest_listed
+    from app.options.strikes import atm_strike as snap_step
+
     by_strike: dict[float, dict[str, Any]] = {}
     for row in chain:
         try:
@@ -176,39 +211,71 @@ def _atm_straddle_move(chain: list[dict[str, Any]], spot: float) -> dict[str, An
             continue
         if k <= 0:
             continue
-        strikes.append(k)
         by_strike[k] = row
+    strikes = sorted(by_strike)
     if not strikes or spot <= 0:
         return None
-    atm = atm_strike(spot, sorted(set(strikes)))
+    snapped = snap_step(spot, step)
+    atm = snapped if snapped in by_strike else nearest_listed(spot, strikes)
     row = by_strike.get(atm)
     if not row:
         return None
 
-    def _ltp(side: str) -> float | None:
-        block = row.get(side) or row.get(side.replace("_options", "")) or {}
-        if not isinstance(block, dict):
-            return None
-        md = block.get("market_data") if isinstance(block.get("market_data"), dict) else block
-        raw = md.get("ltp") if isinstance(md, dict) else None
-        try:
-            return float(raw) if raw is not None else None
-        except (TypeError, ValueError):
-            return None
-
-    ce = _ltp("call_options")
-    pe = _ltp("put_options")
+    ce, ce_src = _leg_quote(row, "call_options")
+    pe, pe_src = _leg_quote(row, "put_options")
     if ce is None or pe is None:
         return None
-    premium = ce + pe
+    premium = round(ce + pe, 2)
     return {
         "atm": atm,
-        "call_ltp": round(ce, 2),
-        "put_ltp": round(pe, 2),
-        "straddle": round(premium, 2),
-        "expected_move": round(premium, 2),
+        "spot": round(spot, 2),
+        "expiry": expiry.isoformat() if expiry else None,
+        "step": step,
+        "call_price": ce,
+        "put_price": pe,
+        "call_source": ce_src,
+        "put_source": pe_src,
+        # Compat aliases for the first Sensex panel build
+        "call_ltp": ce,
+        "put_ltp": pe,
+        "straddle": premium,
+        "expected_move": premium,
         "range": [round(spot - premium, 2), round(spot + premium, 2)],
     }
+
+
+def _latest_index_price(store: Any, symbol: str, day: date) -> float | None:
+    """Latest Sensex price: today's last 1m close (live overlay during hours, session close after)."""
+    from app.data.service import get_candle_page, get_candles
+
+    start = _day_start(day)
+    try:
+        candles = list(
+            get_candles(
+                store, symbol, "1m", from_time=start, to_time=None,
+                session_types=("normal", "weekend_full"),
+            ).candles
+        )
+    except Exception:
+        candles = []
+    if candles:
+        return float(candles[-1]["close"])
+    try:
+        page = get_candle_page(store, symbol, "1m", limit=1, session_types=["normal", "weekend_full"])
+        if page.candles:
+            return float(page.candles[-1]["close"])
+    except Exception:
+        return None
+    return None
+
+
+def _sensex_step(on: date) -> int:
+    from app.options.strikes import StrikeStepUnknown, load_default_step_table
+
+    try:
+        return load_default_step_table().step("SENSEX", on)
+    except StrikeStepUnknown:
+        return 100
 
 
 def build_sensex_for(
@@ -217,10 +284,11 @@ def build_sensex_for(
     data_dir: Path,
     store: Any,
     clock: Callable[[], float] = time.time,
-    chain_fetcher: Callable[[], list[dict[str, Any]]] | None = None,
+    chain_fetcher: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
-    """Sensex market view: prior-day CPR/pivots + expected move from the ATM straddle."""
+    """Sensex market view: prior-day CPR/pivots + ATM straddle from the latest index price."""
     from app.market_view.view import day_type, levels_of, score_structure, structure
+    from app.options.chain_view import chain_spot_from_rows
     from app.upstox.instruments import SENSEX_INDEX_KEY
 
     daily = _daily(store, SENSEX, day)
@@ -231,16 +299,25 @@ def build_sensex_for(
         max(-2, min(2, total if abs(total) < 2 else (2 if total > 0 else -2))),
         "Neutral",
     )
-    spot = float(st["prev_close"]) if st else 0.0
     straddle: dict[str, Any] | None = None
+    expiry: date | None = None
     try:
-        rows = chain_fetcher() if chain_fetcher is not None else _fetch_sensex_chain()
-        if rows and spot > 0:
-            straddle = _atm_straddle_move(rows, spot)
+        fetched = chain_fetcher() if chain_fetcher is not None else _fetch_sensex_chain()
+        if isinstance(fetched, tuple) and len(fetched) == 2:
+            expiry, rows = fetched[0], fetched[1]
+        else:
+            rows = list(fetched or [])
+        # Spot: live underlying from the chain when present, else latest 1m close — never CPR prev_close.
+        spot = chain_spot_from_rows(rows) if rows else None
+        if spot is None:
+            spot = _latest_index_price(store, SENSEX, day)
+        if rows and spot is not None and spot > 0:
+            straddle = _atm_straddle_move(rows, float(spot), step=_sensex_step(day), expiry=expiry)
     except Exception:
         straddle = None
     rng = tuple(straddle["range"]) if straddle and straddle.get("range") else None
     dtype, dreason = day_type(st, None)
+    exp_txt = f" exp {straddle['expiry']}" if straddle and straddle.get("expiry") else ""
     view = {
         "day": day.isoformat(),
         "built_at": int(clock()),
@@ -256,7 +333,8 @@ def build_sensex_for(
         "levels": levels_of(st, rng),
         "plan": (
             f"Sensex: watch CPR {st['tc']:,.0f}/{st['bc']:,.0f}; "
-            f"ATM straddle move ~{straddle['expected_move']:.0f} pts."
+            f"ATM {straddle['atm']:,.0f}{exp_txt} straddle ~{straddle['expected_move']:.0f} pts "
+            f"(spot {straddle['spot']:,.0f})."
             if st and straddle
             else (
                 f"Sensex: watch CPR {st['tc']:,.0f}/{st['bc']:,.0f}."
@@ -270,16 +348,18 @@ def build_sensex_for(
     return view
 
 
-def _fetch_sensex_chain() -> list[dict[str, Any]]:
+def _fetch_sensex_chain() -> tuple[date | None, list[dict[str, Any]]]:
+    """Nearest weekly Sensex option chain (expiry ASC from Upstox)."""
     from app.config import settings
     from app.upstox.deps import make_client
     from app.upstox.instruments import SENSEX_INDEX_KEY
 
     client = make_client()
     if client is None:
-        return []
+        return None, []
     key = settings.sensex_index_key or SENSEX_INDEX_KEY
     expiries = client.option_contracts(key)
     if not expiries:
-        return []
-    return client.option_chain(key, expiries[0])
+        return None, []
+    exp = expiries[0]
+    return exp, client.option_chain(key, exp)

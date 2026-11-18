@@ -108,8 +108,14 @@ export function SensexMarketView({
             <p className="mb-1 font-medium text-white/90">ATM straddle</p>
             {move ? (
               <ul className="space-y-0.5 font-mono text-white/70">
-                <li>ATM {fmt(move.atm)}</li>
-                <li>CE {fmt(move.call_ltp)} · PE {fmt(move.put_ltp)}</li>
+                <li>
+                  Spot {fmt(move.spot)} · ATM {fmt(move.atm)}
+                  {move.expiry ? ` · exp ${move.expiry}` : ""}
+                </li>
+                <li>
+                  CE {fmt(move.call_price ?? move.call_ltp ?? 0)} ({move.call_source ?? "ltp"}) · PE{" "}
+                  {fmt(move.put_price ?? move.put_ltp ?? 0)} ({move.put_source ?? "ltp"})
+                </li>
                 <li>Expected move ±{fmt(move.expected_move)} pts</li>
                 <li>Range {formatRange(move.range)}</li>
               </ul>
