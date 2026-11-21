@@ -112,6 +112,18 @@ def test_stop_distance_helpers() -> None:
     assert stop_distance_from_signal(entry=100.0, stop=None, stop_points=None) is None
 
 
+def test_short_whose_price_falls_has_positive_pnl() -> None:
+    """Direction sanity: a short that covers lower must book positive P&L (zero costs)."""
+    from tests.bt_helpers import Scripted, buy, day_bars, run, sell, MON
+
+    rows = [(100, 100, 100, 100), (100, 100, 100, 100), (90, 91, 89, 90), (90, 90, 90, 90)]
+    res = run(Scripted({0: [sell()], 2: [buy()]}), day_bars(MON, rows))
+    (t,) = res.trades
+    assert t.direction == "SHORT"
+    assert (t.entry_price, t.exit_price) == (100.0, 90.0)
+    assert t.gross_pnl == 10.0 and t.net_pnl == 10.0
+
+
 def test_price_action_defaults_still_points_for_nifty_parity() -> None:
     pa = PriceAction(pattern="morning_star")
     assert pa.level_pts == 10.0

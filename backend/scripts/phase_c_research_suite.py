@@ -164,6 +164,9 @@ def _summarise_run(out: dict[str, Any]) -> dict[str, Any]:
     avg_risk = sizing.get("avg_actual_risk") or float(out.get("_risk") or 300)
     avg_r = (statistics.mean(nets) / avg_risk) if nets and avg_risk else None
     costs_as_r = (charges / (avg_risk * len(trades))) if trades and avg_risk else None
+    grosses = [float(t.get("gross_pnl") or 0) for t in trades]
+    charge_rows = [float(t.get("charges_total") or 0) for t in trades]
+    avg_gross_r = (statistics.mean(grosses) / avg_risk) if grosses and avg_risk else None
     return {
         "trades": int(metrics["trades"]),
         "win_rate": metrics.get("win_rate"),
@@ -173,10 +176,12 @@ def _summarise_run(out: dict[str, Any]) -> dict[str, Any]:
         "gross_pnl": gross,
         "total_charges": charges,
         "avg_r": avg_r,
+        "avg_gross_r": avg_gross_r,
         "costs_as_r": costs_as_r,
         "sizing": sizing,
         "trade_nets": nets,
         "trade_times": [(int(t["entry_time"]), int(t["exit_time"]), float(t["net_pnl"])) for t in trades],
+        "trade_gross_charges": list(zip(grosses, charge_rows)),
     }
 
 
@@ -381,47 +386,66 @@ def _random_benchmark(
     window: str,
     seeds: list[int] = RANDOM_SEEDS,
 ) -> dict[str, Any]:
-    """Null of no directional edge: keep |net| and day/trade counts, randomize signs (10 seeds).
+    """Null of no directional edge on GROSS; charges stay the same on every seed.
 
-    Same symbols and same number of trades (and magnitudes) as the strategy; exits/costs are
-    already baked into each trade net. A true random-entry re-sim would re-run the engine; this
-    sign-shuffle is the cheap no-look-ahead null used for the ≥95% gate.
+    Per trade: random_net = ±gross − charges (slip already inside fill/gross). Flipping *net*
+    would wrongly flip the cost sign. A no-edge strategy sits near the 50th percentile on GROSS
+    (and therefore on this net, since costs are identical across seeds).
     """
-    # Per calendar day: list of trade nets (preserves trades-per-day structure for reporting)
-    by_day: dict[date, list[float]] = defaultdict(list)
+    by_day: dict[date, list[tuple[float, float]]] = defaultdict(list)  # (gross, charges)
     for r in rows:
         if not r.get("ok"):
             continue
         sp = r["spec"]
         if sp["strategy_key"] != strategy_key or float(sp["risk"]) != risk or sp["window"] != window:
             continue
-        for entry_t, _exit_t, net in r["summary"].get("trade_times") or []:
-            by_day[datetime.fromtimestamp(entry_t, IST).date()].append(float(net))
+        pairs = r["summary"].get("trade_gross_charges") or []
+        times = r["summary"].get("trade_times") or []
+        if pairs and len(pairs) == len(times):
+            for (entry_t, _exit_t, _net), (gross, chg) in zip(times, pairs):
+                by_day[datetime.fromtimestamp(entry_t, IST).date()].append((float(gross), float(chg)))
+        else:
+            # Fallback: only nets available — cannot keep costs fixed
+            for entry_t, _exit_t, net in times:
+                by_day[datetime.fromtimestamp(entry_t, IST).date()].append((float(net), 0.0))
     if not by_day:
         return {"error": "no trades", "percentile": None}
 
-    trade_nets = [n for day_nets in by_day.values() for n in day_nets]
-    strat_net = sum(trade_nets)
-    n_trades = len(trade_nets)
+    pairs = [p for day_pairs in by_day.values() for p in day_pairs]
+    grosses = [g for g, _c in pairs]
+    charges = [c for _g, c in pairs]
+    strat_gross = sum(grosses)
+    total_charges = sum(charges)
+    strat_net = strat_gross - total_charges
+    n_trades = len(pairs)
     trades_per_day = {d.isoformat(): len(v) for d, v in sorted(by_day.items())}
 
+    seed_gross: list[float] = []
     seed_nets: list[float] = []
     for seed in seeds:
         rng = random.Random(seed)
-        sample = [n if rng.random() < 0.5 else -n for n in trade_nets]
-        seed_nets.append(sum(sample))
+        flipped = [g if rng.random() < 0.5 else -g for g in grosses]
+        gsum = sum(flipped)
+        seed_gross.append(gsum)
+        seed_nets.append(gsum - total_charges)
 
-    better = sum(1 for s in seed_nets if strat_net > s)
-    percentile = 100.0 * better / len(seed_nets)
+    better_gross = sum(1 for s in seed_gross if strat_gross > s)
+    better_net = sum(1 for s in seed_nets if strat_net > s)
+    pct_gross = 100.0 * better_gross / len(seed_gross)
+    pct_net = 100.0 * better_net / len(seed_nets)
     return {
         "strategy_net": strat_net,
+        "strategy_gross": strat_gross,
+        "total_charges": total_charges,
         "trades": n_trades,
         "n_days": len(by_day),
         "trades_per_day_sample": dict(list(trades_per_day.items())[:3]),
         "seed_nets": seed_nets,
-        "percentile": percentile,
-        "beats_95": percentile >= 95.0,
-        "method": "sign_shuffle_trade_nets",
+        "seed_gross": seed_gross,
+        "percentile": pct_net,
+        "percentile_gross": pct_gross,
+        "beats_95": pct_net >= 95.0,
+        "method": "sign_shuffle_gross_minus_same_charges",
     }
 
 
@@ -619,18 +643,20 @@ def _render_md(report: dict[str, Any]) -> str:
         "",
         "## Random-entry benchmark (OOS percentile vs 10 seeds)",
         "",
-        "Method: sign-shuffle of realized trade nets (same |net|, same trades/day counts; null = no edge).",
+        "Method: sign-shuffle GROSS, then subtract the **same** charges (slip already in fills/gross). "
+        "Flipping net would wrongly flip the cost sign. No-edge ≈ 50th on gross.",
         "",
     ]
-    lines.append("| strategy | risk | strat net | percentile | beats ≥95% |")
-    lines.append("|---|---:|---:|---:|---|")
+    lines.append("| strategy | risk | strat gross | strat net | gross pctile | net pctile | beats ≥95% |")
+    lines.append("|---|---:|---:|---:|---:|---:|---|")
     for risk, block in report["random"].items():
         for skey, rnd in block.items():
             if "error" in rnd:
-                lines.append(f"| {skey} | {risk} | — | — | — |")
+                lines.append(f"| {skey} | {risk} | — | — | — | — | — |")
                 continue
             lines.append(
-                f"| {skey} | {risk} | {rnd['strategy_net']:.0f} | {rnd['percentile']:.0f} | "
+                f"| {skey} | {risk} | {rnd.get('strategy_gross', 0):.0f} | {rnd['strategy_net']:.0f} | "
+                f"{rnd.get('percentile_gross', rnd['percentile']):.0f} | {rnd['percentile']:.0f} | "
                 f"{'yes' if rnd.get('beats_95') else 'no'} |"
             )
     lines += ["", "## Gate verdict", ""]

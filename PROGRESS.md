@@ -2189,6 +2189,17 @@ notifications + Alerts log. Max 5 scripts; Web Worker; never on the live WS view
 - UI: ACTIVE includes 7 (“SENSEX DD CE”), panel + dashboard card + trailing OrderHelper; alerts;
   Sensex chart shows slot-7 markers. Tests + full backend suite + frontend paper tests + typecheck.
 
+## 21 Nov 2026 — Phase C sanity (random null / direction / cost share)
+
+- **Random bug:** Phase C v1 sign-shuffled *net* (costs flipped sign). Fixed to
+  `±gross − same charges` (slip already in fills/gross). DEV dry symbols: HDFCBANK gross
+  pctile 90 (broken net-flip was 30); BANKNIFTY gross 100 (broken 0). No-edge ≈ 50th on gross.
+- **Direction:** NIFTY dd_five_long `index` vs `index_future` 1-unit zero-cost 2022-01..2024-12:
+  277 trades, 0 mismatches, points 3342.9 both. Unit test: short cover lower → +PnL.
+- **Cost share (sample 3 symbols DEV):** costs often ≈ gross R (e.g. dd_five_long @₹300
+  gross R 0.59 / cost R 0.57). Report: `data/validation/phase_c_sanity_2026-11-21.md` (untracked).
+- Re-ran Phase C suite with fixed random null; gate PASS/FAIL unchanged (still 0 passers).
+
 ## 21 Nov 2026 — Phase C: stock/BankNifty research suite (research only; no slots)
 
 - **STEP 0 sizing:** over-notional no longer skips — `RiskSizing` caps at `floor(cap/price)`
