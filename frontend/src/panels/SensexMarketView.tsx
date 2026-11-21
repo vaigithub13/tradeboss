@@ -120,7 +120,10 @@ export function SensexMarketView({
                 <li>Range {formatRange(move.range)}</li>
               </ul>
             ) : (
-              <p className="text-white/40">Unavailable (no option chain)</p>
+              <p className="text-white/40" data-testid="sensex-straddle-unavailable">
+                Unavailable
+                {view.expected_move_reason ? ` (${view.expected_move_reason})` : " (no option chain)"}
+              </p>
             )}
           </div>
 

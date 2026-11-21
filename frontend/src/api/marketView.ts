@@ -69,6 +69,7 @@ export interface SensexMarketView extends MarketView {
   symbol: string;
   instrument_key: string;
   expected_move: SensexExpectedMove | null;
+  expected_move_reason?: string | null;
 }
 
 export function fetchSensexMarketView(refresh = false, signal?: AbortSignal): Promise<SensexMarketView> {

@@ -2087,6 +2087,20 @@ Trades (17 Nov expiry, 1 lot of 65; paper / backtest where compared):
 - **Holdout** with skip_hour_10-11: no 10–11 entries → identical to baseline (−₹1.7k, n=25).
 - Slot 5 / paper slots not modified; backend not started.
 
+## 21 Nov 2026 — Sensex ATM straddle: expiry + stale null-cache fix
+
+Root cause (Fri 20 Nov): day file `data/market-view/sensex/2026-11-20.json` written at
+**08:43 IST** with `expected_move: null`, then served all market day (polls used
+`refresh=false`). Expiry was blindly `contracts[0]` with no BSE roll / instruments list.
+
+- `nearest_sensex_expiry`: keep today during session; after 15:30 IST on expiry day → next.
+- Expiries from BSE instruments ∩ Upstox contracts; chain fetch retries with backoff; HTTP
+  status/body logged redacted; view field `expected_move_reason` (e.g. `no chain for expiry
+  X: HTTP 400` / `ATM quotes unavailable…`).
+- Route treats null-straddle cache as stale so polls rebuild once quotes appear.
+- Panel shows the reason instead of generic "Unavailable (no option chain)".
+- Nifty / paper untouched. Suites + typecheck green; backend not started; `data/` not committed.
+
 ## 18 Nov 2026 — Phase 2: live Pine alerts with sound (Nifty + Sensex)
 
 Client-only PineTS live alerts. Paste v5/v6 → Accept → **Run live (NIFTY|SENSEX)** →

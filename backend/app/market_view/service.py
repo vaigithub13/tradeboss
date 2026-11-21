@@ -278,6 +278,62 @@ def _sensex_step(on: date) -> int:
         return 100
 
 
+#: Sensex weekly options settle; after this IST clock on expiry day, roll to the next.
+_SENSEX_EXPIRY_ROLL_HHMM = (15, 30)
+
+
+def nearest_sensex_expiry(
+    expiries: list[date] | tuple[date, ...],
+    *,
+    today: date,
+    now: datetime | None = None,
+) -> date | None:
+    """Nearest valid Sensex option expiry.
+
+    Keeps `today` while the session is still open on expiry day; after 15:30 IST on that
+    day (or when `today` is past an expiry), rolls to the next listed expiry. BSE weekly
+    dates come from the instruments / contracts list — not the NSE Nifty calendar.
+    """
+    future = sorted({e for e in expiries if e >= today})
+    if not future:
+        return None
+    chosen = future[0]
+    if chosen != today:
+        return chosen
+    clock = now if now is not None else datetime.now(IST)
+    if clock.tzinfo is None:
+        clock = clock.replace(tzinfo=IST)
+    else:
+        clock = clock.astimezone(IST)
+    if (clock.hour, clock.minute) >= _SENSEX_EXPIRY_ROLL_HHMM:
+        return future[1] if len(future) > 1 else None
+    return chosen
+
+
+def sensex_view_stale(view: dict[str, Any] | None) -> bool:
+    """A saved day file with no straddle must be rebuilt (Fri 20 Nov pre-open null cache)."""
+    if view is None:
+        return True
+    return view.get("expected_move") is None
+
+
+def sensex_option_expiries_from_instruments(index: Any, *, today: date) -> list[date]:
+    """Unique unexpired Sensex CE/PE expiries from the BSE instrument master."""
+    from app.upstox.instruments import SENSEX_INDEX_KEY
+
+    found: set[date] = set()
+    for i in getattr(index, "instruments", []):
+        if getattr(i, "kind", None) != "option":
+            continue
+        exp = getattr(i, "expiry", None)
+        if exp is None or exp < today:
+            continue
+        under = getattr(i, "underlying_key", None) or ""
+        if under == SENSEX_INDEX_KEY or getattr(i, "symbol", "").upper().startswith("SENSEX"):
+            found.add(exp)
+    return sorted(found)
+
+
 def build_sensex_for(
     day: date,
     *,
@@ -301,20 +357,41 @@ def build_sensex_for(
     )
     straddle: dict[str, Any] | None = None
     expiry: date | None = None
+    reason: str | None = None
     try:
-        fetched = chain_fetcher() if chain_fetcher is not None else _fetch_sensex_chain()
-        if isinstance(fetched, tuple) and len(fetched) == 2:
-            expiry, rows = fetched[0], fetched[1]
+        fetched = chain_fetcher() if chain_fetcher is not None else _fetch_sensex_chain(day=day)
+        rows: list[dict[str, Any]] = []
+        if isinstance(fetched, tuple):
+            if len(fetched) >= 3:
+                expiry, rows, reason = fetched[0], list(fetched[1] or []), fetched[2]
+            elif len(fetched) == 2:
+                expiry, rows = fetched[0], list(fetched[1] or [])
+            else:
+                rows = list(fetched[0] or []) if fetched else []
         else:
             rows = list(fetched or [])
         # Spot: live underlying from the chain when present, else latest 1m close — never CPR prev_close.
         spot = chain_spot_from_rows(rows) if rows else None
         if spot is None:
             spot = _latest_index_price(store, SENSEX, day)
-        if rows and spot is not None and spot > 0:
+        if not rows:
+            reason = reason or (
+                f"no chain for expiry {expiry.isoformat()}: empty"
+                if expiry
+                else "no Sensex option chain"
+            )
+        elif spot is None or spot <= 0:
+            reason = reason or "no Sensex spot for ATM (chain and 1m candles empty)"
+        else:
             straddle = _atm_straddle_move(rows, float(spot), step=_sensex_step(day), expiry=expiry)
-    except Exception:
+            if straddle is None:
+                exp_s = expiry.isoformat() if expiry else "?"
+                reason = f"ATM quotes unavailable for expiry {exp_s}"
+            else:
+                reason = None
+    except Exception as exc:
         straddle = None
+        reason = f"Sensex option chain failed: {exc}"
     rng = tuple(straddle["range"]) if straddle and straddle.get("range") else None
     dtype, dreason = day_type(st, None)
     exp_txt = f" exp {straddle['expiry']}" if straddle and straddle.get("expiry") else ""
@@ -328,6 +405,7 @@ def build_sensex_for(
         "bias": bias,
         "expected_range": list(rng) if rng else None,
         "expected_move": straddle,
+        "expected_move_reason": reason,
         "day_type": dtype,
         "day_type_reason": dreason,
         "levels": levels_of(st, rng),
@@ -348,18 +426,84 @@ def build_sensex_for(
     return view
 
 
-def _fetch_sensex_chain() -> tuple[date | None, list[dict[str, Any]]]:
-    """Nearest weekly Sensex option chain (expiry ASC from Upstox)."""
-    from app.config import settings
-    from app.upstox.deps import make_client
-    from app.upstox.instruments import SENSEX_INDEX_KEY
+def _fetch_sensex_chain(
+    *,
+    day: date | None = None,
+    sleep: Callable[[float], None] = time.sleep,
+    attempts: int = 3,
+) -> tuple[date | None, list[dict[str, Any]], str | None]:
+    """Nearest valid Sensex option chain: instruments expiries + Upstox, with retry/backoff.
 
+    Returns `(expiry, rows, reason)`. `reason` is set when the chain cannot be used; never
+    includes tokens. HTTP failures log status + redacted body.
+    """
+    import logging
+
+    from app.config import settings
+    from app.upstox.client import UpstoxApiError, UpstoxAuthError, UpstoxError
+    from app.upstox.deps import make_client
+    from app.upstox.instruments import SENSEX_INDEX_KEY, current_index
+
+    log = logging.getLogger("tradeboss.sensex_chain")
     client = make_client()
     if client is None:
-        return None, []
+        return None, [], "no Upstox data token"
     key = settings.sensex_index_key or SENSEX_INDEX_KEY
-    expiries = client.option_contracts(key)
-    if not expiries:
-        return None, []
-    exp = expiries[0]
-    return exp, client.option_chain(key, exp)
+    today = day or datetime.now(IST).date()
+    now = datetime.now(IST)
+
+    instrument_exps: list[date] = []
+    try:
+        index = current_index(settings.instruments_dir)
+        if index is not None:
+            instrument_exps = sensex_option_expiries_from_instruments(index, today=today)
+    except Exception as exc:
+        log.warning("sensex instruments expiries unavailable: %s", exc)
+
+    upstox_exps: list[date] = []
+    try:
+        upstox_exps = list(client.option_contracts(key))
+    except UpstoxError as exc:
+        status = getattr(exc, "status", None)
+        log.warning(
+            "sensex option/contract failed status=%s body=%s",
+            status if status is not None else "?",
+            str(exc),
+        )
+
+    # Prefer instruments ∩ Upstox when both exist; else instruments; else Upstox.
+    if instrument_exps and upstox_exps:
+        inter = sorted(set(instrument_exps) & set(upstox_exps))
+        candidates = inter or instrument_exps or upstox_exps
+    else:
+        candidates = instrument_exps or upstox_exps
+    exp = nearest_sensex_expiry(candidates, today=today, now=now)
+    if exp is None:
+        return None, [], "no Sensex option expiries in instruments or Upstox contracts"
+
+    last_reason = f"no chain for expiry {exp.isoformat()}: empty"
+    for attempt in range(max(1, attempts)):
+        try:
+            rows = client.option_chain(key, exp)
+        except UpstoxAuthError as exc:
+            log.warning("sensex option/chain auth failed: %s", exc)
+            return exp, [], f"no chain for expiry {exp.isoformat()}: auth ({exc})"
+        except UpstoxApiError as exc:
+            last_reason = f"no chain for expiry {exp.isoformat()}: HTTP {exc.status}"
+            log.warning(
+                "sensex option/chain failed expiry=%s status=%s body=%s",
+                exp.isoformat(),
+                exc.status,
+                str(exc),
+            )
+        except UpstoxError as exc:
+            last_reason = f"no chain for expiry {exp.isoformat()}: {exc}"
+            log.warning("sensex option/chain error expiry=%s: %s", exp.isoformat(), exc)
+        else:
+            if rows:
+                return exp, rows, None
+            last_reason = f"no chain for expiry {exp.isoformat()}: empty"
+            log.warning("sensex option/chain empty expiry=%s attempt=%d", exp.isoformat(), attempt + 1)
+        if attempt + 1 < attempts:
+            sleep(min(8.0, 0.5 * (2**attempt)))
+    return exp, [], last_reason

@@ -57,6 +57,8 @@ export interface SensexMarketView {
   bias: string;
   expected_range: [number, number] | null;
   expected_move: SensexStraddle | null;
+  /** Why the ATM straddle is missing (e.g. "no chain for expiry 2026-11-20: HTTP 400"). */
+  expected_move_reason?: string | null;
   day_type: "trend" | "range" | "mixed";
   day_type_reason: string;
   levels: SensexLevel[];

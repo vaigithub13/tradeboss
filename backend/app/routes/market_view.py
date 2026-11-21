@@ -77,15 +77,19 @@ def market_view_sensex(
     clock: Annotated[Callable[[], float], Depends(get_mv_clock)],
     refresh: bool = False,
 ) -> dict[str, Any]:
-    """Sensex-only market view: prior-day CPR/pivots + ATM straddle expected move."""
+    """Sensex-only market view: prior-day CPR/pivots + ATM straddle expected move.
+
+    A saved day file with `expected_move: null` is treated as stale so polls recover
+    once the BSE chain has quotes (Fri 20 Nov pre-open null cache).
+    """
     today = datetime.fromtimestamp(clock(), IST).date()
     if not refresh:
         saved = service.load_sensex_view(data_dir, today)
-        if saved is not None:
+        if saved is not None and not service.sensex_view_stale(saved):
             return saved
     with _build_lock:
         if not refresh:
             saved = service.load_sensex_view(data_dir, today)
-            if saved is not None:
+            if saved is not None and not service.sensex_view_stale(saved):
                 return saved
         return service.build_sensex_for(today, data_dir=data_dir, store=store, clock=clock)
