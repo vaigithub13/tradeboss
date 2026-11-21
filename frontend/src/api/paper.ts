@@ -52,7 +52,7 @@ export interface PaperDeskStatus {
   slots: PaperStatus[];
 }
 
-export const PAPER_SLOTS = ["1", "2", "3", "4", "5", "6"] as const;
+export const PAPER_SLOTS = ["1", "2", "3", "4", "5", "6", "7"] as const;
 
 export const fetchPaperStatus = (): Promise<PaperDeskStatus> => getJson<PaperDeskStatus>("/api/paper/status");
 

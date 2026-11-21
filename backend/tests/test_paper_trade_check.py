@@ -130,8 +130,11 @@ def test_the_reconcile_captures_the_option_bars_before_the_paper_check(tmp_path,
         order.append("capture")
 
     monkeypatch.setattr(svc, "capture_options", capture)
-    monkeypatch.setattr(svc.paper, "reconcile_check",
-                        lambda store, symbol, day, tape=None: order.append(("check", type(tape))))
+    def check(store, symbol=None, day=None, tape=None, tapes=None):  # noqa: ANN001
+        kind = OptionHistoryStore if tapes and "NIFTY50" in tapes else type(tape)
+        order.append(("check", kind))
+
+    monkeypatch.setattr(svc.paper, "reconcile_check", check)
     svc.engine.day = date(2026, 10, 9)
     asyncio.run(svc.reconcile_now())
     assert order == ["capture", ("check", OptionHistoryStore)]

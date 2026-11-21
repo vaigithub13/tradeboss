@@ -124,6 +124,14 @@ export function parseParams(text: string): { params?: Record<string, unknown>; e
 /** Slot 5's strategy params (the Quantman run): the same as scripts/launchd/paper_slots.json. */
 export const SLOT5_PARAMS = {"mode": "long_only", "use_wr": true, "max_trades_per_day": 10, "last_entry": "15:10", "timeframe": "3m", "strike_premium": 250};
 
+/** Slot 7: same as slot 5 on SENSEX — strike_premium 800, slip 0.65 (research scale). */
+export const SLOT7_PARAMS = {
+  ...SLOT5_PARAMS,
+  strike_premium: 800,
+  symbol: "SENSEX",
+  slippage_points: 0.65,
+};
+
 export const EXIT_RULES = [
   { name: "", label: "no stop / target" },
   { name: "premium_1to2", label: "1:2 premium (−20% / +40%)" },
@@ -134,7 +142,8 @@ export const EXIT_RULES = [
 /** What each slot starts with: 1 and 2 are the week's comparison (no exits); 3 and 4 the same with 1:2 premium;
  * 5 is the DD Nifty 5-confirmation system as in the user's Quantman run 12524478: calls only, Williams %R filter,
  * 3m bars, the strike nearest a 250 premium, 10% premium stop trailing 10% per 15% (`params` prefill the box);
- * 6 is the same with puts only (the mirror rules), to test the bearish side separately. */
+ * 6 is the same with puts only (the mirror rules), to test the bearish side separately;
+ * 7 is slot 5's rules on SENSEX (Friday weeklies, strike_premium 800, slip 0.65). */
 export const SLOT_DEFAULTS: Record<string, { strategy: string; exit: string; params?: string }> = {
   "1": { strategy: "log_xz", exit: "" },
   "2": { strategy: "price_channel", exit: "" },
@@ -142,6 +151,7 @@ export const SLOT_DEFAULTS: Record<string, { strategy: string; exit: string; par
   "4": { strategy: "price_channel", exit: "premium_1to2" },
   "5": { strategy: "dd_five_confirm", exit: "premium_trail_10", params: JSON.stringify(SLOT5_PARAMS) },
   "6": { strategy: "dd_five_confirm", exit: "premium_trail_10", params: JSON.stringify({ ...SLOT5_PARAMS, mode: "short_only" }) },
+  "7": { strategy: "dd_five_confirm", exit: "premium_trail_10", params: JSON.stringify(SLOT7_PARAMS) },
 };
 
 /** The params sent to start a slot: the box's params, plus `exit_rule` when one is chosen. */

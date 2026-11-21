@@ -16,11 +16,13 @@ from app.live.model import BarEvent
 from app.live.recorder import RecordingCursor
 from app.live.spreads.decode import depth_quotes
 from app.paper.session import PaperSession
-from app.upstox.instruments import NIFTY_INDEX_KEY, VIX_KEY
+from app.upstox.instruments import NIFTY_INDEX_KEY, SENSEX_INDEX_KEY, VIX_KEY
 
 #: exchange-final minutes only (and the intraday API's completed minutes fetched for a feed gap): the paper
 #: strategy never sees a tick-built minute
 PAPER_BAR_SOURCES = ("i1", "session_end", "official", "backfill")
+_FO_PREFIX = {"NIFTY50": "NSE_FO|", "SENSEX": "BSE_FO|"}
+_INDEX_FOR_SYMBOL = {"NIFTY50": NIFTY_INDEX_KEY, "SENSEX": SENSEX_INDEX_KEY}
 
 
 class _Stop(Exception):
@@ -51,6 +53,8 @@ class CatchUp:
     def resume(self, session: PaperSession) -> int:
         """Replay the frames recorded since the last pass. Returns how many."""
         engine = self.engine
+        index_key = _INDEX_FOR_SYMBOL.get(session.symbol, NIFTY_INDEX_KEY)
+        fo_prefix = _FO_PREFIX.get(session.symbol, "NSE_FO|")
         done = 0
         for raw, wall in self.cursor.frames():
             if self.until_ms is not None and engine.current_ts >= self.until_ms:
@@ -63,15 +67,15 @@ class CatchUp:
             for ev in engine.take_events():
                 if ev.key == VIX_KEY and self.on_vix is not None:
                     self.on_vix(ev.bar.time_s, ev.bar.close)
-                elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in PAPER_BAR_SOURCES:
+                elif ev.key == index_key and ev.bar.source in PAPER_BAR_SOURCES:
                     session.on_index_minute(bar_minute(ev), now_ms=engine.current_ts)
-                elif ev.key.startswith("NSE_FO|") and ev.bar.source in PAPER_BAR_SOURCES:
+                elif ev.key.startswith(fo_prefix) and ev.bar.source in PAPER_BAR_SOURCES:
                     session.on_option_minute(ev.key, bar_minute(ev), now_ms=engine.current_ts)
             if engine.current_ts > 0:
-                if NIFTY_INDEX_KEY in engine.ticked:
-                    session.on_index_tick(engine.ticked[NIFTY_INDEX_KEY], now_ms=engine.current_ts)
+                if index_key in engine.ticked:
+                    session.on_index_tick(engine.ticked[index_key], now_ms=engine.current_ts)
                 for key, ltp in engine.ticked.items():
-                    if key.startswith("NSE_FO|"):
+                    if key.startswith(fo_prefix):
                         session.on_option_tick(key, ltp, now_ms=engine.current_ts)
                 session.on_clock(engine.current_ts)
         return done

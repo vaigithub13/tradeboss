@@ -42,7 +42,7 @@ STRATEGIES = {
 class StartBody(BaseModel):
     strategy: str = "log_xz"
     params: dict[str, Any] = Field(default_factory=dict)
-    #: "1".."6": strategies run side by side, each with its own position and P&L
+    #: "1".."7": strategies run side by side, each with its own position and P&L
     slot: str = "1"
     #: who pressed Start: launchd paper_autostart ("auto") or the Paper panel ("hand")
     start_source: Literal["auto", "hand"] = "hand"

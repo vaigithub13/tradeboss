@@ -22,8 +22,6 @@ from app.paper.desk import PaperDesk
 
 ROOT = Path(__file__).resolve().parents[2]
 IST = timezone(timedelta(hours=5, minutes=30))
-SYMBOL = "NIFTY50"
-
 Check = Callable[[date, dict[str, Any]], dict[str, Any]]
 
 
@@ -33,16 +31,22 @@ def store_check(candles_dir: Path, options_dir: Path) -> Check:
     from app.options.history import OptionHistoryStore
     from app.paper.check import end_of_day_check
 
-    store, tape = CandleStore(candles_dir), OptionHistoryStore(options_dir)
+    store = CandleStore(candles_dir)
+    tapes = {
+        "NIFTY50": OptionHistoryStore(options_dir, underlying="NIFTY"),
+        "SENSEX": OptionHistoryStore(options_dir, underlying="SENSEX"),
+    }
 
     def run(day: date, saved: dict[str, Any]) -> dict[str, Any]:
+        params = dict(saved.get("requested_params") or {})
+        symbol = str(params.get("symbol") or saved.get("symbol") or "NIFTY50")
         return end_of_day_check(
             day=day, signals=saved.get("signals", []), live_report=saved.get("report", []),
             live_bars={int(b["time"]): b for b in saved.get("bars", [])},
-            incomplete=set(saved.get("incomplete_bars") or []), store=store, symbol=SYMBOL,
-            strategy=saved["requested_strategy"], params=dict(saved.get("requested_params") or {}),
+            incomplete=set(saved.get("incomplete_bars") or []), store=store, symbol=symbol,
+            strategy=saved["requested_strategy"], params=params,
             timeframe=saved.get("timeframe", "5m"), basis="fill" if saved.get("uses_stops") else "decision",
-            tape=tape,
+            tape=tapes.get(symbol),
         )
 
     return run
@@ -97,13 +101,13 @@ def head_commit() -> str:
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--from", dest="since", required=True, help="first day, YYYY-MM-DD")
-    p.add_argument("--slot", action="append", help="slot number; repeat for more (default: 1-6)")
+    p.add_argument("--slot", action="append", help="slot number; repeat for more (default: 1-7)")
     p.add_argument("--paper-dir", type=Path, default=ROOT / "data" / "paper")
     args = p.parse_args()
     commit = head_commit()
     check = store_check(ROOT / "data" / "candles", ROOT / "data" / "option_history")
     on = datetime.now(IST).date()
-    for slot, path in live_day_files(args.paper_dir, args.slot or ["1", "2", "3", "4", "5", "6"], date.fromisoformat(args.since)):
+    for slot, path in live_day_files(args.paper_dir, args.slot or ["1", "2", "3", "4", "5", "6", "7"], date.fromisoformat(args.since)):
         if json.loads(path.read_text(encoding="utf-8")).get("source", "live") != "live":
             continue
         old, new = recheck_file(path, check, commit=commit, on=on)

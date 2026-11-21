@@ -74,8 +74,10 @@ def symbols_dirtied_by(
     return out
 
 STALE_AFTER_S = 15.0
-PAPER_SYMBOL = "NIFTY50"  # the chart symbol whose stored candles the end-of-day check reads
+PAPER_SYMBOL = "NIFTY50"  # legacy default; reconcile_check now uses each slot's own chart symbol
 MAX_SUBSCRIPTIONS = 12
+_PAPER_INDEX_KEYS = (NIFTY_INDEX_KEY, SENSEX_INDEX_KEY)
+_PAPER_FO_PREFIXES = ("NSE_FO|", "BSE_FO|")
 BACKFILL_RETRY_S = 15.0
 BACKFILL_WITHHOLD_MAX_S = 60.0
 BACKFILL_WARN_EVERY_S = 60.0
@@ -274,12 +276,15 @@ class LiveService:
         with self._elock:
             self.engine.on_frame(raw, wall)
             now_ms = self.engine.current_ts
-            index_price = self.engine.ticked.get(NIFTY_INDEX_KEY)
-            option_prices = {k: v for k, v in self.engine.ticked.items() if k.startswith("NSE_FO|")}
+            index_ticks = {k: self.engine.ticked[k] for k in _PAPER_INDEX_KEYS if k in self.engine.ticked}
+            option_prices = {
+                k: v for k, v in self.engine.ticked.items() if k.startswith(_PAPER_FO_PREFIXES)
+            }
         self._drain()
         if now_ms > 0:
-            if index_price is not None:
-                self.paper.on_index_tick(index_price, now_ms=now_ms)  # stop orders fire on the live index price
+            for index_key, index_price in index_ticks.items():
+                # stop orders fire on the live index price; desk routes by slot symbol
+                self.paper.on_index_tick(index_price, now_ms=now_ms, index_key=index_key)
             for key, ltp in option_prices.items():
                 self.paper.on_option_tick(key, ltp, now_ms=now_ms)  # premium exits on the contract's traded price
             self.paper.on_clock(now_ms)  # 15:15:00 square-off at this frame's quote (exchange time)
@@ -354,26 +359,27 @@ class LiveService:
         return replay_into(session, path, on_vix=self.vix.add, open_volume_baseline=self.cfg.open_volume_baseline)
 
     def _feed_paper(self, events: list[BarEvent]) -> None:
-        """VIX feeds the model fallback; exchange-final index minutes feed the paper strategy; exchange-final option
-        minutes are read against paper's ticks (shadow exits)."""
+        """VIX feeds the model fallback; exchange-final index minutes feed matching paper slots; exchange-final
+        option minutes (NSE_FO and BSE_FO) are read against paper's ticks (shadow exits)."""
         for ev in events:
             if ev.key == VIX_KEY:
                 self.vix.add(ev.bar.time_s, ev.bar.close)
-            elif ev.key.startswith("NSE_FO|") and ev.bar.source in PAPER_BAR_SOURCES:
+            elif ev.key.startswith(_PAPER_FO_PREFIXES) and ev.bar.source in PAPER_BAR_SOURCES:
                 self.paper.on_option_minute(ev.key, bar_minute(ev), now_ms=self.engine.current_ts)
-            elif ev.key == NIFTY_INDEX_KEY and ev.bar.source in PAPER_BAR_SOURCES:
+            elif ev.key in _PAPER_INDEX_KEYS and ev.bar.source in PAPER_BAR_SOURCES:
                 b = ev.bar
                 self.paper.on_index_bar(
                     {"time": b.time_s, "open": b.open, "high": b.high, "low": b.low, "close": b.close,
                      "volume": b.volume or 0, "source": b.source},
                     now_ms=self.engine.current_ts,
+                    index_key=ev.key,
                 )
 
     def _resend_index_to_paper(self, key: str) -> None:
-        """After a backfill (or a release) of the index: every final minute of the day goes to paper again. The
-        engine re-sends only its last two bars, and minutes that arrived while the index was withheld were never
+        """After a backfill (or a release) of an index: every final minute of the day goes to matching paper slots.
+        The engine re-sends only its last two bars, and minutes that arrived while the index was withheld were never
         sent; paper ignores the ones it already has and rebuilds the bars the gap left short."""
-        if key != NIFTY_INDEX_KEY:
+        if key not in _PAPER_INDEX_KEYS:
             return
         with self._elock:
             minutes = [b for b in self.engine.bars(key) if b.source in PAPER_BAR_SOURCES]
@@ -383,6 +389,7 @@ class LiveService:
                 {"time": b.time_s, "open": b.open, "high": b.high, "low": b.low, "close": b.close,
                  "volume": b.volume or 0, "source": b.source},
                 now_ms=now_ms,
+                index_key=key,
             )
 
     def _sync_key(self, key: str) -> None:
@@ -490,37 +497,51 @@ class LiveService:
             self._flags.reconciled_day = day
             # the day's option bars first, so the paper check prices the backtest (and its premium exits) from them
             await self.capture_options(day)
-            tape = None if self.cfg.option_history_dir is None else OptionHistoryStore(self.cfg.option_history_dir)
-            self.paper.reconcile_check(self.store, PAPER_SYMBOL, day, tape=tape)
+            tapes: dict[str, Any] = {}
+            if self.cfg.option_history_dir is not None:
+                tapes["NIFTY50"] = OptionHistoryStore(self.cfg.option_history_dir, underlying="NIFTY")
+                tapes["SENSEX"] = OptionHistoryStore(self.cfg.option_history_dir, underlying="SENSEX")
+            self.paper.reconcile_check(self.store, day=day, tapes=tapes or None)
         return reports
 
     async def capture_options(self, day: date) -> dict[str, Any] | None:
-        """After the close, once a day: the nearest weekly's 1m option bars, ATM +/- 5 over the day's index range,
-        into the option store, so paper-vs-backtest comparisons price from stored bars."""
+        """After the close, once a day: nearest weekly 1m option bars (Nifty + Sensex), ATM +/- 5 over each
+        index's day range, into the option store so paper-vs-backtest can price from stored bars when available."""
         if self.cfg.option_history_dir is None or self._flags.options_captured_day == day:
             return None
         client = self.client_factory()
         index = current_index(self.cfg.instruments_dir)
-        with self._elock:
-            bars = self.engine.bars(NIFTY_INDEX_KEY, include_withheld=True)
-        if client is None or index is None or not bars:
+        if client is None or index is None:
             log.warning("option capture for %s skipped: %s", day,
-                        "no Upstox token" if client is None else "no instrument snapshot" if index is None else "no index bars")
+                        "no Upstox token" if client is None else "no instrument snapshot")
             return None
-        day_range = (min(b.low for b in bars), max(b.high for b in bars))
-        try:
-            result = await asyncio.to_thread(
-                capture_session, day, day_range, client=client, instruments=index,
-                store=OptionHistoryStore(self.cfg.option_history_dir), today=day,
-            )
-        except Exception as exc:  # noqa: BLE001 - the script can be run by hand
-            log.warning("option capture for %s failed: %s: %s", day, type(exc).__name__, exc)
-            return None
+        results: list[dict[str, Any]] = []
+        for chart_symbol, index_key, underlying in (
+            ("NIFTY50", NIFTY_INDEX_KEY, "NIFTY"),
+            ("SENSEX", SENSEX_INDEX_KEY, "SENSEX"),
+        ):
+            with self._elock:
+                bars = self.engine.bars(index_key, include_withheld=True)
+            if not bars:
+                log.warning("option capture %s %s skipped: no index bars", day, underlying)
+                continue
+            day_range = (min(b.low for b in bars), max(b.high for b in bars))
+            try:
+                result = await asyncio.to_thread(
+                    capture_session, day, day_range, client=client, instruments=index,
+                    store=OptionHistoryStore(self.cfg.option_history_dir, underlying=underlying),
+                    today=day, underlying=underlying,
+                )
+            except Exception as exc:  # noqa: BLE001 - the script can be run by hand
+                log.warning("option capture %s %s failed: %s: %s", day, underlying, type(exc).__name__, exc)
+                continue
+            results.append(result)
+            level = logging.WARNING if result["failed"] or result["empty"] else logging.INFO
+            log.log(level, "option capture %s %s: expiry %s, %d strikes, %d stored, %d empty, %d failed",
+                    day, underlying, result["expiry"], len(result["strikes"]), result["fetched"],
+                    result["empty"], result["failed"])
         self._flags.options_captured_day = day
-        level = logging.WARNING if result["failed"] or result["empty"] else logging.INFO
-        log.log(level, "option capture %s: expiry %s, %d strikes, %d stored, %d empty, %d failed", day,
-                result["expiry"], len(result["strikes"]), result["fetched"], result["empty"], result["failed"])
-        return result
+        return results[0] if results else None
 
     async def _startup_reconcile(self) -> None:
         client = self.client_factory()

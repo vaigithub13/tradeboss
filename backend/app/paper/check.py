@@ -314,6 +314,8 @@ def _day_bars(store: CandleStore, symbol: str, day: date, timeframe: str) -> dic
 
 #: the backtest settings the paper comparison uses (as in PROGRESS: delta-adjusted fills, measured slippage 0.2)
 CHECK_SLIPPAGE = 0.2
+#: Sensex paper slot: same scale as research (0.2 × 800/250)
+CHECK_SLIPPAGE_SENSEX = 0.65
 
 
 def backtest_report(
@@ -323,6 +325,8 @@ def backtest_report(
     """The backtest's trade-report rows for one day, with the option overlay, and its warnings."""
     from app.backtest.catalog import build_strategy, parse_config
     from app.backtest.execute import _engine_config, _load_underlyings, _model, _report_rows
+    from app.backtest.expiry import load_default_calendar, load_sensex_calendar
+    from app.backtest.lots import load_default_lot_table
     from app.exits.rules import parse_exit_rule
     from app.options.model import overlay_options
 
@@ -330,15 +334,22 @@ def backtest_report(
     exit_rule = rest.pop("exit_rule", None)
     timeframe = rest.pop("timeframe", timeframe)
     strike_premium = rest.pop("strike_premium", None)
+    rest.pop("symbol", None)  # chart symbol is the `symbol` arg, not a strategy param
+    slip = rest.pop("slippage_points", None)
+    if slip is None:
+        slip = CHECK_SLIPPAGE_SENSEX if symbol == "SENSEX" else CHECK_SLIPPAGE
     config = parse_config({
         "strategy": strategy, "params": rest, "symbol": symbol, "timeframe": timeframe,
         "start": day.isoformat(), "end": day.isoformat(), "sessions": list(DEFAULT_INCLUDED_SESSION_TYPES),
-        "mode": "options", "slippage_points": CHECK_SLIPPAGE, "exit_rule": exit_rule,
+        "mode": "options", "slippage_points": float(slip), "exit_rule": exit_rule,
         **({} if strike_premium is None else {"strike_premium": strike_premium}),
     })
     result = run_backtest(build_strategy(config), StoreSource(store, symbol), _engine_config(config))
-    nifty, vix = _load_underlyings(config, store=store)
-    option = overlay_options(result, nifty, vix, config=_model(config), tape=tape)
+    index_bars, vix = _load_underlyings(config, store=store)
+    cal = load_sensex_calendar() if symbol == "SENSEX" else load_default_calendar()
+    option = overlay_options(
+        result, index_bars, vix, config=_model(config), calendar=cal, lots=load_default_lot_table(), tape=tape,
+    )
     by_id = {row["index_trade_id"]: row for row in option.option.trades}
     rows, _counts = _report_rows(result.trades, by_id, rule=parse_exit_rule(config.get("exit_rule")),
                                  step=60 * int(timeframe[:-1]))

@@ -23,6 +23,17 @@ def test_held_contracts_come_first_then_the_atm_pairs_then_the_recorder() -> Non
     assert order_option_keys(held, atm, spread) == ["NSE_FO|9", "NSE_FO|1", "NSE_FO|5", "NSE_FO|7", "NSE_FO|3"]
 
 
+def test_nifty_option_keys_rank_before_sensex_under_the_cap() -> None:
+    """Slots 2/4/5/6 (NSE) must not lose keys to slot 7 (BSE) when the 40-cap is tight."""
+    held = {"BSE_FO|H0", "NSE_FO|H0"}
+    atm = {"BSE_FO|A0", "NSE_FO|A0", "BSE_FO|A1", "NSE_FO|A1"}
+    ordered = order_option_keys(held, atm, ["NSE_FO|S0", "BSE_FO|S0"])
+    assert ordered[:2] == ["NSE_FO|H0", "BSE_FO|H0"]
+    assert ordered.index("NSE_FO|A0") < ordered.index("BSE_FO|A0")
+    keys = compose_keys(["NSE_INDEX|Nifty 50"], ordered, enabled=True)
+    assert "NSE_FO|H0" in keys and "NSE_FO|A0" in keys
+
+
 def test_the_cap_refuses_the_recorder_before_any_paper_contract() -> None:
     held = {f"NSE_FO|H{i}" for i in range(4)}
     atm = {f"NSE_FO|A{i}" for i in range(30)}

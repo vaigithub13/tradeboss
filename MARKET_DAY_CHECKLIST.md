@@ -46,7 +46,10 @@ For every trading day (first used for Monday sessions). Times are IST.
   > -30; exit on close below the Supertrend), **3m bars**, the strike whose model premium is nearest **250**, premium stop
   -10% trailing +10% per +15% (`premium_trail_10`), at most 10 entries a day. All in `paper_slots.json`.
   Strategy 6: the same rules for puts only (`mode: short_only`: close < Supertrend, RSI < 30, close < S1, close < lower
-  BB, %R < -70). Slots 5 and 6 show an order-helper table (buy CE/PE, strike, paper entry, current stop) for manual orders. A Start late in the day catches up from the recording, so the signals are the same.
+  BB, %R < -70). Strategy 7: same as strategy 5 on **SENSEX** (Friday weeklies, strike_premium **800**, slip **0.65**,
+  BSE_FO keys; Nifty option keys still rank first under the 40-cap). Slots 5–7 show an order-helper table (buy CE/PE,
+  strike, paper entry, current stop) for manual orders. A Start late in the day catches up from the recording, so the
+  signals are the same.
 - Paper squares off at 15:15:00 at the live bid.
 - A Start after 15:30 replays the day from the recording into `data/paper/slotN/replay/` (marked replay); it never
   touches the live day files or the totals. The panel's Trades button lists every live trade over the slots.

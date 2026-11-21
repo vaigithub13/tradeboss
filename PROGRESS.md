@@ -2173,3 +2173,18 @@ notifications + Alerts log. Max 5 scripts; Web Worker; never on the live WS view
   real-prem +86.4k PF 1.57.
 - Note: modelled Sensex PC20 `premium_1to2` never fires before channel reverse (identical to bare
   PC20); `premium_trail_10` does. Script: `backend/scripts/sensex_research_suite.py`.
+
+## 21 Nov 2026 — Paper slot 7: SENSEX DD Quantman long (slots 2/4/5/6 unchanged)
+
+- Desk `SLOTS` → 1–7; slot 7 autostarts at 09:16 with `dd_five_confirm` long_only / use_wr /
+  premium_trail_10 / last_entry 15:10 / max 10/day, `symbol=SENSEX`, `strike_premium=800`,
+  `slippage_points=0.65` (research scale). Friday weeklies + lot 20 from instruments; Upstox cost
+  table (BSE exchange % still NSE-derived / unverified).
+- Per-slot chart symbol: Sensex sessions get Sensex index bars/ticks + `BSE_FO|` option ticks;
+  Nifty slots unchanged. `prepare()` pre-subscribes strike_premium CE/PE (same fix as slot 5).
+  Option-key order: held → ATM with **NSE_FO before BSE_FO** → spread; OPTION_CAP stays 40.
+- EOD check per slot symbol; Sensex check slip 0.65; Sensex option capture → `SENSEX_*.parquet`
+  when Sensex index bars exist (else modelled). Quotes the slot sees still go through QuoteBook /
+  tick ranges. LIVE_TRADING false; backend not started; slots 2/4/5/6 configs untouched.
+- UI: ACTIVE includes 7 (“SENSEX DD CE”), panel + dashboard card + trailing OrderHelper; alerts;
+  Sensex chart shows slot-7 markers. Tests + full backend suite + frontend paper tests + typecheck.

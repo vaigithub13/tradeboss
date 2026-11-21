@@ -75,10 +75,19 @@ def test_model_config_trailing_validation() -> None:
 
 
 def test_slot_settings() -> None:
-    rest, minutes, prem = slot_settings({"timeframe": "3m", "strike_premium": 250, "mode": "long_only"})
+    from app.paper.live import MODEL_SLIPPAGE_POINTS, SENSEX_SLIPPAGE_POINTS
+
+    rest, minutes, prem, symbol, slip = slot_settings(
+        {"timeframe": "3m", "strike_premium": 250, "mode": "long_only"}
+    )
     assert rest == {"mode": "long_only"} and minutes == 3 and prem == 250.0
-    assert slot_settings({}) == ({}, 5, None)
+    assert symbol == "NIFTY50" and slip == MODEL_SLIPPAGE_POINTS
+    assert slot_settings({}) == ({}, 5, None, "NIFTY50", MODEL_SLIPPAGE_POINTS)
+    _, _, _, sx, sx_slip = slot_settings({"symbol": "SENSEX", "strike_premium": 800})
+    assert sx == "SENSEX" and sx_slip == SENSEX_SLIPPAGE_POINTS
     with pytest.raises(PaperError):
         slot_settings({"timeframe": "2m"})
     with pytest.raises(PaperError):
         slot_settings({"strike_premium": -5})
+    with pytest.raises(PaperError):
+        slot_settings({"symbol": "BANKNIFTY"})

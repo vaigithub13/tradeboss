@@ -160,8 +160,9 @@ def client_for(runner: PaperRunner, *, enabled: bool = True, now: int = ms(9, 20
     fourth = Fixture(runner.directory / "slot4", {}).runner
     fifth = Fixture(runner.directory / "slot5", {}).runner
     sixth = Fixture(runner.directory / "slot6", {}).runner
+    seventh = Fixture(runner.directory / "slot7", {}).runner
     app.state.live = SimpleNamespace(enabled=enabled, paper=PaperDesk({"1": runner, "2": other, "3": third, "4": fourth,
-                                                                       "5": fifth, "6": sixth}),
+                                                                       "5": fifth, "6": sixth, "7": seventh}),
                                      now_ms=lambda: now)
     return TestClient(app)
 
@@ -226,14 +227,14 @@ def test_routes_run_a_second_strategy_in_slot_2_beside_the_first(tmp_path) -> No
     assert r.status_code == 200 and r.json()["slot"] == "2" and r.json()["params"] == {"use_target": True}
     body = c.get("/api/paper/status").json()
     assert body["state"] == "running" and [s["state"] for s in body["slots"]] == [
-        "running", "running", "stopped", "stopped", "stopped", "stopped",
+        "running", "running", "stopped", "stopped", "stopped", "stopped", "stopped",
     ]
     assert c.post("/api/paper/stop", params={"slot": "2"}).json()["state"] == "stopped"
     assert [s["state"] for s in c.get("/api/paper/status").json()["slots"]] == [
-        "running", "stopped", "stopped", "stopped", "stopped", "stopped",
+        "running", "stopped", "stopped", "stopped", "stopped", "stopped", "stopped",
     ]
     assert c.get("/api/paper/day", params={"day": "2026-10-05", "slot": "2"}).status_code == 200
-    assert c.post("/api/paper/start", json={"strategy": "log_xz", "slot": "7"}).status_code == 400
+    assert c.post("/api/paper/start", json={"strategy": "log_xz", "slot": "9"}).status_code == 400
 
 
 def test_a_strategy_with_a_target_or_stop_is_refused_because_paper_does_not_apply_them(tmp_path) -> None:

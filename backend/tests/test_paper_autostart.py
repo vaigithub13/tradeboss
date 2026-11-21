@@ -44,6 +44,9 @@ def test_shipped_config_matches_the_checklist() -> None:
                                    "timeframe": "3m", "strike_premium": 250, "exit_rule": "premium_trail_10"}),
         ("6", "dd_five_confirm", {"mode": "short_only", "use_wr": True, "max_trades_per_day": 10, "last_entry": "15:10",
                                    "timeframe": "3m", "strike_premium": 250, "exit_rule": "premium_trail_10"}),
+        ("7", "dd_five_confirm", {"mode": "long_only", "use_wr": True, "max_trades_per_day": 10, "last_entry": "15:10",
+                                   "timeframe": "3m", "strike_premium": 800, "exit_rule": "premium_trail_10",
+                                   "symbol": "SENSEX", "slippage_points": 0.65}),
     ]
 
 

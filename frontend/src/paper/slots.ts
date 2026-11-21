@@ -1,7 +1,7 @@
 /** Active vs retired paper slots (UI only — does not change backend configs). */
 
-/** Live cards / dashboard: Price Channel and DD Quantman. Log XZ slots 1 and 3 are retired. */
-export const ACTIVE_PAPER_SLOTS = ["2", "4", "5", "6"] as const;
+/** Live cards / dashboard: Price Channel, DD Quantman Nifty, Sensex DD. Log XZ slots 1 and 3 are retired. */
+export const ACTIVE_PAPER_SLOTS = ["2", "4", "5", "6", "7"] as const;
 export const RETIRED_PAPER_SLOTS = ["1", "3"] as const;
 
 export type ActivePaperSlot = (typeof ACTIVE_PAPER_SLOTS)[number];
@@ -14,6 +14,7 @@ export const SLOT_LABELS: Record<string, string> = {
   "4": "Price Channel 1:2",
   "5": "DD Quantman CE",
   "6": "DD Quantman PE",
+  "7": "SENSEX DD CE",
 };
 
 export function isActivePaperSlot(slot: string): boolean {

@@ -72,23 +72,25 @@ class OptionHistorySource(Protocol):
 
 # ------------------------------------------------------------------------------------------ store
 class OptionHistoryStore:
-    """<base>/NIFTY_<expiry>.parquet (all candles of that expiry) + NIFTY_<expiry>.done.json (what was asked).
+    """<base>/{underlying}_<expiry>.parquet (all candles of that expiry) + matching .done.json ledger.
 
-    A contract that came back with candles is "done". One Upstox does not list is "not_listed".
-    An empty answer is source_empty (the dates asked, and the day they were asked) and is tried again after a week.
+    Default underlying is NIFTY (unchanged paths). Sensex live capture uses SENSEX_*. A contract that came back
+    with candles is "done". One Upstox does not list is "not_listed". An empty answer is source_empty (the dates
+    asked, and the day they were asked) and is tried again after a week.
     """
 
     COLUMNS = ["time", "strike", "kind", "open", "high", "low", "close", "volume", "oi", "source", "key", "symbol", "lot_size"]
 
-    def __init__(self, base_dir: Path) -> None:
+    def __init__(self, base_dir: Path, *, underlying: str = "NIFTY") -> None:
         self.base_dir = base_dir
+        self.underlying = underlying
         self._bars: dict[tuple[date, float, str], dict[int, tuple[float, float, float, float]]] = {}
 
     def _pq(self, expiry: date) -> Path:
-        return self.base_dir / f"NIFTY_{expiry.isoformat()}.parquet"
+        return self.base_dir / f"{self.underlying}_{expiry.isoformat()}.parquet"
 
     def _ledger(self, expiry: date) -> Path:
-        return self.base_dir / f"NIFTY_{expiry.isoformat()}.done.json"
+        return self.base_dir / f"{self.underlying}_{expiry.isoformat()}.done.json"
 
     def _read_ledger(self, expiry: date) -> dict[str, Any]:
         p = self._ledger(expiry)
@@ -230,7 +232,14 @@ class OptionHistoryStore:
     def expiries(self) -> list[date]:
         if not self.base_dir.is_dir():
             return []
-        return sorted(date.fromisoformat(p.stem[6:]) for p in self.base_dir.glob("NIFTY_*.parquet"))
+        prefix = f"{self.underlying}_"
+        out: list[date] = []
+        for p in self.base_dir.glob(f"{self.underlying}_*.parquet"):
+            try:
+                out.append(date.fromisoformat(p.stem[len(prefix):]))
+            except ValueError:
+                continue
+        return sorted(out)
 
 
 def _write_parquet(df: pd.DataFrame, path: Path) -> None:
@@ -467,13 +476,18 @@ def capture_session(
 ) -> dict[str, Any]:
     """After the close: store one session of the nearest weekly expiry's options, ATM +/- `window` at every minute of
     the day (`day_range` = the index's low and high). Paper fills and backtests then price from the same store."""
-    from app.backtest.expiry import load_default_calendar
+    from app.backtest.expiry import load_default_calendar, load_sensex_calendar
     from app.options.strikes import load_default_step_table
+    from app.upstox.instruments import SENSEX_INDEX_KEY
 
-    expiry = load_default_calendar().next_expiry(day).date
+    if underlying == "SENSEX":
+        calendar, underlying_key = load_sensex_calendar(), SENSEX_INDEX_KEY
+    else:
+        calendar, underlying_key = load_default_calendar(), NIFTY_KEY
+    expiry = calendar.next_expiry(day).date
     step = load_default_step_table().step(underlying, day)
     strikes = plan_strikes({day: day_range}, step, window=window)
-    src = UpstoxHistorySource(client, instruments, today=today)
+    src = UpstoxHistorySource(client, instruments, today=today, underlying_key=underlying_key)
     stats = capture_listed_day(src, store, day, expiry, strikes, label="live-recorded", today=today)
     return {"day": day.isoformat(), "expiry": expiry.isoformat(), "strikes": strikes, "fetched": stats.fetched,
             "empty": stats.empty, "not_listed": stats.not_listed, "failed": stats.failed}

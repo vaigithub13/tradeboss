@@ -294,16 +294,18 @@ export default function App() {
   const replayCard = replayReveal?.cardId == null
     ? null
     : activeRun?.result?.trades.find((trade) => trade.id === replayReveal.cardId);
-  if (symbol === "NIFTY50" && !replayActive && paperOpen) {
+  if ((symbol === "NIFTY50" || symbol === "SENSEX") && !replayActive && paperOpen) {
     const times = candles.map((c) => c.time);
     for (const slot of paperStatus?.slots ?? []) {
+      const slotSym = (slot.params as { symbol?: string } | undefined)?.symbol ?? "NIFTY50";
+      if (symbol === "SENSEX" ? slotSym !== "SENSEX" : slotSym === "SENSEX") continue;
       markers.push(...paperMarkers(slot.signals ?? NO_PAPER_SIGNALS, times, slot.slot === "1" ? "" : `${slot.slot}·`));
     }
   }
   const tradeOverlay = usePaperTradesStore((s) => s.overlay);
   const paperFocus = usePaperTradesStore((s) => s.focus);
   const chartFocus = !paperFocus ? focus : !focus || paperFocus.token > focus.token ? paperFocus : focus;
-  if (symbol === "NIFTY50" && tradeOverlay) {
+  if ((symbol === "NIFTY50" || symbol === "SENSEX") && tradeOverlay) {
     for (const m of tradeOverlay.markers) {
       markers.push({
         time: snapBar(m.time) as UTCTimestamp,

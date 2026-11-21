@@ -113,6 +113,18 @@ describe("slots and exit rules", () => {
     });
     expect(SLOT_DEFAULTS["6"]?.exit).toBe("premium_trail_10");
     expect(JSON.parse(SLOT_DEFAULTS["6"]?.params ?? "{}").mode).toBe("short_only");
+    expect(SLOT_DEFAULTS["7"]?.strategy).toBe("dd_five_confirm");
+    expect(SLOT_DEFAULTS["7"]?.exit).toBe("premium_trail_10");
+    expect(JSON.parse(SLOT_DEFAULTS["7"]?.params ?? "{}")).toEqual({
+      mode: "long_only",
+      use_wr: true,
+      max_trades_per_day: 10,
+      last_entry: "15:10",
+      timeframe: "3m",
+      strike_premium: 800,
+      symbol: "SENSEX",
+      slippage_points: 0.65,
+    });
   });
 
   it("puts the chosen rule into the params, and only then", () => {

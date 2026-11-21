@@ -435,12 +435,15 @@ def test_after_an_index_backfill_every_final_minute_goes_to_paper_again() -> Non
     stub = SimpleNamespace(
         _elock=threading.Lock(),
         engine=SimpleNamespace(bars=lambda key: bars, current_ts=123),
-        paper=SimpleNamespace(on_index_bar=lambda bar, now_ms: got.append({**bar, "now": now_ms})),
+        paper=SimpleNamespace(on_index_bar=lambda bar, now_ms, index_key=None: got.append(
+            {**bar, "now": now_ms, "index_key": index_key})),
     )
     LiveService._resend_index_to_paper(stub, "NSE_FO|1")  # not the index: nothing
     assert got == []
     LiveService._resend_index_to_paper(stub, NIFTY_INDEX_KEY)
-    assert [(g["time"], g["source"], g["now"]) for g in got] == [((base - 1) * 60, "i1", 123), (base * 60, "backfill", 123)]
+    assert [(g["time"], g["source"], g["now"], g["index_key"]) for g in got] == [
+        ((base - 1) * 60, "i1", 123, NIFTY_INDEX_KEY), (base * 60, "backfill", 123, NIFTY_INDEX_KEY),
+    ]
 
 
 def test_after_the_reconcile_the_days_options_are_captured_once(monkeypatch, tmp_path) -> None:
@@ -460,12 +463,15 @@ def test_after_the_reconcile_the_days_options_are_captured_once(monkeypatch, tmp
 
     monkeypatch.setattr(svc, "capture_session", fake_capture)
     monkeypatch.setattr(svc, "current_index", lambda _dir: object())
+    from app.upstox.instruments import NIFTY_INDEX_KEY
+
     bars = [Bar(29857000, 22500, 22599.05, 22490, 22520, 0, None, "official"),
             Bar(29857001, 22300, 22310, 22179.9, 22200, 0, None, "official")]
     stub = SimpleNamespace(
         cfg=SimpleNamespace(option_history_dir=tmp_path, instruments_dir=tmp_path),
         client_factory=lambda: object(), _elock=threading.Lock(), _flags=svc._Flags(),
-        engine=SimpleNamespace(bars=lambda key, include_withheld=False: bars),
+        # Sensex path skips when that index has no bars (this fixture is Nifty-only).
+        engine=SimpleNamespace(bars=lambda key, include_withheld=False: bars if key == NIFTY_INDEX_KEY else []),
     )
     day = date(2026, 10, 8)
     result = asyncio.run(svc.LiveService.capture_options(stub, day))
@@ -489,7 +495,7 @@ def test_exchange_final_option_minutes_go_to_paper_and_tick_built_ones_do_not() 
         _elock=threading.Lock(),
         engine=SimpleNamespace(current_ts=456),
         vix=SimpleNamespace(add=lambda t, c: None),
-        paper=SimpleNamespace(on_index_bar=lambda bar, now_ms: None,
+        paper=SimpleNamespace(on_index_bar=lambda bar, now_ms, index_key=None: None,
                               on_option_minute=lambda key, bar, now_ms: got.append((key, bar["low"], bar["source"],
                                                                                     now_ms))),
     )

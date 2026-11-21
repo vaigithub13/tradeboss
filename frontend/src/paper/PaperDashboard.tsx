@@ -541,11 +541,11 @@ function SlotDetails({
           Shadow net {formatRupees(status?.summary?.shadow_net ?? null)} · diff{" "}
           {formatRupees(status?.summary?.shadow_diff ?? null)}
         </div>
-        {(slot === "4" || slot === "5" || slot === "6") && (
+        {(slot === "4" || slot === "5" || slot === "6" || slot === "7") && (
           <OrderHelperBox
             open={status?.position ?? null}
             slot={slot}
-            trailing={slot === "5" || slot === "6" ? "Trailing stop updates live on paper's SL." : undefined}
+            trailing={slot === "5" || slot === "6" || slot === "7" ? "Trailing stop updates live on paper's SL." : undefined}
           />
         )}
       </div>

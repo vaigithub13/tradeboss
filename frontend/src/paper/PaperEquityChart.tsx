@@ -9,6 +9,7 @@ const COLORS: Record<string, string> = {
   "4": "#a78bfa",
   "5": "#34d399",
   "6": "#f472b6",
+  "7": "#fbbf24",
 };
 
 /** Collapse duplicate times (keep last) and drop non-finite timestamps for Lightweight Charts. */

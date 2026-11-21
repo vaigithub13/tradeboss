@@ -17,7 +17,7 @@ from app.backtest.catalog import build_strategy
 from app.backtest.contracts import Strategy
 from app.exits.rules import ExitRule, parse_exit_rule
 from app.backtest.costs import load_default_cost_table
-from app.backtest.expiry import load_default_calendar
+from app.backtest.expiry import load_default_calendar, load_sensex_calendar
 from app.backtest.lots import load_default_lot_table
 from app.live.model import ist_date, ist_ms_of_day
 from app.live.spreads.decode import depth_quotes
@@ -26,11 +26,16 @@ from app.options.strikes import load_default_step_table
 from app.data.store import CandleStore
 from app.paper.check import end_of_day_check
 from app.paper.history import stored_warmup
-from app.paper.pricing import VixSeries, last_stored_vix, model_price_for
+from app.paper.pricing import MODEL_SLIPPAGE_POINTS, VixSeries, last_stored_vix, model_price_for
 from app.paper.quotes import QuoteBook
 from app.paper.session import PaperSession
 from app.paper.store import load_day, save_day, weekly_summary
 from app.upstox.instruments import current_index
+
+#: chart symbols paper can run; SENSEX uses BSE Friday weeklies + lot 20
+PAPER_SYMBOLS = ("NIFTY50", "SENSEX")
+#: Sensex research scale: Nifty check slip 0.2 × (800/250) → 0.65; also the modelled-fill slip for slot 7
+SENSEX_SLIPPAGE_POINTS = 0.65
 
 MakeSession = Callable[[date, str, dict[str, Any]], PaperSession]
 SESSION_END_MS = (15 * 60 + 30) * 60_000  # 15:30 IST: a Start after this replays the day, it does not trade it
@@ -61,14 +66,15 @@ class SettingsMismatch(PaperError):
     """Today's file was written by another strategy or other parameters; starting would mix them."""
 
 
-#: slot settings that travel in the params but are not strategy parameters: the bar size ("3m", "5m") and the
-#: strike picked by premium (rupees, Quantman's "premium near"); the end-of-day backtest reads them too
-SLOT_KEYS = ("timeframe", "strike_premium")
+#: slot settings that travel in the params but are not strategy parameters: the bar size ("3m", "5m"), the
+#: strike picked by premium (rupees, Quantman's "premium near"), chart symbol, and option slip; the EOD check
+#: reads them too
+SLOT_KEYS = ("timeframe", "strike_premium", "symbol", "slippage_points")
 PAPER_TIMEFRAMES = {"1m": 1, "3m": 3, "5m": 5, "15m": 15}
 
 
-def slot_settings(params: dict[str, Any]) -> tuple[dict[str, Any], int, float | None]:
-    """(params without the slot keys, bar minutes, strike premium or None)."""
+def slot_settings(params: dict[str, Any]) -> tuple[dict[str, Any], int, float | None, str, float]:
+    """(params without the slot keys, bar minutes, strike premium or None, chart symbol, model slippage)."""
     rest = {k: v for k, v in params.items() if k not in SLOT_KEYS}
     tf = params.get("timeframe", "5m")
     if tf not in PAPER_TIMEFRAMES:
@@ -76,14 +82,24 @@ def slot_settings(params: dict[str, Any]) -> tuple[dict[str, Any], int, float | 
     sp = params.get("strike_premium")
     if sp is not None and (isinstance(sp, bool) or not isinstance(sp, (int, float)) or not sp > 0):
         raise PaperError("strike_premium must be a number > 0")
-    return rest, PAPER_TIMEFRAMES[tf], None if sp is None else float(sp)
+    symbol = params.get("symbol", "NIFTY50")
+    if symbol not in PAPER_SYMBOLS:
+        raise PaperError(f"symbol must be one of {list(PAPER_SYMBOLS)}")
+    slip = params.get("slippage_points")
+    if slip is None:
+        model_slip = SENSEX_SLIPPAGE_POINTS if symbol == "SENSEX" else MODEL_SLIPPAGE_POINTS
+    else:
+        if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
+            raise PaperError("slippage_points must be a number >= 0")
+        model_slip = float(slip)
+    return rest, PAPER_TIMEFRAMES[tf], None if sp is None else float(sp), str(symbol), model_slip
 
 
 def paper_strategy(strategy: str, params: dict[str, Any]) -> tuple[Strategy, ExitRule | None]:
     """The strategy a slot runs and its exit rule. The rule travels in the params (`exit_rule`, e.g.
     "premium_1to2"), so the same-settings check, a restart and the end-of-day backtest all see it; the strategy is
     built exactly as the backtest builds it with that exit_rule."""
-    rest, _minutes, _premium = slot_settings(params)
+    rest, _minutes, _premium, _symbol, _slip = slot_settings(params)
     rule = parse_exit_rule(rest.pop("exit_rule", None))
     built = build_strategy({"strategy": strategy, "params": rest,
                             "exit_rule": None if rule is None else rule.to_dict()})
@@ -95,9 +111,29 @@ def choose_nearest_weekly_atm(direction: str, spot: float, on: date) -> OptionCo
                            lots=load_default_lot_table(), steps=load_default_step_table())
 
 
+def choose_for_chart_symbol(symbol: str) -> Callable[[str, float, date], OptionContract]:
+    """ATM / premium-nearest weekly for Nifty (Thu) or Sensex (Fri). Lot and step come from the dated tables."""
+    if symbol == "SENSEX":
+        calendar, underlying = load_sensex_calendar(), "SENSEX"
+    else:
+        calendar, underlying = load_default_calendar(), "NIFTY"
+    lots, steps = load_default_lot_table(), load_default_step_table()
+
+    def choose(direction: str, spot: float, on: date) -> OptionContract:
+        return choose_contract(
+            direction, spot, on, calendar=calendar, lots=lots, steps=steps, underlying=underlying,
+        )
+
+    return choose
+
+
 def session_factory(instruments_dir: Path, vix: VixSeries, store: CandleStore, symbol: str = "NIFTY50") -> MakeSession:
     """Builds a PaperSession for the live feed: the instrument master for option keys, the model for
-    fallback prices, the feed's VIX, and the strategy warmed on the stored bars before the day."""
+    fallback prices, the feed's VIX, and the strategy warmed on the stored bars before the day.
+
+    `symbol` is the factory default when params omit `symbol` (Nifty slots). Sensex slots pass
+    `params.symbol=\"SENSEX\"` and get Friday weeklies + scaled slippage.
+    """
 
     def make(day: date, strategy: str, params: dict[str, Any]) -> PaperSession:
         index = current_index(instruments_dir)
@@ -105,22 +141,25 @@ def session_factory(instruments_dir: Path, vix: VixSeries, store: CandleStore, s
             raise PaperError("no instrument snapshot yet, so option contracts cannot be chosen")
         key_of = {i.symbol: i.key for i in index.instruments}
         built, rule = paper_strategy(strategy, params)
-        _rest, bar_minutes, strike_premium = slot_settings(params)
+        _rest, bar_minutes, strike_premium, chart_symbol, model_slip = slot_settings(
+            {**params, "symbol": params.get("symbol", symbol)}
+        )
         session = PaperSession(
             day=day,
             strategy=built,
             exit_rule=rule,
-            choose=choose_nearest_weekly_atm,
+            choose=choose_for_chart_symbol(chart_symbol),
             key_for=key_of.get,
             quotes=QuoteBook(),
             cost_table=load_default_cost_table(),
             model_price=model_price_for(vix.at),
             stale_model_price=_stale_model(store, day),
-            symbol=symbol,
+            symbol=chart_symbol,
             bar_minutes=bar_minutes,
             strike_premium=strike_premium,
+            model_slippage=model_slip,
         )
-        session.warm(stored_warmup(store, symbol, day, bar_minutes))
+        session.warm(stored_warmup(store, chart_symbol, day, bar_minutes))
         return session
 
     return make
