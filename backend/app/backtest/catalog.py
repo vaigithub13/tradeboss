@@ -25,6 +25,8 @@ from app.strategies.supertrend_flip import SupertrendFlip
 from app.options.model import canonical_option_fill
 
 NIFTY_SYMBOL = "NIFTY50"
+SENSEX_SYMBOL = "SENSEX"
+OPTIONS_SYMBOLS = frozenset({NIFTY_SYMBOL, SENSEX_SYMBOL})
 
 
 class RunRequestError(ValueError):
@@ -355,8 +357,8 @@ def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[s
     mode = body.get("mode")
     if mode not in ("index", "options"):
         raise RunRequestError("mode must be 'index' or 'options'")
-    if mode == "options" and symbol != NIFTY_SYMBOL:
-        raise RunRequestError("options mode runs on NIFTY50 only")
+    if mode == "options" and symbol not in OPTIONS_SYMBOLS:
+        raise RunRequestError(f"options mode runs on {' or '.join(sorted(OPTIONS_SYMBOLS))} only")
     offset = body.get("strike_offset", 0)
     if isinstance(offset, bool) or not isinstance(offset, int) or offset not in (-1, 0, 1):
         raise RunRequestError("strike_offset must be -1, 0 or 1")

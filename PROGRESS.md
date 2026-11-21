@@ -2153,3 +2153,23 @@ notifications + Alerts log. Max 5 scripts; Web Worker; never on the live WS view
 - Tests: `tests/test_sensex.py` + controls/liveStore; typecheck clean; full suite (worker parity flake
   cleared on retry). Paper slots 2/4/5/6, GEX, options, backtests unchanged. Backend not started.
   `data/` and `.env` not committed.
+
+## 21 Nov 2026 — SENSEX options research (no paper slot; Nifty slots untouched)
+
+- Platform: options mode allows **SENSEX**; Friday weekly calendar (`expiry_rules_sensex.json`);
+  lot **20** from 2022-01-01; execute uses Sensex calendar/lots, forces modelled premiums
+  (no `SENSEX_*.parquet`), India VIX IV proxy, Nifty BS calibration, Upstox costs (BSE exchange %
+  unverified). `LIVE_TRADING` false; backend not started.
+- Scale: `strike_premium` **800** (Nifty ₹250 × ~3.28 spot); slippage **0.65** (0.2 × 800/250);
+  live timing; strike at fill; delta-adjusted stops.
+- Windows: dev 2022-01-03..2024-12-31; OOS 2025-01-01..2026-06-30 (holdout 2026-07-01..2026-10-01
+  excluded); forward 2026-10-02..2026-11-20 informational. Report:
+  `data/validation/sensex_research_2026-11-21.md` (data/ untracked).
+- Runs: slots PC20 / PC20+premium_1to2 / S5 long / S6 short at P800; EMP, MS/ES 15m raw + 5m conf,
+  GT9 at ATM×P800 × orig×trail10. **Premiums: modelled every window.**
+- Gates (positive both, OOS PF≥1.25, ≥100 OOS trades, survives −top10, no ±20% cliff): **none passed**.
+  Closest: **S5_long** Sensex — dev +93.6k PF 1.33; OOS +50.2k PF 1.46 / 160 trades; fwd +17.7k;
+  fails −top10 (−39.1k); ±20% premium no cliff. Vs Nifty S5-QM-long research +159.7k PF 1.47 /
+  real-prem +86.4k PF 1.57.
+- Note: modelled Sensex PC20 `premium_1to2` never fires before channel reverse (identical to bare
+  PC20); `premium_trail_10` does. Script: `backend/scripts/sensex_research_suite.py`.

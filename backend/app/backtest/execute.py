@@ -11,11 +11,11 @@ from typing import Any
 import numpy as np
 
 from app.backtest.breakdowns import dte_breakdown, flag_breakdown, tag_breakdown
-from app.backtest.catalog import NIFTY_SYMBOL, build_strategy
+from app.backtest.catalog import NIFTY_SYMBOL, SENSEX_SYMBOL, build_strategy
 from app.backtest.costs import get_cost_model, load_default_cost_table
 from app.backtest.curve import equity_and_drawdown
 from app.backtest.engine import BacktestConfig, run_backtest
-from app.backtest.expiry import load_default_calendar
+from app.backtest.expiry import ExpiryCalendar, load_default_calendar, load_sensex_calendar
 from app.backtest.holdout import holdout_record, load_holdout, refuse_holdout_overlap, resolve_period
 from app.backtest.lots import load_default_lot_table
 from app.backtest.metrics import TradeRecord
@@ -33,6 +33,16 @@ from app.options.model import OptionModelConfig, canonical_option_fill, load_opt
 IST = timezone(timedelta(hours=5, minutes=30))
 VIX_SYMBOL = "NSE_INDEX_India_VIX"
 Report = Callable[[dict[str, Any]], None]
+
+
+def _options_underlying(symbol: str) -> str:
+    if symbol == SENSEX_SYMBOL:
+        return "SENSEX"
+    return "NIFTY"
+
+
+def _options_calendar(symbol: str) -> ExpiryCalendar:
+    return load_sensex_calendar() if symbol == SENSEX_SYMBOL else load_default_calendar()
 
 
 def execute_run(config: dict[str, Any], report: Report, *, hash_data: bool = True) -> dict[str, Any]:
@@ -59,15 +69,28 @@ def _execute_single(config: dict[str, Any], report: Report, *, hash_data: bool =
     option = None
     vix_bars: list[dict[str, Any]] = []
     if config["mode"] == "options":
-        nifty, vix_bars = _load_underlyings(config)
+        index_bars, vix_bars = _load_underlyings(config)
         model = _model(config)
+        cal = _options_calendar(config["symbol"])
+        lots = load_default_lot_table()
         report({"phase": "overlay", "done": 0, "total": len(result.trades)})
 
         def on_trade(done: int, total: int) -> None:
             if done == 1 or done == total or done % 25 == 0:
                 report({"phase": "overlay", "done": done, "total": total})
 
-        option = overlay_options(result, nifty, vix_bars, config=model, on_trade=on_trade)
+        # Sensex: no option_history files yet → modelled premiums (India VIX as IV proxy).
+        tape = None if config["symbol"] == SENSEX_SYMBOL else default_history_store()
+        option = overlay_options(
+            result,
+            index_bars,
+            vix_bars,
+            config=model,
+            calendar=cal,
+            lots=lots,
+            tape=tape,
+            on_trade=on_trade,
+        )
         report({"phase": "overlay", "done": len(result.trades), "total": len(result.trades)})
 
     view = _view(result, option, config)
@@ -142,6 +165,23 @@ def execute_holdout(config: dict[str, Any], report: Report) -> dict[str, Any]:
 
 
 def _engine_config(config: dict[str, Any]) -> BacktestConfig:
+    options_index = config["symbol"] in (NIFTY_SYMBOL, SENSEX_SYMBOL) and config.get("mode") == "options"
+    # Index-mode Sensex / other symbols: fixed lot 1. Options: dated lot table + weekly contract.
+    if options_index:
+        underlying = _options_underlying(config["symbol"])
+        calendar = _options_calendar(config["symbol"])
+        return BacktestConfig(
+            timeframe=config["timeframe"],
+            start=config["start"],
+            end=config["end"],
+            session_types=tuple(config["sessions"]),
+            underlying=underlying,
+            lot_table=load_default_lot_table(),
+            lot_size=None,
+            contract=lambda day, cal=calendar: (cal.next_expiry(day, "weekly").date, "weekly"),
+            cost_model=get_cost_model("zero"),
+            live_timing=bool(config.get("live_timing", True)),
+        )
     nifty = config["symbol"] == NIFTY_SYMBOL
     calendar = load_default_calendar()
     return BacktestConfig(
@@ -160,8 +200,10 @@ def _engine_config(config: dict[str, Any]) -> BacktestConfig:
 
 def _model(config: dict[str, Any]) -> OptionModelConfig:
     shipped = load_option_model()
+    underlying = _options_underlying(config["symbol"])
+    sensex = underlying == "SENSEX"
     return OptionModelConfig(
-        underlying=shipped.underlying,
+        underlying=underlying,
         strike_offset=int(config["strike_offset"]),
         cycle=shipped.cycle,
         roll_on_expiry_day=shipped.roll_on_expiry_day,
@@ -176,13 +218,19 @@ def _model(config: dict[str, Any]) -> OptionModelConfig:
         snap_tick=shipped.snap_tick,
         vix_stale_seconds=shipped.vix_stale_seconds,
         gap_pct=shipped.gap_pct,
-        calibration_ref=shipped.calibration_ref,
-        rates_note=shipped.rates_note,
+        calibration_ref=None if sensex else shipped.calibration_ref,
+        rates_note=(
+            "SENSEX research: Nifty-calibrated BS + India VIX as IV proxy; no BSE option tape; "
+            "Upstox cost table (exchange % NSE-derived, unverified for BSE)."
+            if sensex
+            else shipped.rates_note
+        ),
         model_version=shipped.model_version,
         model_as_of=shipped.model_as_of,
         carry_basis=shipped.carry_basis,
-        real_premiums=shipped.real_premiums,
-        vix_scales=shipped.vix_scales,
+        # No SENSEX_*.parquet in data/option_history — force modelled fills.
+        real_premiums=False if sensex else shipped.real_premiums,
+        vix_scales=() if sensex else shipped.vix_scales,
         premium_target_pct=_premium_exit(config, "target"),
         premium_stop_pct=_premium_exit(config, "stop"),
         premium_trail_every=_premium_trail(config, "trail_every"),
@@ -214,9 +262,10 @@ def _load_underlyings(config: dict[str, Any], *, store: CandleStore | None = Non
         end = date.fromisoformat(config["end"]) + timedelta(days=1)
         to_time = int(datetime(end.year, end.month, end.day, tzinfo=IST).timestamp())
     store = store or CandleStore(settings.candles_dir)
-    nifty, _ = store.load(NIFTY_SYMBOL, from_time=from_time, to_time=to_time, session_types=config["sessions"])
+    index_symbol = config["symbol"] if config["symbol"] in (NIFTY_SYMBOL, SENSEX_SYMBOL) else NIFTY_SYMBOL
+    index_bars, _ = store.load(index_symbol, from_time=from_time, to_time=to_time, session_types=config["sessions"])
     vix, _ = store.load(VIX_SYMBOL, from_time=from_time, to_time=to_time, session_types=config["sessions"])
-    return list(nifty), list(vix)
+    return list(index_bars), list(vix)
 
 
 def _view(result: BacktestResult, option: Any, config: dict[str, Any]) -> dict[str, Any]:

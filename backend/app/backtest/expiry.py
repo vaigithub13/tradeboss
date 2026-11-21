@@ -93,12 +93,18 @@ class HolidayCalendar:
 
 DATA_DIR = Path(__file__).resolve().parent / "data"
 DEFAULT_RULES_FILE = DATA_DIR / "expiry_rules.json"
+SENSEX_RULES_FILE = DATA_DIR / "expiry_rules_sensex.json"
 DEFAULT_HOLIDAYS_FILE = DATA_DIR / "nse_holidays.json"
 
 
 def load_default_calendar() -> ExpiryCalendar:
     """The shipped Nifty calendar: `data/expiry_rules.json` + `data/nse_holidays.json`."""
     return ExpiryCalendar(load_rules(DEFAULT_RULES_FILE), HolidayCalendar.from_json(DEFAULT_HOLIDAYS_FILE))
+
+
+def load_sensex_calendar() -> ExpiryCalendar:
+    """BSE Sensex options: Friday weeklies (`expiry_rules_sensex.json`) + shared market holidays."""
+    return ExpiryCalendar(load_rules(SENSEX_RULES_FILE), HolidayCalendar.from_json(DEFAULT_HOLIDAYS_FILE))
 
 
 def _last_weekday_of_month(year: int, month: int, weekday: int) -> Date:

@@ -1,0 +1,13 @@
+{
+  "_status": "Research calendar for BSE SENSEX index options. Weekly expiries are Fridays (BSE Sensex weeklies); holiday shifts use the same previous-trading-day rule as Nifty. Monthly = last Friday. NOT a full BSE circular dump — used for research backtests only.",
+  "underlying": "SENSEX",
+  "holiday_rule": "If the nominal Friday is not a trading day, the expiry is the PREVIOUS trading day (same shift rule as NSE index options).",
+  "rules": [
+    {
+      "weekday": "Friday",
+      "first_expiry_on_or_after": null,
+      "applies_to": "weekly: Friday of the week; monthly: last Friday of the month",
+      "source": "BSE Sensex weekly options expire on Friday (market practice / Upstox Sensex contract list). Confirmed by near-term BSE.json.gz CE/PE expiries (e.g. 2026-11-26, 2026-12-03). Holiday shift not independently circular-cited — uses NSE holiday list as a shared market holiday proxy."
+    }
+  ]
+}
