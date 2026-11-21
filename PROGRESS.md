@@ -2189,6 +2189,25 @@ notifications + Alerts log. Max 5 scripts; Web Worker; never on the live WS view
 - UI: ACTIVE includes 7 (“SENSEX DD CE”), panel + dashboard card + trailing OrderHelper; alerts;
   Sensex chart shows slot-7 markers. Tests + full backend suite + frontend paper tests + typecheck.
 
+## 21 Nov 2026 — Phase B: stock/futures backtest mode (research only; no slots)
+
+- **Step 0:** Upstox 1m is already split/bonus-adjusted (KOTAKBANK 1:5 ex 2026-01-14: raw
+  overnight −1.45%, not −80%). Set all research `1m_adj == 1m`; ledger records why.
+  ADANIENT Feb 2023 and INDUSINDBK 2025-03-11 labelled real price events (no adjust).
+  Expired BankNifty FUT API works from **2024-10-01** only — not backfilled (dry-run uses index).
+  Notes: `app/research/data/phase_a_price_notes.json`.
+- **Modes:** `index_option` (=`options`, unchanged), `equity_intraday`, `stock_future`,
+  `index_future`, `index`. Dated cost tables from Upstox brokerage page (retrieved 2026-11-21),
+  all UNVERIFIED: `cost_rates_equity_intraday.json`, `cost_rates_futures.json`.
+- **Sizing:** fixed ₹ risk (default 300) / stop distance; futures lot multiples; skip qty&lt;1 or
+  notional &gt; ₹75k. Slippage in ticks (default 1 × tick). Square-off 15:15, live timing.
+- **Strategies:** price_action gains optional `level_atr`/`max_width_atr`/`*_pct` (Nifty points
+  defaults unchanged). GT already ATR; dd_five / ema_pivot / channel scale-free or tick-based.
+  Regression: Nifty options dd_five 2024-Q1 → 27 trades / net ₹10,826.42.
+- **Dry-run:** `scripts/phase_b_dry_run.py` on HDFCBANK, RELIANCE, BANKNIFTY for 2022-01..2024-12
+  only (report under `data/validation/`, untracked). No full universe / no 2025+.
+- No paper/UI/live changes. `LIVE_TRADING` false; backend not started; `data/` / `.env` not committed.
+
 ## 21 Nov 2026 — Phase A: research_universe_v1 (BankNifty + 30 stocks; research only)
 
 Research data only: no live subs, no UI, no paper slots, no engine changes. Backend not started.

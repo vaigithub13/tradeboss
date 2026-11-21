@@ -1,0 +1,38 @@
+{
+  "as_of": "2026-11-21",
+  "upstox_historical_adjustment": {
+    "conclusion": "already_adjusted",
+    "evidence": [
+      {
+        "symbol": "KOTAKBANK",
+        "event": "Split 1:5 ex 2026-01-14 (face Rs 5 → Re 1)",
+        "raw_close_2026-01-13": 426.4,
+        "raw_close_2026-01-14": 420.2,
+        "overnight_move_pct": -1.45,
+        "note": "If unadjusted, pre-ex closes would be ~5× (~₹2100). Raw sits at post-split levels with no jump; Phase A 1m_adj wrongly ×0.2 pre-ex (→ ~₹85)."
+      }
+    ],
+    "action": "Set 1m_adj.parquet = copy of 1m.parquet for all research equities; ledger records reason. Do not re-apply Upstox CA splits/bonuses to OHLC."
+  },
+  "labelled_jumps_not_corporate_actions": [
+    {
+      "symbol": "ADANIENT",
+      "window": "2023-01-31 → 2023-02-02",
+      "moves_pct": [-26.1, -28.2],
+      "label": "real_price_event",
+      "note": "Hindenburg / Adani sell-off cluster; no matching Split/Bonus in Upstox CA feed. Leave raw/adj unadjusted."
+    },
+    {
+      "symbol": "INDUSINDBK",
+      "window": "2025-03-10 → 2025-03-11",
+      "moves_pct": [-27.2],
+      "label": "real_price_event",
+      "note": "Sharp single-day drop; no matching Split/Bonus in Upstox CA feed. Leave raw/adj unadjusted."
+    }
+  ],
+  "banknifty_expired_futures": {
+    "api": "GET /v2/expired-instruments/expiries + /future/contract",
+    "available_from": "2024-10-01",
+    "note": "Upstox returns BankNifty expired futures (sample 31 expiries through 2026-10-27). Full 2022– history is NOT available via this API; Phase B dry-run uses the BANKNIFTY index series. Optional expired-FUT backfill deferred (would only cover late-2024+)."
+  }
+}

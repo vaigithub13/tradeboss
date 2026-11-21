@@ -1,0 +1,168 @@
+{
+  "_note": "Dated cost rates for NSE equity/index FUTURES, Upstox. Same card for stock futures and index futures. Percents as percent. Seeded 2026-11-21 from https://upstox.com/brokerage-charges/. ALL UNVERIFIED.",
+  "segment": "futures",
+  "source_page": "https://upstox.com/brokerage-charges/",
+  "source_retrieved": "2026-11-21",
+  "rows": [
+    {
+      "effective_from": "2022-01-01",
+      "note": "Brokerage lower of ₹20 or 0.05%. STT futures sell 0.01% era → page shows 0.0125% from Apr 2023; pre-2023 uses 0.01 (UNVERIFIED placeholder).",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.05",
+        "stt_sell_pct": "0.01",
+        "exchange_pct": "0.0019",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.002",
+        "gst_pct": "18",
+        "extra": [{"name": "ipft", "pct": "0.0001", "sides": ["BUY", "SELL"], "gst": true}]
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified", "ipft": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox Equity Futures: ₹20 or 0.05% lower — https://upstox.com/brokerage-charges/ (2026-11-21)",
+        "brokerage_pct": "same",
+        "stt_sell_pct": "Pre-Apr-2023 futures STT ~0.01% sell (UNVERIFIED placeholder); page documents 0.0125% from 1 Apr 2023",
+        "exchange_pct": "Order-of-magnitude NSE FUT txn pre-2024 (~0.0019%); dated page starts 0.00188% Apr-2024",
+        "sebi_per_crore": "Upstox SEBI ₹10/crore",
+        "stamp_buy_pct": "Futures stamp 0.002% buy — Upstox page",
+        "gst_pct": "18%",
+        "ipft": "Upstox IPFT ₹0.10/lakh on futures turnover",
+        "gst_on": "Upstox GST on brokerage + transaction (+ IPFT)"
+      }
+    },
+    {
+      "effective_from": "2023-04-01",
+      "note": "Upstox STT/CTT From 1st April 2023: Equity Futures 0.0125% sell.",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.05",
+        "stt_sell_pct": "0.0125",
+        "exchange_pct": "0.0019",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.002",
+        "gst_pct": "18",
+        "extra": [{"name": "ipft", "pct": "0.0001", "sides": ["BUY", "SELL"], "gst": true}]
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified", "ipft": "unverified"
+      },
+      "sources": {
+        "stt_sell_pct": "Upstox 'STT/CTT (From 1st April 2023)' Equity Futures 0.0125% sell — https://upstox.com/brokerage-charges/",
+        "brokerage_flat": "Upstox", "brokerage_pct": "Upstox", "exchange_pct": "approx pre-Apr-2024",
+        "sebi_per_crore": "Upstox", "stamp_buy_pct": "Upstox", "gst_pct": "Upstox",
+        "ipft": "Upstox", "gst_on": "Upstox"
+      }
+    },
+    {
+      "effective_from": "2024-04-01",
+      "note": "Upstox FUT txn 0.00188% (1 Apr 2024 – 30 Sep 2024).",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.05",
+        "stt_sell_pct": "0.0125",
+        "exchange_pct": "0.00188",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.002",
+        "gst_pct": "18",
+        "extra": [{"name": "ipft", "pct": "0.0001", "sides": ["BUY", "SELL"], "gst": true}]
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified", "ipft": "unverified"
+      },
+      "sources": {
+        "exchange_pct": "Upstox Equity Futures NSE 0.00188% (Apr–Sep 2024) — https://upstox.com/brokerage-charges/",
+        "brokerage_flat": "Upstox", "brokerage_pct": "Upstox", "stt_sell_pct": "Upstox 0.0125%",
+        "sebi_per_crore": "Upstox", "stamp_buy_pct": "Upstox", "gst_pct": "Upstox",
+        "ipft": "Upstox", "gst_on": "Upstox"
+      }
+    },
+    {
+      "effective_from": "2024-10-01",
+      "note": "STT futures 0.02% sell; txn 0.00173%.",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.05",
+        "stt_sell_pct": "0.02",
+        "exchange_pct": "0.00173",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.002",
+        "gst_pct": "18",
+        "extra": [{"name": "ipft", "pct": "0.0001", "sides": ["BUY", "SELL"], "gst": true}]
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified", "ipft": "unverified"
+      },
+      "sources": {
+        "stt_sell_pct": "Upstox 'STT/CTT (From 1st October 2024)' Equity Futures 0.02% sell",
+        "exchange_pct": "Upstox Equity Futures NSE 0.00173% from 1 Oct 2024",
+        "brokerage_flat": "Upstox", "brokerage_pct": "Upstox",
+        "sebi_per_crore": "Upstox", "stamp_buy_pct": "Upstox", "gst_pct": "Upstox",
+        "ipft": "Upstox", "gst_on": "Upstox"
+      }
+    },
+    {
+      "effective_from": "2026-03-01",
+      "note": "Upstox FUT txn 0.00183% from 1 Mar 2026; IPFT combined into txn on page.",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.05",
+        "stt_sell_pct": "0.02",
+        "exchange_pct": "0.00183",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.002",
+        "gst_pct": "18"
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified"
+      },
+      "sources": {
+        "exchange_pct": "Upstox 'From 1st March 2026' Equity Futures NSE 0.00183%",
+        "stt_sell_pct": "Upstox 0.02% until 31 Mar 2026",
+        "brokerage_flat": "Upstox", "brokerage_pct": "Upstox",
+        "sebi_per_crore": "Upstox", "stamp_buy_pct": "Upstox", "gst_pct": "Upstox", "gst_on": "Upstox"
+      }
+    },
+    {
+      "effective_from": "2026-04-01",
+      "note": "Upstox STT/CTT From 1st April 2026: Equity Futures 0.05% sell.",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.05",
+        "stt_sell_pct": "0.05",
+        "exchange_pct": "0.00183",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.002",
+        "gst_pct": "18"
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified"
+      },
+      "sources": {
+        "stt_sell_pct": "Upstox 'STT/CTT (From 1st April 2026)' Equity Futures 0.05% sell — https://upstox.com/brokerage-charges/ (2026-11-21)",
+        "exchange_pct": "Upstox 0.00183%",
+        "brokerage_flat": "Upstox", "brokerage_pct": "Upstox",
+        "sebi_per_crore": "Upstox", "stamp_buy_pct": "Upstox", "gst_pct": "Upstox", "gst_on": "Upstox"
+      }
+    }
+  ]
+}

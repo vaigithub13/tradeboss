@@ -1,0 +1,120 @@
+{
+  "_note": "Dated cost rates for NSE equity INTRADAY (MIS), Upstox. Percents are percent (\"0.1\" = 0.1%). sebi_per_crore is ₹ per crore. Seeded 2026-11-21 from https://upstox.com/brokerage-charges/ (retrieved same day) plus NSE/STT circulars already cited for options. ALL rates UNVERIFIED (no contract note). IPFT ₹0.10/lakh = 0.0001% until Mar-2026 combine-into-txn note on Upstox page.",
+  "segment": "equity_intraday",
+  "source_page": "https://upstox.com/brokerage-charges/",
+  "source_retrieved": "2026-11-21",
+  "rows": [
+    {
+      "effective_from": "2022-01-01",
+      "note": "Base study-window row. Brokerage lower of ₹20 or 0.1%. STT 0.025% sell. Exchange ~0.00325% era approximated as 0.00325 until Apr-2024 dated page slabs.",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.1",
+        "stt_sell_pct": "0.025",
+        "exchange_pct": "0.00325",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18",
+        "extra": [{"name": "ipft", "pct": "0.0001", "sides": ["BUY", "SELL"], "gst": true}]
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified", "ipft": "unverified"
+      },
+      "sources": {
+        "brokerage_flat": "Upstox Equity Intraday: ₹20 or 0.1% whichever lower — https://upstox.com/brokerage-charges/ (retrieved 2026-11-21)",
+        "brokerage_pct": "same",
+        "stt_sell_pct": "Upstox page Equity Intraday STT 0.025% sell side (unchanged across 2023–2026 page rows)",
+        "exchange_pct": "Pre-Apr-2024 NSE cash txn charge order of magnitude; Upstox lists 0.00322% from 1 Apr 2024 — earlier row uses 0.00325 as placeholder (UNVERIFIED)",
+        "sebi_per_crore": "SEBI ₹10/crore — Upstox page",
+        "stamp_buy_pct": "Equity Intraday stamp 0.003% buy — Upstox page / Stamp Act",
+        "gst_pct": "18% on brokerage + transaction + IPFT — Upstox page",
+        "ipft": "NSE IPFT ₹0.10 per lakh turnover (0.0001%) — Upstox page",
+        "gst_on": "Upstox: GST on brokerage + transaction charges (+ IPFT via extra.gst)"
+      }
+    },
+    {
+      "effective_from": "2024-04-01",
+      "note": "Upstox page slab: Equity Intraday NSE 0.00322% (1 Apr 2024 – 30 Sep 2024).",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.1",
+        "stt_sell_pct": "0.025",
+        "exchange_pct": "0.00322",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18",
+        "extra": [{"name": "ipft", "pct": "0.0001", "sides": ["BUY", "SELL"], "gst": true}]
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified", "ipft": "unverified"
+      },
+      "sources": {
+        "exchange_pct": "Upstox 'Transaction charges (From 1st April 2024 to 30th September 2024)' Equity Intraday NSE 0.00322% — https://upstox.com/brokerage-charges/ (2026-11-21)",
+        "brokerage_flat": "Upstox Equity Intraday",
+        "brokerage_pct": "Upstox Equity Intraday",
+        "stt_sell_pct": "Upstox Equity Intraday 0.025% sell",
+        "sebi_per_crore": "Upstox SEBI ₹10/crore",
+        "stamp_buy_pct": "Upstox Equity Intraday stamp 0.003% buy",
+        "gst_pct": "18%",
+        "ipft": "Upstox IPFT ₹0.10/lakh",
+        "gst_on": "Upstox GST base"
+      }
+    },
+    {
+      "effective_from": "2024-10-01",
+      "note": "Upstox: Equity Intraday NSE 0.00297% from 1 Oct 2024.",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.1",
+        "stt_sell_pct": "0.025",
+        "exchange_pct": "0.00297",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18",
+        "extra": [{"name": "ipft", "pct": "0.0001", "sides": ["BUY", "SELL"], "gst": true}]
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified", "ipft": "unverified"
+      },
+      "sources": {
+        "exchange_pct": "Upstox 'Transaction charges (From 1st October 2024)' Equity Intraday NSE 0.00297% — https://upstox.com/brokerage-charges/ (2026-11-21)",
+        "brokerage_flat": "Upstox", "brokerage_pct": "Upstox", "stt_sell_pct": "Upstox",
+        "sebi_per_crore": "Upstox", "stamp_buy_pct": "Upstox", "gst_pct": "Upstox",
+        "ipft": "Upstox", "gst_on": "Upstox"
+      }
+    },
+    {
+      "effective_from": "2026-03-01",
+      "note": "Upstox: Equity Intraday NSE 0.00307% from 1 Mar 2026; IPFT combined into txn on page — modelled as exchange-only (no separate ipft line).",
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "0.1",
+        "stt_sell_pct": "0.025",
+        "exchange_pct": "0.00307",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.003",
+        "gst_pct": "18"
+      },
+      "gst_on": ["brokerage", "exchange"],
+      "verification": {
+        "brokerage_flat": "unverified", "brokerage_pct": "unverified", "stt_sell_pct": "unverified",
+        "exchange_pct": "unverified", "sebi_per_crore": "unverified", "stamp_buy_pct": "unverified",
+        "gst_pct": "unverified", "gst_on": "unverified"
+      },
+      "sources": {
+        "exchange_pct": "Upstox 'Transaction charges (From 1st March 2026)' Equity Intraday NSE 0.00307% — https://upstox.com/brokerage-charges/ (2026-11-21)",
+        "brokerage_flat": "Upstox", "brokerage_pct": "Upstox", "stt_sell_pct": "Upstox",
+        "sebi_per_crore": "Upstox", "stamp_buy_pct": "Upstox", "gst_pct": "Upstox", "gst_on": "Upstox"
+      }
+    }
+  ]
+}

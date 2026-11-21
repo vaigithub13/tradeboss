@@ -59,7 +59,8 @@ def execute_run(config: dict[str, Any], report: Report, *, hash_data: bool = Tru
 
 def _execute_single(config: dict[str, Any], report: Report, *, hash_data: bool = True) -> dict[str, Any]:
     strategy = build_strategy(config)
-    source = StoreSource(CandleStore(settings.candles_dir), config["symbol"])
+    candle_symbol = _candle_symbol(config)
+    source = StoreSource(CandleStore(settings.candles_dir), candle_symbol)
     engine_cfg = _engine_config(config)
 
     def on_bar(done: int, total: int) -> None:
@@ -164,8 +165,30 @@ def execute_holdout(config: dict[str, Any], report: Report) -> dict[str, Any]:
     return payload
 
 
+def _candle_symbol(config: dict[str, Any]) -> str:
+    """Resolve trading symbol → candle folder (research equities use NSE_EQ_* folders)."""
+    from app.backtest.instruments import is_cash_or_future_mode, resolve_candle_symbol
+
+    symbol = str(config["symbol"])
+    if not is_cash_or_future_mode(str(config.get("mode", ""))):
+        return symbol
+    try:
+        return resolve_candle_symbol(symbol, candles_dir=settings.candles_dir)
+    except KeyError:
+        return symbol
+
+
 def _engine_config(config: dict[str, Any]) -> BacktestConfig:
-    options_index = config["symbol"] in (NIFTY_SYMBOL, SENSEX_SYMBOL) and config.get("mode") == "options"
+    from app.backtest.costs import Slippage
+    from app.backtest.instruments import (
+        cost_model_for,
+        default_tick,
+        is_cash_or_future_mode,
+        is_options_mode,
+    )
+
+    mode = str(config.get("mode", "index"))
+    options_index = config["symbol"] in (NIFTY_SYMBOL, SENSEX_SYMBOL) and is_options_mode(mode)
     # Index-mode Sensex / other symbols: fixed lot 1. Options: dated lot table + weekly contract.
     if options_index:
         underlying = _options_underlying(config["symbol"])
@@ -181,6 +204,25 @@ def _engine_config(config: dict[str, Any]) -> BacktestConfig:
             contract=lambda day, cal=calendar: (cal.next_expiry(day, "weekly").date, "weekly"),
             cost_model=get_cost_model("zero"),
             live_timing=bool(config.get("live_timing", True)),
+        )
+    if is_cash_or_future_mode(mode):
+        tick = float(config.get("tick_size") or default_tick(mode, str(config["symbol"])))
+        ticks = float(config.get("slippage_ticks", 1.0))
+        slip_pts = ticks * tick
+        # Prefer explicit slippage_points when caller set it above the tick default path
+        if "slippage_ticks" not in config and config.get("slippage_points") is not None:
+            slip_pts = float(config["slippage_points"])
+        lot_size = int(config.get("lot_size", 1))
+        return BacktestConfig(
+            timeframe=config["timeframe"],
+            start=config["start"],
+            end=config["end"],
+            session_types=tuple(config["sessions"]),
+            lot_size=lot_size,
+            cost_model=cost_model_for(mode),
+            slippage=Slippage.points(slip_pts),
+            live_timing=bool(config.get("live_timing", True)),
+            square_off="15:15",
         )
     nifty = config["symbol"] == NIFTY_SYMBOL
     calendar = load_default_calendar()

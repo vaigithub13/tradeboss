@@ -85,6 +85,10 @@ class PriceAction(Strategy):
         swing_right: int = 5,
         level_pts: float = 10.0,
         max_width: float = DEFAULT_MAX_WIDTH,
+        level_atr: float | None = None,
+        max_width_atr: float | None = None,
+        level_pct: float | None = None,
+        max_width_pct: float | None = None,
         mode: str = "long_short",
         first_entry: str = "09:20",
         last_entry: str = "14:50",
@@ -98,7 +102,9 @@ class PriceAction(Strategy):
             pattern=pattern, variant=variant, confluence=confluence, rr=rr,
             confirm_bars=confirm_bars, atr_len=atr_len, avg_body_len=avg_body_len,
             swing_left=swing_left, swing_right=swing_right, level_pts=level_pts,
-            max_width=max_width, mode=mode, first_entry=first_entry, last_entry=last_entry,
+            max_width=max_width, level_atr=level_atr, max_width_atr=max_width_atr,
+            level_pct=level_pct, max_width_pct=max_width_pct,
+            mode=mode, first_entry=first_entry, last_entry=last_entry,
             box_first=box_first, box_last=box_last, lots=lots, st_atr=st_atr, st_mult=st_mult,
         )
         if variant not in VARIANTS:
@@ -126,6 +132,10 @@ class PriceAction(Strategy):
         self.swing_right = swing_right
         self.level_pts = float(level_pts)
         self.max_width = float(max_width)
+        self.level_atr = None if level_atr is None else float(level_atr)
+        self.max_width_atr = None if max_width_atr is None else float(max_width_atr)
+        self.level_pct = None if level_pct is None else float(level_pct)
+        self.max_width_pct = None if max_width_pct is None else float(max_width_pct)
         self.mode = mode
         self.lots = lots
         self.st_atr = st_atr
@@ -195,20 +205,36 @@ class PriceAction(Strategy):
             return False
         return True
 
-    def _near_levels(self, price: float) -> bool:
+    def _level_tol(self, price: float, atr: float | None = None) -> float:
+        """Points by default (Nifty); optional ATR multiple or % of price for other instruments."""
+        if self.level_atr is not None and atr is not None and atr > 0:
+            return self.level_atr * atr
+        if self.level_pct is not None and price > 0:
+            return price * self.level_pct / 100.0
+        return self.level_pts
+
+    def _width_cap(self, price: float, atr: float | None = None) -> float:
+        if self.max_width_atr is not None and atr is not None and atr > 0:
+            return self.max_width_atr * atr
+        if self.max_width_pct is not None and price > 0:
+            return price * self.max_width_pct / 100.0
+        return self.max_width
+
+    def _near_levels(self, price: float, atr: float | None = None) -> bool:
         d = self.daily.prev
         if d is None:
             return False
+        tol = self._level_tol(price, atr)
         piv = classic_pivots_full(d.high, d.low, d.close)
-        if any(abs(price - v) <= self.level_pts for v in piv.values()):
+        if any(abs(price - v) <= tol for v in piv.values()):
             return True
         if self._last_swing_hi is not None and self._last_swing_lo is not None:
             lo, hi = fib_zone(self._last_swing_lo, self._last_swing_hi)
-            if lo - self.level_pts <= price <= hi + self.level_pts:
+            if lo - tol <= price <= hi + tol:
                 return True
         box = self._latest_locked_box()
         if box is not None and not box.tooWide:
-            if abs(price - box.high) <= self.level_pts or abs(price - box.low) <= self.level_pts:
+            if abs(price - box.high) <= tol or abs(price - box.low) <= tol:
                 return True
         return False
 
@@ -238,7 +264,11 @@ class PriceAction(Strategy):
             return
         # Only need recent candles (today + yesterday buffer)
         recent = self._fhb_candles[-200:] if len(self._fhb_candles) > 200 else self._fhb_candles
-        res = compute_first_hour_box(recent, as_of=t, max_width=self.max_width)
+        ref = float(recent[-1].close) if recent else 0.0
+        atr = None
+        if self._ohlc:
+            atr = atr_wilder(self._ohlc, len(self._ohlc) - 1, self.atr_len)
+        res = compute_first_hour_box(recent, as_of=t, max_width=self._width_cap(ref, atr))
         for b in reversed(res.boxes):
             if b.day == day and not b.forming:
                 self._locked_box = b
@@ -335,7 +365,7 @@ class PriceAction(Strategy):
                     continue
                 if not self._in_entry_window(bar):
                     continue
-                if self.confluence and not self._near_levels(o.close):
+                if self.confluence and not self._near_levels(o.close, atr):
                     continue
                 sig = self._entry_signal(
                     p.cand.side,
@@ -413,7 +443,8 @@ class PriceAction(Strategy):
 
         # Refresh markers for today's box (cheap: only recent candles)
         recent = self._fhb_candles[-120:]
-        res = compute_first_hour_box(recent, as_of=t, max_width=self.max_width)
+        atr = atr_wilder(self._ohlc, i, self.atr_len) if self._ohlc else None
+        res = compute_first_hour_box(recent, as_of=t, max_width=self._width_cap(o.close, atr))
         box = next((b for b in reversed(res.boxes) if not b.forming), None)
         if box is None or box.tooWide:
             self._box_break = None
@@ -471,7 +502,8 @@ class PriceAction(Strategy):
         if not self._in_entry_window(bar):
             return []
         recent = self._fhb_candles[-120:]
-        res = compute_first_hour_box(recent, as_of=t, max_width=self.max_width)
+        atr = atr_wilder(self._ohlc, len(self._ohlc) - 1, self.atr_len) if self._ohlc else None
+        res = compute_first_hour_box(recent, as_of=t, max_width=self._width_cap(o.close, atr))
         box = next((b for b in reversed(res.boxes) if not b.forming), None)
         if box is None or box.tooWide:
             return []

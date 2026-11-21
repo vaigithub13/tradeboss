@@ -186,6 +186,11 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
             "swing_right": _Field("int", 5, min_value=1),
             "level_pts": _Field("float", 10.0, min_value=0.0),
             "max_width": _Field("float", 150.0, min_value=1.0),
+            # Optional instrument-agnostic distances (None → use level_pts / max_width; Nifty unchanged)
+            "level_atr": _Field("float", None, min_value=0.0),  # type: ignore[arg-type]
+            "max_width_atr": _Field("float", None, min_value=0.0),  # type: ignore[arg-type]
+            "level_pct": _Field("float", None, min_value=0.0),  # type: ignore[arg-type]
+            "max_width_pct": _Field("float", None, min_value=0.0),  # type: ignore[arg-type]
             "mode": _Field("str", "long_short", choices=("long_short", "long_only", "short_only")),
             "first_entry": _Field("str", "09:20"),
             "last_entry": _Field("str", "14:50"),
@@ -248,6 +253,7 @@ _CATALOG: dict[str, tuple[type[Strategy], dict[str, _Field]]] = {
 _TOP = {
     "strategy", "params", "symbol", "timeframe", "start", "end", "sessions",
     "mode", "strike_offset", "slippage_points", "option_fill", "live_timing", "exit_rule", "strike_premium",
+    "risk_rupees", "notional_cap", "lot_size", "slippage_ticks", "tick_size",
     *("premium_target_pct", "premium_stop_pct"),
 }
 #: option-premium exits: settings of the option overlay, not strategy parameters
@@ -354,10 +360,25 @@ def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[s
         if overlaps_holdout(start, end):
             raise RunRequestError(holdout_refusal(start, end))
     sessions = _sessions(body.get("sessions"))
-    mode = body.get("mode")
-    if mode not in ("index", "options"):
-        raise RunRequestError("mode must be 'index' or 'options'")
-    if mode == "options" and symbol not in OPTIONS_SYMBOLS:
+    from app.backtest.instruments import (
+        DEFAULT_NOTIONAL_CAP,
+        DEFAULT_RISK_RUPEES,
+        DEFAULT_SLIPPAGE_TICKS,
+        INSTRUMENT_MODES,
+        is_cash_or_future_mode,
+        is_options_mode,
+        normalize_mode,
+    )
+
+    mode_raw = body.get("mode")
+    if mode_raw not in INSTRUMENT_MODES:
+        raise RunRequestError(
+            "mode must be 'index_option' (or 'options'), 'index', 'equity_intraday', "
+            "'stock_future', or 'index_future'"
+        )
+    mode = normalize_mode(str(mode_raw))
+    # Persist canonical name; keep 'options' accepted as input alias of index_option
+    if is_options_mode(mode) and symbol not in OPTIONS_SYMBOLS:
         raise RunRequestError(f"options mode runs on {' or '.join(sorted(OPTIONS_SYMBOLS))} only")
     offset = body.get("strike_offset", 0)
     if isinstance(offset, bool) or not isinstance(offset, int) or offset not in (-1, 0, 1):
@@ -365,20 +386,53 @@ def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[s
     slip = body.get("slippage_points", 0.5)
     if isinstance(slip, bool) or not isinstance(slip, (int, float)) or slip < 0:
         raise RunRequestError("slippage_points must be a number >= 0")
+    slip_ticks = body.get("slippage_ticks")
+    if slip_ticks is not None:
+        if isinstance(slip_ticks, bool) or not isinstance(slip_ticks, (int, float)) or slip_ticks < 0:
+            raise RunRequestError("slippage_ticks must be a number >= 0")
+        slip_ticks = float(slip_ticks)
+    elif is_cash_or_future_mode(mode):
+        slip_ticks = DEFAULT_SLIPPAGE_TICKS
+    tick_size = body.get("tick_size")
+    if tick_size is not None:
+        if isinstance(tick_size, bool) or not isinstance(tick_size, (int, float)) or not tick_size > 0:
+            raise RunRequestError("tick_size must be a number > 0")
+        tick_size = float(tick_size)
     option_fill = _option_fill(body.get("option_fill", "delta_adjusted"))
     strike_premium = body.get("strike_premium")
     if strike_premium is not None:
         if isinstance(strike_premium, bool) or not isinstance(strike_premium, (int, float)) or not strike_premium > 0:
             raise RunRequestError("strike_premium must be a number > 0 (rupees)")
-        if mode != "options":
-            raise RunRequestError("strike_premium applies to options mode")
+        if not is_options_mode(mode):
+            raise RunRequestError("strike_premium applies to index_option mode")
         strike_premium = float(strike_premium)
+    risk_rupees = body.get("risk_rupees", DEFAULT_RISK_RUPEES if is_cash_or_future_mode(mode) else None)
+    if risk_rupees is not None:
+        if isinstance(risk_rupees, bool) or not isinstance(risk_rupees, (int, float)) or not risk_rupees > 0:
+            raise RunRequestError("risk_rupees must be a number > 0")
+        risk_rupees = float(risk_rupees)
+    notional_cap = body.get("notional_cap", DEFAULT_NOTIONAL_CAP if is_cash_or_future_mode(mode) else None)
+    if notional_cap is not None:
+        if isinstance(notional_cap, bool) or not isinstance(notional_cap, (int, float)) or not notional_cap > 0:
+            raise RunRequestError("notional_cap must be a number > 0")
+        notional_cap = float(notional_cap)
+    lot_size = body.get("lot_size", 1 if is_cash_or_future_mode(mode) else None)
+    if lot_size is not None:
+        if isinstance(lot_size, bool) or not isinstance(lot_size, int) or lot_size < 1:
+            raise RunRequestError("lot_size must be a whole number >= 1")
     live_timing = _live_timing(body.get("live_timing", True))
     premium = parse_premium_exits(body)
-    exit_rule = parse_exit_setting(body.get("exit_rule"), mode=mode, premium=premium, params=params)
-    if premium and mode != "options":
-        raise RunRequestError("premium exits apply to options mode")
-    return {
+    # exit_rule / premium checks use options alias for compatibility
+    mode_for_exits = "options" if is_options_mode(mode) else ("index" if mode == "index" else mode)
+    exit_rule = parse_exit_setting(
+        body.get("exit_rule"),
+        mode="options" if is_options_mode(mode) else "index",
+        premium=premium,
+        params=params,
+    )
+    if premium and not is_options_mode(mode):
+        raise RunRequestError("premium exits apply to index_option mode")
+    out: dict[str, Any] = {
         **premium,
         "strategy": strategy,
         "params": params,
@@ -387,7 +441,7 @@ def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[s
         "start": start.isoformat(),
         "end": None if end is None else end.isoformat(),
         "sessions": sessions,
-        "mode": mode,
+        "mode": mode_for_exits if is_options_mode(mode) or mode == "index" else mode,
         "strike_offset": offset,
         "slippage_points": float(slip),
         "option_fill": option_fill,
@@ -395,6 +449,24 @@ def parse_config(body: dict[str, Any], *, allow_holdout: bool = False) -> dict[s
         "exit_rule": exit_rule,
         **({} if strike_premium is None else {"strike_premium": strike_premium}),
     }
+    # Keep wire format: options stays "options" for existing Nifty runners; new modes use their names.
+    if is_options_mode(mode):
+        out["mode"] = "options"
+    elif mode == "index":
+        out["mode"] = "index"
+    else:
+        out["mode"] = mode
+    if slip_ticks is not None:
+        out["slippage_ticks"] = slip_ticks
+    if tick_size is not None:
+        out["tick_size"] = tick_size
+    if risk_rupees is not None:
+        out["risk_rupees"] = risk_rupees
+    if notional_cap is not None:
+        out["notional_cap"] = notional_cap
+    if lot_size is not None and is_cash_or_future_mode(mode):
+        out["lot_size"] = lot_size
+    return out
 
 
 def parse_exit_setting(value: Any, *, mode: str, premium: dict[str, Any], params: dict[str, Any]) -> dict[str, Any] | None:
@@ -436,6 +508,19 @@ def build_strategy(config: dict[str, Any]) -> Strategy:
         from app.exits.rules import WithExits, parse_exit_rule
 
         strategy = WithExits(strategy, parse_exit_rule(config["exit_rule"]))  # type: ignore[arg-type]
+    from app.backtest.instruments import is_cash_or_future_mode, risk_sizing_for
+
+    if is_cash_or_future_mode(str(config.get("mode", ""))):
+        from app.backtest.risk_wrap import WithRiskSizing
+
+        sizing = risk_sizing_for(
+            str(config["mode"]),
+            risk_rupees=float(config.get("risk_rupees", 300)),
+            notional_cap=float(config.get("notional_cap", 75_000)),
+            lot_size=int(config.get("lot_size", 1)),
+        )
+        if sizing is not None:
+            strategy = WithRiskSizing(strategy, sizing)
     return strategy
 
 
@@ -451,6 +536,8 @@ def _coerce(key: str, value: Any, field: _Field) -> Any:
             raise RunRequestError(f"{key} must be >= {field.min_value}")
         return value
     if field.kind == "float":
+        if value is None and field.default is None:
+            return None
         if isinstance(value, bool) or not isinstance(value, (int, float)):
             raise RunRequestError(f"{key} must be a number")
         number = float(value)

@@ -136,12 +136,18 @@ def test_write_adjusted_series_leaves_raw_and_writes_ledger(tmp_path: Path) -> N
     post = _minute_bar(date(2023, 7, 4), 100.0)
     write_parquet(pd.DataFrame([pre, post], columns=COLUMNS), tmp_path / RAW_NAME)
     actions = [CorporateAction("Split", date(2023, 7, 4), "1:2", None, 0.5, 2.0, {})]
-    ledger = write_adjusted_series(tmp_path, actions, as_of=date(2026, 11, 21), source="test")
+    ledger = write_adjusted_series(tmp_path, actions, as_of=date(2026, 11, 21), source="test", apply=True)
     assert (tmp_path / ADJ_NAME).is_file()
     assert (tmp_path / LEDGER_NAME).is_file()
     assert (tmp_path / RAW_NAME).is_file()
     assert ledger["applied_splits_bonuses"][0]["ex_date"] == "2023-07-04"
     assert ledger["rows_raw"] == 2
+    # Default path is identity (Upstox already adjusted)
+    from app.research.corporate_actions import write_identity_adjusted
+
+    ident = write_identity_adjusted(tmp_path, as_of=date(2026, 11, 21), reason="test identity", actions=actions)
+    assert ident["identity_copy"] is True
+    assert ident["applied_splits_bonuses"] == []
 
 
 def test_detect_split_jumps_flags_unexplained_gap() -> None:

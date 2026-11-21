@@ -1,7 +1,11 @@
 """Split/bonus factors from Upstox Fundamentals corporate-actions; adjust OHLC + volume.
 
-Dividends and rights are recorded but not applied to OHLC in Phase A (user asked splits/bonuses).
+Dividends and rights are recorded but not applied to OHLC (user asked splits/bonuses only).
 Raw 1m stays in `1m.parquet`; adjusted series is written to `1m_adj.parquet` with `adjustments.json`.
+
+Phase B finding (2026-11-21): Upstox historical 1m candles are **already** split/bonus-adjusted
+(KOTAKBANK 1:5 ex 2026-01-14 shows no raw jump). Prefer `write_identity_adjusted` so
+`1m_adj == 1m`; do not re-apply CA factors to OHLC unless a vendor feed is proven unadjusted.
 """
 
 from __future__ import annotations
@@ -171,14 +175,77 @@ def apply_adjustments(df: pd.DataFrame, actions: list[CorporateAction], *, as_of
     return out
 
 
+def write_identity_adjusted(
+    symbol_dir: Path,
+    *,
+    as_of: date,
+    reason: str,
+    actions: list[CorporateAction] | None = None,
+) -> dict[str, Any]:
+    """Copy raw → 1m_adj (Upstox history already adjusted). Record CA inventory without applying."""
+    import shutil
+
+    raw_path = symbol_dir / RAW_NAME
+    if not raw_path.is_file():
+        raise FileNotFoundError(f"no raw candles at {raw_path}")
+
+    def _copy(tmp: Path) -> None:
+        shutil.copyfile(raw_path, tmp)
+
+    publish_file(symbol_dir / ADJ_NAME, _copy, accept=lambda p: p.is_file() and p.stat().st_size > 0)
+    actions = actions or []
+    serializable = {
+        "as_of": as_of.isoformat(),
+        "source": "identity_copy",
+        "raw": RAW_NAME,
+        "adjusted": ADJ_NAME,
+        "identity_copy": True,
+        "reason": reason,
+        "applied_splits_bonuses": [],
+        "actions": [
+            {
+                "kind": a.kind,
+                "ex_date": a.ex_date.isoformat(),
+                "ratio": a.ratio,
+                "amount": a.amount,
+                "price_factor": a.price_factor,
+                "volume_factor": a.volume_factor,
+            }
+            for a in actions
+        ],
+    }
+    payload = json.dumps(serializable, indent=2, sort_keys=True) + "\n"
+    publish_file(
+        symbol_dir / LEDGER_NAME,
+        lambda p: p.write_text(payload, encoding="utf-8"),
+        accept=lambda tmp: tmp.is_file() and tmp.stat().st_size > 0,
+    )
+    return serializable
+
+
 def write_adjusted_series(
     symbol_dir: Path,
     actions: list[CorporateAction],
     *,
     as_of: date,
     source: str,
+    apply: bool = False,
 ) -> dict[str, Any]:
-    """Read raw 1m.parquet, write 1m_adj.parquet + adjustments.json. Returns the ledger dict."""
+    """Read raw 1m.parquet, write 1m_adj.parquet + adjustments.json. Returns the ledger dict.
+
+    Default `apply=False` (Phase B): identity copy — Upstox 1m is already adjusted.
+    Pass `apply=True` only when a feed is proven unadjusted.
+    """
+    if not apply:
+        return write_identity_adjusted(
+            symbol_dir,
+            as_of=as_of,
+            reason=(
+                "Upstox historical 1m already split/bonus-adjusted; factors not re-applied "
+                f"(source={source})"
+            ),
+            actions=actions,
+        )
     raw_path = symbol_dir / RAW_NAME
     if not raw_path.is_file():
         raise FileNotFoundError(f"no raw candles at {raw_path}")
