@@ -67,6 +67,12 @@ def _execute_single(config: dict[str, Any], report: Report, *, hash_data: bool =
         report({"phase": "index", "done": done, "total": total})
 
     result = run_backtest(strategy, source, engine_cfg, on_progress=on_bar)
+    sizing_stats = None
+    if hasattr(strategy, "sizing_stats"):
+        try:
+            sizing_stats = strategy.sizing_stats()  # type: ignore[operator]
+        except Exception:
+            sizing_stats = None
     option = None
     vix_bars: list[dict[str, Any]] = []
     if config["mode"] == "options":
@@ -104,6 +110,7 @@ def _execute_single(config: dict[str, Any], report: Report, *, hash_data: bool =
         "cost_rows": [] if option is None else _cost_rows(option.option.trades),
         "data_hash": _data_hash(result, vix_bars, config) if hash_data else None,
         "warnings": warnings,
+        "sizing_stats": sizing_stats,
         "result": view,
     }
 

@@ -10,7 +10,7 @@ import pytest
 
 from app.backtest.catalog import parse_config, RunRequestError
 from app.backtest.instruments import cost_model_for, normalize_mode
-from app.backtest.sizing import RiskSizing, stop_distance_from_signal
+from app.backtest.sizing import RiskSizing, SizeResult, stop_distance_from_signal
 from app.strategies.price_action import PriceAction
 
 
@@ -88,17 +88,22 @@ def test_futures_cost_table_loads() -> None:
     assert leg.components["stt"] > 0
 
 
-def test_risk_sizing_equity_and_futures_lots() -> None:
+def test_risk_sizing_caps_notional_instead_of_skipping() -> None:
     eq = RiskSizing(risk_rupees=300, notional_cap=75_000, lot_size=1)
-    qty, reason = eq.size(stop_distance=10.0, entry_price=1500.0)
-    assert reason is None and qty == 30  # floor(300/10)
-    qty2, reason2 = eq.size(stop_distance=10.0, entry_price=3000.0)
-    assert qty2 == 0 and reason2 and "notional" in reason2
+    r = eq.size(stop_distance=10.0, entry_price=1500.0)
+    assert r.skip_reason is None and r.qty_units == 30 and not r.capped  # floor(300/10)
+    # Would be 30 shares @ 3000 = 90k > 75k → cap at floor(75000/3000)=25
+    r2 = eq.size(stop_distance=10.0, entry_price=3000.0)
+    assert r2.skip_reason is None and r2.qty_units == 25 and r2.capped
+    assert r2.actual_risk == pytest.approx(250.0)  # below target 300
+    # Price alone above cap → qty < 1
+    r3 = eq.size(stop_distance=10.0, entry_price=80_000.0)
+    assert r3.qty_units == 0 and r3.skip_reason == "qty_below_1"
 
     fut = RiskSizing(risk_rupees=300, notional_cap=200_000, lot_size=30)
-    qty3, reason3 = fut.size(stop_distance=5.0, entry_price=500.0)
+    r4 = fut.size(stop_distance=5.0, entry_price=500.0)
     # floor(300/5)=60 → 2 lots × 30 = 60
-    assert reason3 is None and qty3 == 60
+    assert r4.skip_reason is None and r4.qty_units == 60
 
 
 def test_stop_distance_helpers() -> None:

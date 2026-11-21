@@ -2189,6 +2189,21 @@ notifications + Alerts log. Max 5 scripts; Web Worker; never on the live WS view
 - UI: ACTIVE includes 7 (“SENSEX DD CE”), panel + dashboard card + trailing OrderHelper; alerts;
   Sensex chart shows slot-7 markers. Tests + full backend suite + frontend paper tests + typecheck.
 
+## 21 Nov 2026 — Phase C: stock/BankNifty research suite (research only; no slots)
+
+- **STEP 0 sizing:** over-notional no longer skips — `RiskSizing` caps at `floor(cap/price)`
+  (risk below target); skip only if qty &lt; 1. Stats: capped count + avg actual risk on the run.
+  Dry-run dd_five long DEV: HDFCBANK 251 trades (245 capped, avg risk ≈₹152), RELIANCE 244
+  (237, ≈₹156), BANKNIFTY 293 (287, ≈₹78) after research **1-unit** futures sizing (exchange
+  FUT lot 30 × spot ≫ ₹75k notional — a real lot cannot fit under the cap).
+- **Universe run:** `scripts/phase_c_research_suite.py` — research_universe_v1 (29 equities +
+  BANKNIFTY index_future costs), 8 strategies × risk ₹300/₹600, DEV 2022-01..2024-12 /
+  OOS 2025-01..2026-06-30. Holdout 2026-07-01..2026-10-01 **not opened** (0 gate passers).
+- **Gates:** all strategies FAIL (breadth 0–3.3%; WF portfolios negative both windows; random
+  sign-shuffle percentile ≪ 95%). Report: `data/validation/phase_c_research_2026-11-21.md`
+  (+ JSON; untracked). Nifty index_option regression lock + paper slots untouched.
+- No live/backend start; `LIVE_TRADING` false; `data/` / `.env` not committed.
+
 ## 21 Nov 2026 — Phase B: stock/futures backtest mode (research only; no slots)
 
 - **Step 0:** Upstox 1m is already split/bonus-adjusted (KOTAKBANK 1:5 ex 2026-01-14: raw

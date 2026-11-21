@@ -1,4 +1,4 @@
-"""Wrap a strategy to resize entries by fixed-₹ risk (Phase B equity/futures)."""
+"""Wrap a strategy to resize entries by fixed-₹ risk (equity/futures)."""
 
 from __future__ import annotations
 
@@ -29,10 +29,10 @@ def _atr_from_bars(ctx: Any, length: int) -> float | None:
 
 
 class WithRiskSizing(Strategy):
-    """Resize BUY/SELL entry lots from stop distance; skip when under-sized or over notional cap.
+    """Resize BUY/SELL entry lots from stop distance.
 
-    When the signal has no stop / stop_points, fall back to `atr_mult * ATR(atr_length)` on the
-    strategy timeframe (sizing only — does not invent a broker stop unless the signal already had one).
+    Over-notional sizes are capped at floor(cap/price) (risk below target), not skipped.
+    Skip only when qty < 1. Tracks capped trades and actual risk for reporting.
     """
 
     def __init__(
@@ -49,9 +49,14 @@ class WithRiskSizing(Strategy):
         self.atr_length = atr_length
         self.atr_mult = float(atr_mult)
         self.skipped: list[dict[str, Any]] = []
+        self.capped: list[dict[str, Any]] = []
+        self.accepted_risks: list[float] = []
 
     def __getattr__(self, name: str) -> Any:
-        if name in ("inner", "sizing", "skipped", "atr_length", "atr_mult", "params", "name"):
+        if name in (
+            "inner", "sizing", "skipped", "capped", "accepted_risks",
+            "atr_length", "atr_mult", "params", "name",
+        ):
             raise AttributeError(name)
         return getattr(self.inner, name)
 
@@ -68,6 +73,17 @@ class WithRiskSizing(Strategy):
 
     def on_stop(self, ctx: Any) -> None:
         self.inner.on_stop(ctx)
+
+    def sizing_stats(self) -> dict[str, Any]:
+        risks = self.accepted_risks
+        return {
+            "signals_skipped": len(self.skipped),
+            "trades_capped": len(self.capped),
+            "trades_sized": len(risks),
+            "avg_actual_risk": (sum(risks) / len(risks)) if risks else None,
+            "target_risk": self.sizing.risk_rupees,
+            "skip_reasons": _count_reasons(self.skipped),
+        }
 
     def on_bar(self, bar: dict[str, Any], ctx: Any) -> list[Signal]:
         raw = list(self.inner.on_bar(bar, ctx) or [])
@@ -87,19 +103,32 @@ class WithRiskSizing(Strategy):
                     self.skipped.append({"time": int(bar["time"]), "tag": sig.tag, "reason": "no_stop_or_atr"})
                     continue
                 dist = self.atr_mult * atr
-            qty_units, reason = self.sizing.size(stop_distance=dist, entry_price=close)
-            if reason is not None:
+            result = self.sizing.size(stop_distance=dist, entry_price=close)
+            if result.skip_reason is not None:
                 self.skipped.append(
                     {
                         "time": int(bar["time"]),
                         "tag": sig.tag,
-                        "reason": reason,
+                        "reason": result.skip_reason,
                         "stop_distance": dist,
                         "close": close,
                     }
                 )
                 continue
-            lots = max(1, qty_units // self.sizing.lot_size)
+            if result.capped:
+                self.capped.append(
+                    {
+                        "time": int(bar["time"]),
+                        "tag": sig.tag,
+                        "qty": result.qty_units,
+                        "close": close,
+                        "stop_distance": dist,
+                        "actual_risk": result.actual_risk,
+                        "target_risk": result.target_risk,
+                    }
+                )
+            self.accepted_risks.append(result.actual_risk)
+            lots = max(1, result.qty_units // self.sizing.lot_size)
             out.append(
                 Signal(
                     sig.side,
@@ -119,6 +148,23 @@ class WithRiskSizing(Strategy):
     @property
     def settings_warnings(self) -> list[str]:
         notes = list(getattr(self.inner, "settings_warnings", ()))
-        if self.skipped:
-            notes.append(f"risk sizing skipped {len(self.skipped)} signal(s)")
+        stats = self.sizing_stats()
+        if stats["signals_skipped"]:
+            notes.append(f"risk sizing skipped {stats['signals_skipped']} signal(s)")
+        if stats["trades_capped"]:
+            avg = stats["avg_actual_risk"]
+            notes.append(
+                f"risk sizing capped {stats['trades_capped']} trade(s); "
+                f"avg actual risk ₹{avg:.1f} vs target ₹{stats['target_risk']:.0f}"
+                if avg is not None
+                else f"risk sizing capped {stats['trades_capped']} trade(s)"
+            )
         return notes
+
+
+def _count_reasons(rows: list[dict[str, Any]]) -> dict[str, int]:
+    out: dict[str, int] = {}
+    for row in rows:
+        key = str(row.get("reason") or "unknown")
+        out[key] = out.get(key, 0) + 1
+    return out
