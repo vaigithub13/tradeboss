@@ -30,6 +30,29 @@ def make(handler, **kw) -> tuple[UpstoxClient, list[float]]:
 
 
 # ------------------------------------------------------------------ request shape
+def test_corporate_actions_url_encodes_isin() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append(req)
+        return httpx.Response(
+            200,
+            json={
+                "status": "success",
+                "data": [
+                    {"name": "Split", "ratio": "1:2", "expiry_date": "04 Jul 2023", "amount": None},
+                ],
+            },
+        )
+
+    c, _ = make(handler)
+    rows = c.corporate_actions("INE040A01034")
+    assert len(rows) == 1
+    (req,) = seen
+    assert req.method == "GET"
+    assert req.url.raw_path.decode() == "/v2/fundamentals/INE040A01034/corporate-actions"
+
+
 def test_historical_url_encodes_the_key_puts_to_before_from_and_sends_the_bearer_token() -> None:
     seen: list[httpx.Request] = []
 
@@ -225,7 +248,7 @@ def test_default_client_is_pinned_to_api_upstox_com_and_does_not_follow_redirect
 def test_client_exposes_only_read_methods_and_only_issues_GET() -> None:
     public = {n for n, _ in inspect.getmembers(UpstoxClient, inspect.isfunction) if not n.startswith("_")}
     assert public == {
-        "market_status", "historical_candles", "intraday_candles",
+        "market_status", "corporate_actions", "historical_candles", "intraday_candles",
         "expired_historical_candles", "expired_expiries",
         "expired_future_contracts", "expired_option_contracts",
         "option_contracts", "option_contracts_meta", "option_lot_size", "option_chain",

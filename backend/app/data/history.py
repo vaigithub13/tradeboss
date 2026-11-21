@@ -28,7 +28,7 @@ import pandas as pd
 
 from app.data.importer import COLUMNS, build_frame, write_parquet
 from app.upstox.client import UpstoxClient, parse_candles
-from app.upstox.instruments import NIFTY_INDEX_KEY, SENSEX_INDEX_KEY, Instrument
+from app.upstox.instruments import BANKNIFTY_INDEX_KEY, NIFTY_INDEX_KEY, SENSEX_INDEX_KEY, Instrument
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -42,8 +42,12 @@ SESSION_DONE_AFTER = time(15, 45)
 EMPTY_RETRY = timedelta(days=7)
 
 #: keep the folder of the original Nifty sample so it stays a fixture and cross-check source;
-#: Sensex uses a short stable folder name (same pattern)
-DIR_ALIASES = {NIFTY_INDEX_KEY: "NIFTY50", SENSEX_INDEX_KEY: "SENSEX"}
+#: Sensex / BankNifty use short stable folder names (same pattern)
+DIR_ALIASES = {
+    NIFTY_INDEX_KEY: "NIFTY50",
+    SENSEX_INDEX_KEY: "SENSEX",
+    BANKNIFTY_INDEX_KEY: "BANKNIFTY",
+}
 
 DateRange = tuple[date, date]
 

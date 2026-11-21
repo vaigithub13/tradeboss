@@ -1,0 +1,17 @@
+{
+  "_note": "Fixed research universe v1. Symbols are exact NSE trading_symbol matches; do not silently replace renames/demergers. Resolved instrument_keys are filled by `resolve_universe` against the Upstox snapshot of as_of.",
+  "id": "research_universe_v1",
+  "as_of": "2026-11-21",
+  "history_from": "2022-01-03",
+  "index": {
+    "symbol": "BANKNIFTY",
+    "instrument_key": "NSE_INDEX|Nifty Bank",
+    "role": "index"
+  },
+  "stocks": [
+    "HDFCBANK", "ICICIBANK", "RELIANCE", "INFY", "TCS", "SBIN", "AXISBANK", "KOTAKBANK",
+    "LT", "BAJFINANCE", "BHARTIARTL", "ITC", "HINDUNILVR", "M&M", "MARUTI", "SUNPHARMA",
+    "TATAMOTORS", "TATASTEEL", "NTPC", "POWERGRID", "ULTRACEMCO", "ASIANPAINT", "TITAN",
+    "HCLTECH", "WIPRO", "ADANIENT", "JSWSTEEL", "INDUSINDBK", "BAJAJFINSV", "HINDALCO"
+  ]
+}

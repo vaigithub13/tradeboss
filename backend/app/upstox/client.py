@@ -161,6 +161,16 @@ class UpstoxClient:
         data = body.get("data")
         return data if isinstance(data, dict) else {}
 
+    def corporate_actions(self, isin: str) -> list[dict[str, Any]]:
+        """GET /v2/fundamentals/{isin}/corporate-actions: dividends, bonus, splits, rights (read-only)."""
+        body = self._get(f"/v2/fundamentals/{quote(isin, safe='')}/corporate-actions")
+        data = body.get("data")
+        if data is None:
+            return []
+        if not isinstance(data, list):
+            raise UpstoxApiError("unexpected response shape (no data list)", status=200)
+        return [x for x in data if isinstance(x, dict)]
+
     def historical_candles(
         self,
         instrument_key: str,

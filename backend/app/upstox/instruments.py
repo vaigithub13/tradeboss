@@ -36,6 +36,7 @@ _DATE_DIR = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 NIFTY_INDEX_KEY = "NSE_INDEX|Nifty 50"
 VIX_KEY = "NSE_INDEX|India VIX"
 SENSEX_INDEX_KEY = "BSE_INDEX|SENSEX"
+BANKNIFTY_INDEX_KEY = "NSE_INDEX|Nifty Bank"
 
 Kind = Literal["index", "equity", "future", "option"]
 KINDS: tuple[Kind, ...] = ("index", "equity", "future", "option")
@@ -294,7 +295,7 @@ def _expiry_date(ms: Any) -> date | None:
 
 def instrument_of(row: dict[str, Any]) -> Instrument | None:
     """One master row -> Instrument, or None if it is not something we offer:
-    NSE indices/stocks + Nifty F&O, and BSE Sensex index + Sensex F&O (BSE_FO)."""
+    NSE indices/stocks + Nifty F&O + BankNifty futures (research volume), and BSE Sensex + Sensex F&O."""
     seg, typ, key = row.get("segment"), row.get("instrument_type"), row.get("instrument_key")
     if not isinstance(key, str) or not key:
         return None
@@ -310,9 +311,14 @@ def instrument_of(row: dict[str, Any]) -> Instrument | None:
         return Instrument(key, symbol, name, "equity", seg, typ, lot_size=lot_size)
     if seg in ("NSE_FO", "BSE_FO") and typ in ("FUT", "CE", "PE"):
         underlying = row.get("underlying_key")
-        if seg == "NSE_FO" and underlying != NIFTY_INDEX_KEY:
-            return None
-        if seg == "BSE_FO" and underlying != SENSEX_INDEX_KEY:
+        if seg == "NSE_FO":
+            if underlying == NIFTY_INDEX_KEY:
+                pass  # Nifty futures and options
+            elif underlying == BANKNIFTY_INDEX_KEY and typ == "FUT":
+                pass  # research: front BankNifty future for volume (options stay out)
+            else:
+                return None
+        elif seg == "BSE_FO" and underlying != SENSEX_INDEX_KEY:
             return None
         strike = row.get("strike_price")
         return Instrument(

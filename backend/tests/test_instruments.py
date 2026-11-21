@@ -201,14 +201,14 @@ def test_snapshot_due_rule_for_the_startup_fallback(tmp_path: Path) -> None:
 
 
 # ------------------------------------------------------------------ what we offer
-def test_only_indices_nse_stocks_and_nifty_futures_options_are_offered() -> None:
+def test_only_indices_nse_stocks_and_allowed_fo_are_offered() -> None:
     idx = index_from_sample()
     kinds = {i.key: i.kind for i in idx.instruments}
     assert kinds["NSE_INDEX|Nifty 50"] == "index" and kinds["NSE_INDEX|India VIX"] == "index"
     assert kinds["NSE_EQ|INE002A01018"] == "equity"
     assert kinds["NSE_FO|48704"] == "future" and kinds["NSE_FO|40793"] == "option"
     assert "NSE_EQ|IN2920250163" not in kinds  # SG (gold bond) series: not a stock
-    assert "NSE_FO|59396" not in kinds  # BANKNIFTY option: Nifty only
+    assert "NSE_FO|59396" not in kinds  # BANKNIFTY option: still out (FUT-only for BankNifty)
     assert not any(k.startswith("NSE_EQ|FILL") for k in kinds)
 
 

@@ -1,0 +1,230 @@
+{
+  "as_of": "2026-11-21",
+  "history_from": "2022-01-03",
+  "id": "research_universe_v1",
+  "notes": [
+    "TATAMOTORS: no NSE_EQ match (rename/demerger?); not substituted"
+  ],
+  "resolved": [
+    {
+      "expiry": null,
+      "folder": "BANKNIFTY",
+      "instrument_key": "NSE_INDEX|Nifty Bank",
+      "role": "index",
+      "symbol": "BANKNIFTY"
+    },
+    {
+      "expiry": "2026-11-23",
+      "folder": "NSE_FO_61466",
+      "instrument_key": "NSE_FO|61466",
+      "role": "future",
+      "symbol": "BANKNIFTY FUT 23 NOV 26"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE040A01034",
+      "instrument_key": "NSE_EQ|INE040A01034",
+      "role": "equity",
+      "symbol": "HDFCBANK"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE090A01021",
+      "instrument_key": "NSE_EQ|INE090A01021",
+      "role": "equity",
+      "symbol": "ICICIBANK"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE002A01018",
+      "instrument_key": "NSE_EQ|INE002A01018",
+      "role": "equity",
+      "symbol": "RELIANCE"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE009A01021",
+      "instrument_key": "NSE_EQ|INE009A01021",
+      "role": "equity",
+      "symbol": "INFY"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE467B01029",
+      "instrument_key": "NSE_EQ|INE467B01029",
+      "role": "equity",
+      "symbol": "TCS"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE062A01020",
+      "instrument_key": "NSE_EQ|INE062A01020",
+      "role": "equity",
+      "symbol": "SBIN"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE238A01034",
+      "instrument_key": "NSE_EQ|INE238A01034",
+      "role": "equity",
+      "symbol": "AXISBANK"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE237A01036",
+      "instrument_key": "NSE_EQ|INE237A01036",
+      "role": "equity",
+      "symbol": "KOTAKBANK"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE018A01030",
+      "instrument_key": "NSE_EQ|INE018A01030",
+      "role": "equity",
+      "symbol": "LT"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE296A01032",
+      "instrument_key": "NSE_EQ|INE296A01032",
+      "role": "equity",
+      "symbol": "BAJFINANCE"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE397D01024",
+      "instrument_key": "NSE_EQ|INE397D01024",
+      "role": "equity",
+      "symbol": "BHARTIARTL"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE154A01025",
+      "instrument_key": "NSE_EQ|INE154A01025",
+      "role": "equity",
+      "symbol": "ITC"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE030A01027",
+      "instrument_key": "NSE_EQ|INE030A01027",
+      "role": "equity",
+      "symbol": "HINDUNILVR"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE101A01026",
+      "instrument_key": "NSE_EQ|INE101A01026",
+      "role": "equity",
+      "symbol": "M&M"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE585B01010",
+      "instrument_key": "NSE_EQ|INE585B01010",
+      "role": "equity",
+      "symbol": "MARUTI"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE044A01036",
+      "instrument_key": "NSE_EQ|INE044A01036",
+      "role": "equity",
+      "symbol": "SUNPHARMA"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE081A01020",
+      "instrument_key": "NSE_EQ|INE081A01020",
+      "role": "equity",
+      "symbol": "TATASTEEL"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE733E01010",
+      "instrument_key": "NSE_EQ|INE733E01010",
+      "role": "equity",
+      "symbol": "NTPC"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE752E01010",
+      "instrument_key": "NSE_EQ|INE752E01010",
+      "role": "equity",
+      "symbol": "POWERGRID"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE481G01011",
+      "instrument_key": "NSE_EQ|INE481G01011",
+      "role": "equity",
+      "symbol": "ULTRACEMCO"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE021A01026",
+      "instrument_key": "NSE_EQ|INE021A01026",
+      "role": "equity",
+      "symbol": "ASIANPAINT"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE280A01028",
+      "instrument_key": "NSE_EQ|INE280A01028",
+      "role": "equity",
+      "symbol": "TITAN"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE860A01027",
+      "instrument_key": "NSE_EQ|INE860A01027",
+      "role": "equity",
+      "symbol": "HCLTECH"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE075A01022",
+      "instrument_key": "NSE_EQ|INE075A01022",
+      "role": "equity",
+      "symbol": "WIPRO"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE423A01024",
+      "instrument_key": "NSE_EQ|INE423A01024",
+      "role": "equity",
+      "symbol": "ADANIENT"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE019A01038",
+      "instrument_key": "NSE_EQ|INE019A01038",
+      "role": "equity",
+      "symbol": "JSWSTEEL"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE095A01012",
+      "instrument_key": "NSE_EQ|INE095A01012",
+      "role": "equity",
+      "symbol": "INDUSINDBK"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE918I01026",
+      "instrument_key": "NSE_EQ|INE918I01026",
+      "role": "equity",
+      "symbol": "BAJAJFINSV"
+    },
+    {
+      "expiry": null,
+      "folder": "NSE_EQ_INE038A01020",
+      "instrument_key": "NSE_EQ|INE038A01020",
+      "role": "equity",
+      "symbol": "HINDALCO"
+    }
+  ],
+  "unresolved": [
+    "TATAMOTORS"
+  ]
+}

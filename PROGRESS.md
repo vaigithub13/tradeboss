@@ -2188,3 +2188,27 @@ notifications + Alerts log. Max 5 scripts; Web Worker; never on the live WS view
   tick ranges. LIVE_TRADING false; backend not started; slots 2/4/5/6 configs untouched.
 - UI: ACTIVE includes 7 (“SENSEX DD CE”), panel + dashboard card + trailing OrderHelper; alerts;
   Sensex chart shows slot-7 markers. Tests + full backend suite + frontend paper tests + typecheck.
+
+## 21 Nov 2026 — Phase A: research_universe_v1 (BankNifty + 30 stocks; research only)
+
+Research data only: no live subs, no UI, no paper slots, no engine changes. Backend not started.
+`LIVE_TRADING` false. `data/` and `.env` not committed.
+
+- **Universe** `backend/app/research/data/research_universe_v1.json` (`as_of` 2026-11-21,
+  `history_from` 2022-01-03): BANKNIFTY index + front BankNifty FUT (volume) + 30 NSE equities.
+  Resolve via `resolve_universe` against Upstox snapshot →
+  `research_universe_v1_resolved.json`. **Unresolved (not substituted): TATAMOTORS**
+  (post-demerger; no NSE_EQ trading_symbol). 31 resolved.
+- **Instruments:** `BANKNIFTY_INDEX_KEY` + `DIR_ALIASES` → `BANKNIFTY`; NSE_FO allowlist adds
+  BankNifty **FUT only** (options stay out).
+- **Backfill:** `scripts/research_universe_backfill.py` reuses `sync_symbol` (28d windows,
+  throttle + resume). ~452k 1m bars/equity · BANKNIFTY 452,341 · front FUT from listing
+  (2026-08-31).
+- **CA:** Upstox `/v2/fundamentals/{ISIN}/corporate-actions` → raw `1m.parquet` +
+  `1m_adj.parquet` + `adjustments.json`. Splits/bonuses applied; dividends recorded only.
+  API returns recent events only (KOTAKBANK 1:5 split 2026-01-14 applied).
+- **Quality:** `data/validation/research_universe_v1_quality_2026-11-21.md` (untracked).
+  Most equities 0 missing days; single-day holes BANKNIFTY/RELIANCE/ITC/HINDUNILVR.
+  Split-jump flags: ADANIENT (4, Feb 2023) · INDUSINDBK (1, Mar 2025) — no matching CA in feed.
+- Tests: `tests/test_research_universe.py` + client CA GET; full suites green
+  (1801+1 skip backend · 476 frontend).
