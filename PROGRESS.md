@@ -2269,3 +2269,4 @@ Paper only. No order route. Slots 1–7, GEX, the option chain, and the Sensex p
 - **Rank:** `python -m scripts.scanner_rank`. `scripts/launchd/install-scanner-rank.sh` schedules Saturday 10:00 IST and does not start uvicorn. A stale `rankings/latest.json` also refreshes on the next backend start outside pytest.
 - **UI:** Stock Scanner tab hides the Nifty chart the same way the other desks do. Detail chart is its own small 5-minute view.
 - Tests: `tests/test_scanner_*.py` (55 with the key-cap checks) and frontend tab, sort, and settings tests.
+- **23 Nov follow-up:** under 8 fires, history falls back to the whole universe (`history_source` stock or pooled). `max_open_positions` defaults to 1, beside `max_trades_per_day` 3. `auto_trade` defaults off and the settings toggle stays disabled until `data/scanner/replay/` has a finished file stamped `SCANNER_CODE_VERSION`. Live switch left off.

@@ -58,6 +58,7 @@ export interface ScannerSignal {
   open_pct?: number | null;
   avg_rupees?: number | null;
   win_rate?: number | null;
+  history_source?: "stock" | "pooled" | string;
   avg_r?: number | null;
   fires?: number;
   wins?: number;
@@ -93,6 +94,7 @@ export interface ScannerSettings {
   max_loss_per_trade: number;
   daily_loss_limit: number;
   max_trades_per_day: number;
+  max_open_positions: number;
   max_capital_per_trade: number;
   min_rr: number;
   entry_mode: string;
@@ -107,6 +109,8 @@ export interface ScannerSettings {
   universe: string;
   only_proven: boolean;
   auto_trade: boolean;
+  replay_ready?: boolean;
+  replay_reason?: string;
   live_subscribe: boolean;
   slippage_ticks: number;
   tick_size: number;

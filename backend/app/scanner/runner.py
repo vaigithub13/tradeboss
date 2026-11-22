@@ -20,12 +20,13 @@ from app.scanner.bars import (
 from app.scanner.book import flatten, on_bar, take_signals
 from app.scanner.config import ScannerSettings
 from app.scanner.context import context_row, nifty_change_pct
-from app.scanner.history import occurrences
+from app.scanner.history import history_for
 from app.scanner.judge import judge
 from app.scanner.plan import build_plan
 from app.scanner.risk import assess
 from app.scanner.setups import run_setups
 from app.scanner.timemachine import minutes_for, ratio_buckets, run_time_machine
+from app.scanner.version import SCANNER_CODE_VERSION
 
 TmFn = Callable[[dict], dict]
 
@@ -93,6 +94,9 @@ def evaluate_symbol(
     trades_today: int,
     folder: str | None = None,
     tm: TmFn = run_time_machine,
+    open_count: int = 0,
+    universe: dict[str, list[Bar]] | None = None,
+    history_cache: dict | None = None,
 ) -> list[dict[str, Any]]:
     prev = _prev_close(bars, day)
     hits = run_setups(bars, enabled=settings.setups, prev_close=prev, as_of=as_of)
@@ -147,6 +151,7 @@ def evaluate_symbol(
             "avg_r": None,
             "occurrences": [],
             "verdict": None,
+            "history_source": "stock",
         }
         if (
             not hit.forming
@@ -170,7 +175,15 @@ def evaluate_symbol(
                 "on": day.isoformat(),
             }
             tm_row = tm(spec)
-            hist = occurrences(bars, setup=hit.setup, up_to=day, settings=hist_settings)
+            hist, history_source = history_for(
+                symbol,
+                universe or {symbol: bars},
+                setup=hit.setup,
+                up_to=day,
+                settings=hist_settings,
+                cache=history_cache,
+            )
+            row["history_source"] = history_source
             verdict = judge(
                 target_pct=float(tm_row["target_pct"]),
                 stop_pct=float(tm_row["stop_pct"]),
@@ -208,6 +221,7 @@ def evaluate_symbol(
             daily_loss=daily_loss,
             trades_today=trades_today,
             open_symbols=open_symbols,
+            open_count=open_count,
         )
         row["decision"] = decision["decision"]
         row["reasons"] = decision["reasons"]
@@ -228,11 +242,14 @@ def scan_feed(
     proven: set[tuple[str, str]] | None,
     folders: dict[str, str] | None = None,
     tm: TmFn = run_time_machine,
+    history_cache: dict | None = None,
 ) -> list[dict[str, Any]]:
     nifty_prev = _prev_close(nifty, day) if nifty else None
     nifty_pct = nifty_change_pct(nifty, day, nifty_prev) if nifty else None
     open_symbols = {p["symbol"] for p in state["open"]}
     trades_today = len(state["trades"]) + len(state["open"])
+    if history_cache is None:
+        history_cache = {}
     found: list[dict[str, Any]] = []
     for symbol, bars in symbols.items():
         found.extend(
@@ -250,6 +267,9 @@ def scan_feed(
                 trades_today=trades_today,
                 folder=(folders or {}).get(symbol),
                 tm=tm,
+                open_count=len(state["open"]),
+                universe=symbols,
+                history_cache=history_cache,
             )
         )
     return found
@@ -337,10 +357,20 @@ def step(
     state: dict[str, Any],
     proven: set[tuple[str, str]] | None,
     tm: TmFn = run_time_machine,
+    history_cache: dict | None = None,
 ) -> None:
     apply_until(state, symbols, day, as_of, settings)
     rows = scan_feed(
-        symbols, sectors, nifty, day=day, as_of=as_of, settings=settings, state=state, proven=proven, tm=tm
+        symbols,
+        sectors,
+        nifty,
+        day=day,
+        as_of=as_of,
+        settings=settings,
+        state=state,
+        proven=proven,
+        tm=tm,
+        history_cache=history_cache,
     )
     merge_signals(state, rows)
     note_alerts(state, rows, [])
@@ -363,6 +393,7 @@ def walk_day(
     """Walk 09:30–14:30 every five minutes, then flat at 15:15. `source` marks a replay so it is not live P&L."""
     state = fresh_state(day)
     state["source"] = source
+    history_cache: dict = {}
     cursor = datetime.combine(day, time(9, 30), tzinfo=IST)
     end = datetime.combine(day, time(14, 30), tzinfo=IST)
     while cursor <= end:
@@ -376,6 +407,7 @@ def walk_day(
             state=state,
             proven=proven,
             tm=tm,
+            history_cache=history_cache,
         )
         cursor += timedelta(minutes=5)
     flat_ts = int(datetime.combine(day, time(15, 15), tzinfo=IST).timestamp())
@@ -394,6 +426,9 @@ def walk_day(
     state["alerts"].append({"id": f"flat:{day.isoformat()}", "kind": "flat", "message": flat_message(float(state["net"]))})
     state["reported"] = True
     state["report"] = build_report(state)
+    state["completed"] = True
+    state["error"] = None
+    state["code_version"] = SCANNER_CODE_VERSION
     return state
 
 

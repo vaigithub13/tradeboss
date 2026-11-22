@@ -44,6 +44,7 @@ const settings: ScannerSettings = {
   max_loss_per_trade: 500,
   daily_loss_limit: 1500,
   max_trades_per_day: 3,
+  max_open_positions: 1,
   max_capital_per_trade: 50000,
   min_rr: 2,
   entry_mode: "trigger_close",
@@ -57,7 +58,9 @@ const settings: ScannerSettings = {
   tm_min_fires: 8,
   universe: "nifty50",
   only_proven: false,
-  auto_trade: true,
+  auto_trade: false,
+  replay_ready: false,
+  replay_reason: "no completed replay for this code version",
   live_subscribe: true,
   slippage_ticks: 1,
   tick_size: 0.05,
@@ -86,7 +89,7 @@ function prime() {
   vi.mocked(fetchScannerSignals).mockResolvedValue({
     signals: [
       { id: "b", symbol: "INFY", setup: "orb15", side: "long", status: "triggered", rr: 1, verdict: "AVOID", decision: "BLOCK" },
-      { id: "a", symbol: "HDFCBANK", setup: "flag", side: "long", status: "triggered", rr: 3, verdict: "GOOD", decision: "PASS", entry: 100, stop: 99, target: 102, qty: 10, histogram: { target: 70, stop: 20, open: 10 }, occurrences: [] },
+      { id: "a", symbol: "HDFCBANK", setup: "flag", side: "long", status: "triggered", rr: 3, verdict: "GOOD", decision: "PASS", entry: 100, stop: 99, target: 102, qty: 10, histogram: { target: 70, stop: 20, open: 10 }, occurrences: [], history_source: "pooled", fires: 12, win_rate: 0.5 },
     ],
   });
   vi.mocked(fetchScannerHeatmap).mockResolvedValue({
@@ -124,6 +127,8 @@ describe("Stock Scanner tab", () => {
     await user.click(hdfc!);
     expect(screen.getByTestId("scanner-chart")).toBeInTheDocument();
     expect(screen.getByTestId("scanner-histogram")).toBeInTheDocument();
+    expect(screen.getByTestId("scanner-signals")).toHaveTextContent("pooled");
+    expect(screen.getByText(/Past fires \(12\) pooled/)).toBeInTheDocument();
     expect(screen.getByTestId("scanner-heatmap")).toHaveTextContent("Financial Services");
   });
 
@@ -135,6 +140,9 @@ describe("Stock Scanner tab", () => {
     expect(saveScannerSettings).toHaveBeenCalledWith({ universe: "banknifty" });
     await user.click(screen.getByTestId("scanner-settings"));
     const trades = await screen.findByLabelText("Max trades");
+    expect(screen.getByLabelText("Max open positions")).toHaveValue(1);
+    expect(screen.getByLabelText("Slot 8 takes PASS signals")).toBeDisabled();
+    expect(screen.getByText("no completed replay for this code version")).toBeInTheDocument();
     await user.clear(trades);
     await user.type(trades, "4");
     await user.click(screen.getByRole("button", { name: "Save" }));

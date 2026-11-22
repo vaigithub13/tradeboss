@@ -82,6 +82,10 @@ class ScannerService:
         return load_settings(self.settings_path)
 
     def update_settings(self, raw: dict) -> ScannerSettings:
+        if raw.get("auto_trade") is True:
+            ready, reason = replay_gate(self.root)
+            if not ready:
+                raise ValueError(reason)
         current = self.settings().to_dict()
         current.update(raw)
         updated = ScannerSettings.from_dict(current)
@@ -226,15 +230,26 @@ class ScannerService:
 
     def replay(self, day: date, symbols: dict, sectors: dict, nifty: list, settings: ScannerSettings | None = None) -> dict:
         settings = settings or self.settings()
-        state = walk_day(
-            symbols,
-            sectors,
-            nifty,
-            day=day,
-            settings=settings,
-            proven=proven_pairs(self.rankings()),
-            source="replay",
-        )
+        try:
+            state = walk_day(
+                symbols,
+                sectors,
+                nifty,
+                day=day,
+                settings=settings,
+                proven=proven_pairs(self.rankings()),
+                source="replay",
+            )
+        except Exception as exc:
+            failed = {
+                "day": day.isoformat(),
+                "source": "replay",
+                "completed": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "code_version": _code_version(),
+            }
+            _write(self.root / "replay" / f"{day.isoformat()}.json", failed)
+            raise
         _write(self.root / "replay" / f"{day.isoformat()}.json", state)
         return state
 
@@ -380,6 +395,45 @@ def _minutes_until(now: datetime, hour: int, minute: int) -> int | None:
     if delta < 0:
         return 0
     return int(delta)
+
+
+def replay_gate(root: Path) -> tuple[bool, str]:
+    """Live auto-take may turn on only after a finished replay from this code version."""
+    folder = root / "replay"
+    if not folder.is_dir():
+        return False, "no completed replay for this code version"
+    version = _code_version()
+    saw_old = False
+    saw_error = False
+    saw_unfinished = False
+    for path in sorted(folder.glob("*.json")):
+        try:
+            body = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if body.get("error"):
+            saw_error = True
+            continue
+        if body.get("code_version") != version:
+            saw_old = True
+            continue
+        if not body.get("completed"):
+            saw_unfinished = True
+            continue
+        return True, ""
+    if saw_old:
+        return False, "replay was made with an older scanner"
+    if saw_error:
+        return False, "replay ended with an error"
+    if saw_unfinished:
+        return False, "replay did not finish"
+    return False, "no completed replay for this code version"
+
+
+def _code_version() -> str:
+    from app.scanner.version import SCANNER_CODE_VERSION
+
+    return SCANNER_CODE_VERSION
 
 
 def ranking_is_stale(path: Path, today: date) -> bool:

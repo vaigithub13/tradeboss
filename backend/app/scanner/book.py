@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import date
 
-from app.scanner.bars import LAST_BAR_MIN, Bar, minute_of
+from app.scanner.bars import ENTRY_CUTOFF_MIN, LAST_BAR_MIN, Bar, minute_of
 from app.scanner.config import ScannerSettings
 from app.scanner.costs import round_trip, slip_points
 from app.scanner.history import bar_exit
@@ -53,8 +53,13 @@ def take_signals(rows: list[dict], settings: ScannerSettings, state: dict) -> li
     for row in ranked:
         if len(state["trades"]) + len(state["open"]) >= settings.max_trades_per_day:
             break
+        if len(state["open"]) >= settings.max_open_positions:
+            break
         if float(state["net"]) <= -settings.daily_loss_limit:
             break
+        entry_time = row.get("entry_time")
+        if entry_time is not None and minute_of(int(entry_time)) >= ENTRY_CUTOFF_MIN:
+            continue
         if row["symbol"] in open_names:
             continue
         pos = open_position(row, day=date.fromisoformat(state["day"]))

@@ -55,6 +55,63 @@ def walk(bars_after: list[Bar], *, side: str, entry: float, stop: float, target:
     return "time", last_close, r
 
 
+def history_for(
+    symbol: str,
+    universe: dict[str, list[Bar]],
+    *,
+    setup: str,
+    up_to: date,
+    settings: ScannerSettings,
+    cache: dict | None = None,
+) -> tuple[HistoryResult, str]:
+    """Use this stock's fires. Under tm_min_fires, use every name in the universe for the same setup."""
+    own_key = ("own", symbol, setup, up_to.isoformat())
+    if cache is not None and own_key in cache:
+        own = cache[own_key]
+    else:
+        own = occurrences(universe.get(symbol, []), setup=setup, up_to=up_to, settings=settings)
+        if cache is not None:
+            cache[own_key] = own
+    if own.fires >= settings.tm_min_fires:
+        return own, "stock"
+    key = (setup, up_to.isoformat())
+    if cache is not None and key in cache:
+        return cache[key], "pooled"
+    parts: list[tuple[str, HistoryResult]] = []
+    for name, bars in universe.items():
+        if name == symbol:
+            parts.append((name, own))
+        else:
+            parts.append((name, occurrences(bars, setup=setup, up_to=up_to, settings=settings)))
+    combined = _merge(parts)
+    if cache is not None:
+        cache[key] = combined
+    return combined, "pooled"
+
+
+def _merge(parts: list[tuple[str, HistoryResult]]) -> HistoryResult:
+    rows: list[dict] = []
+    wins = losses = neither = 0
+    r_sum = 0.0
+    for name, part in parts:
+        wins += part.wins
+        losses += part.losses
+        neither += part.neither
+        r_sum += (part.avg_r or 0.0) * part.fires
+        for row in part.occurrences:
+            rows.append({**row, "symbol": name})
+    fires = wins + losses + neither
+    return HistoryResult(
+        fires=fires,
+        wins=wins,
+        losses=losses,
+        neither=neither,
+        win_rate=(wins / fires) if fires else None,
+        avg_r=(r_sum / fires) if fires else None,
+        occurrences=rows,
+    )
+
+
 def occurrences(
     bars: list[Bar],
     *,

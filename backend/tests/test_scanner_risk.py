@@ -33,18 +33,16 @@ def _plan(**overrides) -> Plan:
 
 
 def _reasons(**kwargs) -> list[str]:
-    result = assess(_plan(**kwargs.get("plan", {})), verdict=kwargs.get("verdict", "GOOD"), settings=SETTINGS, daily_loss=0, trades_today=0, open_symbols=set())
-    extra = {k: v for k, v in kwargs.items() if k not in ("plan", "verdict")}
-    if extra or "plan" in kwargs:
-        result = assess(
-            _plan(**kwargs.get("plan", {})),
-            verdict=kwargs.get("verdict", "GOOD"),
-            settings=SETTINGS,
-            daily_loss=kwargs.get("daily_loss", 0),
-            trades_today=kwargs.get("trades_today", 0),
-            open_symbols=kwargs.get("open_symbols", set()),
-            event_today=kwargs.get("event_today"),
-        )
+    result = assess(
+        _plan(**kwargs.get("plan", {})),
+        verdict=kwargs.get("verdict", "GOOD"),
+        settings=kwargs.get("settings", SETTINGS),
+        daily_loss=kwargs.get("daily_loss", 0),
+        trades_today=kwargs.get("trades_today", 0),
+        open_symbols=kwargs.get("open_symbols", set()),
+        open_count=kwargs.get("open_count", 0),
+        event_today=kwargs.get("event_today"),
+    )
     return list(result["reasons"])
 
 
@@ -64,6 +62,7 @@ def test_each_block_reason() -> None:
     assert late >= 14 * 60 + 30
     assert any("capital" in r for r in _reasons(plan={"capital": 60_000}))
     assert any("already" in r for r in _reasons(open_symbols={"RELIANCE"}))
+    assert any("max open positions" in r for r in _reasons(open_count=1))
     assert any("time machine" in r for r in _reasons(verdict="COIN_FLIP"))
     assert any("event" in r for r in _reasons(event_today=True))
 

@@ -5,12 +5,13 @@ Five-minute bars are resampled on read. This does not open a second websocket.
 
 from __future__ import annotations
 
+import sys
 from datetime import date, timedelta
 
 from app.config import settings
 from app.data.history import sync_symbol
 from app.scanner.config import load_settings
-from app.scanner.universe import resolve_universe
+from app.scanner.universe import UniverseStock, equity_table, resolve_names, resolve_universe
 from app.upstox.deps import make_client
 from app.upstox.instruments import Instrument, current_index
 
@@ -20,7 +21,11 @@ def main() -> None:
     index = current_index(settings.instruments_dir)
     if index is None:
         raise SystemExit("no instrument snapshot; run the morning snapshot first")
-    resolved, unresolved = resolve_universe(index, cfg.universe)
+    names = [arg.strip().upper() for arg in sys.argv[1:] if arg.strip()]
+    if names:
+        resolved, unresolved = resolve_names([UniverseStock(name, "") for name in names], equity_table(index))
+    else:
+        resolved, unresolved = resolve_universe(index, cfg.universe)
     for symbol in unresolved:
         print(f"WARN unmapped {symbol}")
     client = make_client()

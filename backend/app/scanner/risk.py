@@ -17,6 +17,7 @@ def assess(
     daily_loss: float,
     trades_today: int,
     open_symbols: set[str],
+    open_count: int = 0,
     event_today: bool | None = None,
 ) -> dict[str, object]:
     """`event_today` True blocks. None means we have no calendar, so the row says check news and still passes that check."""
@@ -41,6 +42,8 @@ def assess(
         reasons.append("capital above max capital per trade")
     if plan.symbol in open_symbols:
         reasons.append("same stock already in a trade")
+    if open_count >= settings.max_open_positions:
+        reasons.append("max open positions reached")
     if verdict != "GOOD":
         reasons.append(f"time machine {verdict or 'missing'}")
     news = CHECK_NEWS

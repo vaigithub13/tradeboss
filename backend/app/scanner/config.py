@@ -20,6 +20,7 @@ class ScannerSettings:
     max_loss_per_trade: float = 500
     daily_loss_limit: float = 1_500
     max_trades_per_day: int = 3
+    max_open_positions: int = 1
     max_capital_per_trade: float = 50_000
     min_rr: float = 2.0
     entry_mode: str = "trigger_close"  # trigger_close | next_open
@@ -33,7 +34,7 @@ class ScannerSettings:
     tm_min_fires: int = 8
     universe: str = "nifty50"
     only_proven: bool = False
-    auto_trade: bool = True
+    auto_trade: bool = False
     live_subscribe: bool = True
     slippage_ticks: float = 1.0
     tick_size: float = 0.05
@@ -56,6 +57,8 @@ class ScannerSettings:
             raise ValueError("tm_paths must be >= 1")
         if self.max_trades_per_day < 1:
             raise ValueError("max_trades_per_day must be >= 1")
+        if self.max_open_positions < 1:
+            raise ValueError("max_open_positions must be >= 1")
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

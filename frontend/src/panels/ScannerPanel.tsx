@@ -211,7 +211,10 @@ export function ScannerPanel() {
                   <td className="px-2 py-1">{row.rr == null ? "—" : row.rr.toFixed(2)}</td>
                   <td className="px-2 py-1">{n(row.target_pct, 1)}</td>
                   <td className="px-2 py-1">{n(row.stop_pct, 1)}</td>
-                  <td className="px-2 py-1">{row.win_rate == null ? "—" : `${Math.round(row.win_rate * 100)}%`}</td>
+                  <td className="px-2 py-1">
+                    {row.win_rate == null ? "—" : `${Math.round(row.win_rate * 100)}%`}
+                    {row.history_source === "pooled" ? " pooled" : ""}
+                  </td>
                   <td className={`px-2 py-1 ${verdictClass(row.verdict)}`}>{row.verdict ?? "—"}</td>
                   <td className={`px-2 py-1 ${decisionClass(row.decision)}`} title={(row.reasons || []).join(", ")}>
                     {row.decision ?? "—"}
@@ -248,7 +251,9 @@ export function ScannerPanel() {
               <p className="text-white/60">
                 Average result {inr(detail.avg_rupees)} · still open {n(detail.open_pct, 1)}%
               </p>
-              <h3 className="mt-3 font-medium">Past fires ({detail.fires ?? 0})</h3>
+              <h3 className="mt-3 font-medium">
+                Past fires ({detail.fires ?? 0}){detail.history_source === "pooled" ? " pooled" : ""}
+              </h3>
               <ul className="max-h-40 space-y-1 overflow-auto text-white/70">
                 {(detail.occurrences || []).slice(-12).map((item) => (
                   <li key={`${item.day}-${item.reason}`}>
@@ -421,6 +426,7 @@ function SettingsDrawer({
       <Field label="Max loss per trade ₹" value={draft.max_loss_per_trade} onChange={(v) => set({ max_loss_per_trade: v })} />
       <Field label="Daily loss limit ₹" value={draft.daily_loss_limit} onChange={(v) => set({ daily_loss_limit: v })} />
       <Field label="Max trades" value={draft.max_trades_per_day} onChange={(v) => set({ max_trades_per_day: v })} />
+      <Field label="Max open positions" value={draft.max_open_positions} onChange={(v) => set({ max_open_positions: v })} />
       <Field label="Max capital per trade ₹" value={draft.max_capital_per_trade} onChange={(v) => set({ max_capital_per_trade: v })} />
       <Field label="Min reward:risk" value={draft.min_rr} onChange={(v) => set({ min_rr: v })} />
       <Field label="Time Machine paths" value={draft.tm_paths} onChange={(v) => set({ tm_paths: v })} />
@@ -458,9 +464,15 @@ function SettingsDrawer({
         Only proven stock + setup pairs
       </label>
       <label className="mt-2 flex items-center gap-2">
-        <input type="checkbox" checked={draft.auto_trade} onChange={(e) => set({ auto_trade: e.target.checked })} />
+        <input
+          type="checkbox"
+          checked={draft.auto_trade}
+          disabled={!draft.replay_ready}
+          onChange={(e) => set({ auto_trade: e.target.checked })}
+        />
         Slot 8 takes PASS signals
       </label>
+      {!draft.replay_ready && draft.replay_reason ? <p className="mt-1 text-amber-200">{draft.replay_reason}</p> : null}
       <div className="mt-3 space-y-1">
         {Object.entries(draft.setups).map(([name, on]) => (
           <label key={name} className="flex items-center gap-2">

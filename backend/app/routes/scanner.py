@@ -36,6 +36,7 @@ class SettingsIn(BaseModel):
     max_loss_per_trade: float | None = None
     daily_loss_limit: float | None = None
     max_trades_per_day: int | None = None
+    max_open_positions: int | None = None
     max_capital_per_trade: float | None = None
     min_rr: float | None = None
     entry_mode: str | None = None
@@ -92,17 +93,17 @@ def heatmap(request: Request) -> dict[str, Any]:
 
 @router.get("/settings")
 def read_settings(request: Request) -> dict[str, Any]:
-    return get_service(request).settings().to_dict()
+    return _settings_body(get_service(request))
 
 
 @router.put("/settings")
 def write_settings(body: SettingsIn, request: Request) -> dict[str, Any]:
     raw = {k: v for k, v in body.model_dump().items() if v is not None}
     try:
-        updated = get_service(request).update_settings(raw)
+        get_service(request).update_settings(raw)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    return updated.to_dict()
+    return _settings_body(get_service(request))
 
 
 @router.get("/universes")
@@ -139,6 +140,16 @@ async def replay(body: ReplayIn, request: Request) -> dict[str, Any]:
 @router.get("/rankings")
 def rankings(request: Request) -> dict[str, Any]:
     return get_service(request).rankings() or {"as_of": None, "pairs": []}
+
+
+def _settings_body(svc: ScannerService) -> dict[str, Any]:
+    from app.scanner.service import replay_gate
+
+    body = svc.settings().to_dict()
+    ready, reason = replay_gate(svc.root)
+    body["replay_ready"] = ready
+    body["replay_reason"] = reason
+    return body
 
 
 def _replay(svc: ScannerService, body: ReplayIn) -> dict[str, Any]:

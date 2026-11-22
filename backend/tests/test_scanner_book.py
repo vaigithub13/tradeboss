@@ -49,6 +49,26 @@ def _pass_row(symbol: str, edge: float) -> dict:
     }
 
 
+def test_one_open_slot_then_the_next_name_after_the_exit() -> None:
+    state = _state()
+    settings = ScannerSettings(max_open_positions=1, max_trades_per_day=3, auto_trade=True)
+    best = _pass_row("TCS", 20)
+    second = _pass_row("INFY", 5)
+    too_late = _pass_row("SBIN", 40)
+    too_late["entry_time"] = at(DAY, 14, 30)
+    rows = [best, second, too_late]
+    state["signals"] = rows
+    taken = take_signals(rows, settings, state)
+    assert [row["symbol"] for row in taken] == ["TCS"]
+    assert len(state["open"]) == 1
+    closed = on_bar(state, "TCS", bar(DAY, 10, 0, 100.2, 102.2, 100.1, 102.0, 1000), settings)
+    assert closed[0]["exit_reason"] == "target"
+    assert state["open"] == []
+    nxt = take_signals(rows, settings, state)
+    assert [row["symbol"] for row in nxt] == ["INFY"]
+    assert state["open"][0]["symbol"] == "INFY"
+
+
 def test_book_takes_the_better_edge_and_stops_at_the_daily_max() -> None:
     state = _state()
     settings = ScannerSettings(max_trades_per_day=1, auto_trade=True)
@@ -63,7 +83,7 @@ def test_book_takes_the_better_edge_and_stops_at_the_daily_max() -> None:
 
 
 def test_target_stop_time_and_trail() -> None:
-    settings = ScannerSettings(trail_breakeven=False)
+    settings = ScannerSettings(trail_breakeven=False, auto_trade=True)
     state = _state()
     state["signals"] = [_pass_row("INFY", 10)]
     take_signals(state["signals"], settings, state)
@@ -80,7 +100,7 @@ def test_target_stop_time_and_trail() -> None:
     stop_bar = bar(DAY, 10, 0, 99.8, 99.9, 98.5, 99.0, 1000)
     assert on_bar(state, "TCS", stop_bar, settings)[0]["exit_reason"] == "stop"
 
-    trail = ScannerSettings(trail_breakeven=True)
+    trail = ScannerSettings(trail_breakeven=True, auto_trade=True)
     state = _state()
     state["signals"] = [_pass_row("SBIN", 10)]
     take_signals(state["signals"], trail, state)
@@ -90,6 +110,42 @@ def test_target_stop_time_and_trail() -> None:
     closed = on_bar(state, "SBIN", bar(DAY, 10, 5, 100.4, 100.5, 99.9, 100.1, 1000), trail)
     assert closed[0]["exit_reason"] == "stop"
     assert closed[0]["r"] == 0
+
+
+def test_auto_take_stays_off_until_a_current_replay_exists(tmp_path: Path) -> None:
+    from app.scanner.service import replay_gate
+    from app.scanner.version import SCANNER_CODE_VERSION
+
+    assert ScannerSettings().auto_trade is False
+    service = ScannerService(tmp_path)
+    assert service.settings().auto_trade is False
+    ready, reason = replay_gate(tmp_path)
+    assert ready is False
+    assert reason
+    try:
+        service.update_settings({"auto_trade": True})
+        raise AssertionError("auto-take turned on with no replay")
+    except ValueError as exc:
+        assert reason in str(exc) or str(exc)
+    old = {
+        "source": "replay",
+        "completed": True,
+        "error": None,
+        "code_version": "stale",
+        "reported": True,
+    }
+    (tmp_path / "replay").mkdir()
+    (tmp_path / "replay" / "2026-01-05.json").write_text(__import__("json").dumps(old), encoding="utf-8")
+    ready, reason = replay_gate(tmp_path)
+    assert ready is False
+    assert "older" in reason
+    current = dict(old, code_version=SCANNER_CODE_VERSION)
+    (tmp_path / "replay" / "2026-01-06.json").write_text(__import__("json").dumps(current), encoding="utf-8")
+    ready, reason = replay_gate(tmp_path)
+    assert ready is True
+    assert reason == ""
+    updated = service.update_settings({"auto_trade": True})
+    assert updated.auto_trade is True
 
 
 def test_replay_day_finishes_and_stays_out_of_the_live_book(tmp_path: Path) -> None:
