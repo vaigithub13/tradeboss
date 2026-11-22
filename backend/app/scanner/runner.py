@@ -136,7 +136,7 @@ def evaluate_symbol(
             "range_high": hit.range_high,
             "range_low": hit.range_low,
             "trigger_time": hit.time,
-            "forming": hit.forming,
+            "forming": False if plan.status == "expired" else hit.forming,
             "folder": folder or symbol,
             "proven": proven is not None and (symbol, hit.setup) in proven,
             "target_pct": None,
@@ -321,6 +321,18 @@ def _mark_closed(state: dict[str, Any], trades: list[dict]) -> None:
         row["r"] = trade["r"]
 
 
+_TRADE_STATUSES = {"triggered", "in_trade", "target", "stop", "time_exit"}
+
+
+def expire_untriggered(state: dict[str, Any]) -> None:
+    """A signal that never triggered by 14:30 is expired. It is not left forming."""
+    for row in state.get("signals") or []:
+        if row.get("status") in _TRADE_STATUSES:
+            continue
+        row["status"] = "expired"
+        row["forming"] = False
+
+
 def note_alerts(state: dict[str, Any], rows: list[dict[str, Any]], trades: list[dict]) -> None:
     seen = {a["id"] for a in state["alerts"]}
     for row in rows:
@@ -418,6 +430,7 @@ def walk_day(
         if today:
             last_prices[symbol] = (float(today[-1]["close"]), int(today[-1]["time"]))
     closed = flatten(state, last_prices, settings)
+    expire_untriggered(state)
     _mark_closed(state, closed)
     note_alerts(state, [], closed)
     if not state["cutoff_sent"]:

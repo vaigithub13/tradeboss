@@ -148,6 +148,35 @@ def test_auto_take_stays_off_until_a_current_replay_exists(tmp_path: Path) -> No
     assert updated.auto_trade is True
 
 
+def _inside_range_day(day: date) -> list[dict]:
+    """A valid opening range that never breaks, so the signal stays untriggered."""
+    bars = [
+        bar(day, 9, 15, 100.2, 101.0, 100.0, 100.4, 1000),
+        bar(day, 9, 20, 100.4, 100.8, 100.1, 100.5, 1000),
+    ]
+    hour, minute = 9, 30
+    while (hour, minute) <= (15, 10):
+        bars.append(bar(day, hour, minute, 100.4, 100.7, 100.2, 100.5, 1000))
+        minute += 5
+        if minute >= 60:
+            hour += 1
+            minute -= 60
+    return bars
+
+
+def test_untriggered_signal_is_expired_at_1430_not_forming() -> None:
+    from app.scanner.config import SETUP_IDS
+
+    day = date(2026, 1, 6)
+    settings = ScannerSettings(setups={name: name == "orb15" for name in SETUP_IDS}, auto_trade=False, tm_paths=5)
+    state = walk_day({"FLAT": _inside_range_day(day)}, {"FLAT": "Test"}, [], day=day, settings=settings)
+    rows = [row for row in state["signals"] if row["symbol"] == "FLAT"]
+    assert rows
+    assert all(row["status"] == "expired" for row in rows)
+    assert all(row["forming"] is False for row in rows)
+    assert all(row["status"] != "waiting" for row in rows)
+
+
 def test_replay_day_finishes_and_stays_out_of_the_live_book(tmp_path: Path) -> None:
     settings = ScannerSettings(tm_paths=40, tm_seed=20261123, max_trades_per_day=3, auto_trade=True)
     symbols = {"INFY": _trend_tape()}

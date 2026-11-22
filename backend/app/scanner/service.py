@@ -16,6 +16,7 @@ from app.scanner.config import ScannerSettings, load_settings, save_settings
 from app.scanner.runner import (
     apply_until,
     build_report,
+    expire_untriggered,
     fresh_state,
     merge_signals,
     note_alerts,
@@ -214,6 +215,7 @@ class ScannerService:
         state = self._load_state(now.date())
         if state.get("cutoff_sent"):
             return
+        expire_untriggered(state)
         state["alerts"].append({"id": f"cutoff:{state['day']}", "kind": "cutoff", "message": cutoff_message()})
         state["cutoff_sent"] = True
         self._save_state(state)
