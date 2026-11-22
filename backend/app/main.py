@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import threading
@@ -25,6 +26,7 @@ from app.routes.market_view import router as market_view_router
 from app.routes.options import router as options_router
 from app.routes.paper import router as paper_router
 from app.routes.pine import router as pine_router
+from app.routes.scanner import router as scanner_router
 from app.routes.upstox import router as upstox_router
 from app.upstox.instruments import snapshot_due, take_bse_snapshot, take_snapshot
 
@@ -74,6 +76,23 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
         gex = build_scheduler()
         await gex.start()
+    scanner_task = None
+    from app.routes.candles import get_store
+    from app.scanner.service import ScannerService, kickoff_rank_if_stale, scanner_loop, scheduler_wanted
+
+    if getattr(_app.state, "scanner", None) is None:
+        _app.state.scanner = ScannerService(
+            settings.data_dir / "scanner",
+            store=get_store(),
+            instruments_dir=settings.instruments_dir,
+        )
+    if live is not None and getattr(live, "scanner_key_source", None) is None:
+        from app.scanner.service import scanner_live_keys
+
+        live.scanner_key_source = scanner_live_keys
+    if scheduler_wanted():
+        scanner_task = asyncio.create_task(scanner_loop(_app.state.scanner))
+        kickoff_rank_if_stale(_app.state.scanner)
     options_rec = None
     if settings.options_recorder_enabled and settings.upstox_token_value() is not None:
         from app.options.chain_scheduler import build_scheduler as build_options_scheduler
@@ -83,6 +102,14 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
+        if scanner_task is not None:
+            scanner_task.cancel()
+            try:
+                await scanner_task
+            except asyncio.CancelledError:
+                pass
+            except Exception:
+                pass
         if options_rec is not None:
             await options_rec.stop()
         if gex is not None:
@@ -106,6 +133,7 @@ app.include_router(market_view_router)
 app.include_router(upstox_router)
 app.include_router(live_router)
 app.include_router(paper_router)
+app.include_router(scanner_router)
 app.include_router(pine_router)
 app.include_router(ai_router)
 app.add_middleware(

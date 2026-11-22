@@ -44,7 +44,7 @@ from app.upstox.redact import redact
 log = logging.getLogger("tradeboss.live.connection")
 
 AUTHORIZE_URL = "https://api.upstox.com/v3/feed/market-data-feed/authorize"
-MAX_KEYS = 100  # far below Upstox's 1500 combined full-mode keys; we only need a handful
+MAX_KEYS = 160  # chart + options + a Nifty 50 scanner book; still far below Upstox's 1500 full-mode keys
 
 State = Literal["off", "connecting", "live", "reconnecting", "auth_failed", "closed", "locked_elsewhere", "disabled"]
 

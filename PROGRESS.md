@@ -2257,3 +2257,15 @@ Research data only: no live subs, no UI, no paper slots, no engine changes. Back
   Split-jump flags: ADANIENT (4, Feb 2023) · INDUSINDBK (1, Mar 2025) — no matching CA in feed.
 - Tests: `tests/test_research_universe.py` + client CA GET; full suites green
   (1801+1 skip backend · 476 frontend).
+
+## 23 Nov 2026 — Stock Scanner tab (slot 8 paper book)
+
+Paper only. No order route. Slots 1–7, GEX, the option chain, and the Sensex panel are unchanged. `LIVE_TRADING` stays false. `data/` and `.env` are not committed.
+
+- **Universe** `backend/app/scanner/universes.json` (`as_of` 2026-11-21): Nifty 50 (50) and Nifty Bank (14), with sector. Unmapped names are skipped and shown. History is the existing 1-minute store (`scripts/scanner_backfill.py`, last ~90 calendar days). Five-minute bars are resampled at read time.
+- **Setups** (switchable): ORB 15, flag, RSI 25/75, VWAP reclaim/reject, gap-and-go, gap-fill. Shared reject at or after 14:30 IST or reward:risk under 2. Context columns: day %, VWAP distance, relative volume, vs Nifty.
+- **Plan and risk:** quantity from ₹500 max loss and ₹50,000 capital. Time Machine is 10,000 paths, seed `20261123`, GOOD / COIN FLIP / AVOID. Missing news is a warning, not a block. Slot 8 takes PASS signals and manages stop, target, break-even, and the 15:15 flat. Replay stays under `data/scanner/replay/`.
+- **Feed:** scanner equity keys are appended after the chart (12) and options (40). `MAX_KEYS` is 160 so a full socket drops stocks before held options. One websocket.
+- **Rank:** `python -m scripts.scanner_rank`. `scripts/launchd/install-scanner-rank.sh` schedules Saturday 10:00 IST and does not start uvicorn. A stale `rankings/latest.json` also refreshes on the next backend start outside pytest.
+- **UI:** Stock Scanner tab hides the Nifty chart the same way the other desks do. Detail chart is its own small 5-minute view.
+- Tests: `tests/test_scanner_*.py` (55 with the key-cap checks) and frontend tab, sort, and settings tests.

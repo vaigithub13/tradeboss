@@ -6,6 +6,7 @@ from collections.abc import Iterable
 
 CHART_CAP = 12
 OPTION_CAP = 40  # far below Upstox's 1500 combined full-mode keys per user; still one connection
+SCANNER_CAP = 60  # Nifty 50 plus a little room; appended after options so a full list drops stocks first
 
 
 def _segment_rank(key: str) -> int:
@@ -27,17 +28,31 @@ def order_option_keys(held: Iterable[str], atm: Iterable[str], spread: Iterable[
     return list(dict.fromkeys([*_sorted_keys(held), *_sorted_keys(atm), *spread]))
 
 
-def compose_keys(chart: list[str], options: list[str], *, enabled: bool) -> list[str]:
+def compose_keys(
+    chart: list[str],
+    options: list[str],
+    *,
+    enabled: bool,
+    scanner: list[str] | None = None,
+) -> list[str]:
+    """Chart keys, then option keys, then scanner equity keys. An omitted scanner list keeps the old result."""
     base = list(dict.fromkeys(chart))[:CHART_CAP]
-    if not enabled:
-        return base
     seen = set(base)
     extra: list[str] = []
-    for key in options:
+    if enabled:
+        for key in options:
+            if key in seen:
+                continue
+            extra.append(key)
+            seen.add(key)
+            if len(extra) >= OPTION_CAP:
+                break
+    scan_extra: list[str] = []
+    for key in scanner or []:
         if key in seen:
             continue
-        extra.append(key)
+        scan_extra.append(key)
         seen.add(key)
-        if len(extra) >= OPTION_CAP:
+        if len(scan_extra) >= SCANNER_CAP:
             break
-    return base + extra
+    return base + extra + scan_extra

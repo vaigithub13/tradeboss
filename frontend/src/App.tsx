@@ -45,6 +45,8 @@ import { viewLevels } from "./marketView/present";
 import { gexLevels, gexSummary } from "./chart/gex";
 import { OptionsTab } from "./options/OptionsTab";
 import { SensexPanel } from "./panels/SensexPanel";
+import { ScannerPanel } from "./panels/ScannerPanel";
+import { useScannerAlerts } from "./scanner/useAlerts";
 import { ChartScopeProvider, NIFTY_SCOPE } from "./store/chartScope";
 import { useSensexChartStore } from "./store/chartStore";
 import { useSensexIndicatorStore } from "./store/indicatorStore";
@@ -68,7 +70,7 @@ const STATUS_UI: Record<BackendStatus, { label: string; dot: string; text: strin
 export default function App() {
   const [mainView, setMainView] = useState<MainView>(() => {
     const saved = readJson<string>(PAPER_TAB_KEY, "chart");
-    return saved === "options" || saved === "paper" || saved === "chart" || saved === "sensex" ? saved : "chart";
+    return saved === "options" || saved === "paper" || saved === "chart" || saved === "sensex" || saved === "scanner" ? saved : "chart";
   });
   const setView = useCallback((view: MainView) => {
     setMainView(view);
@@ -220,6 +222,7 @@ export default function App() {
   const replayCursorTime = useReplayStore((s) => s.cursor);
   useReplayClock();
   usePaperAlerts();
+  useScannerAlerts();
   usePineLiveHost();
   const setPanelOpen = useBacktestStore((s) => s.setPanelOpen);
   const [pineOpen, setPineOpen] = useState(false);
@@ -369,6 +372,16 @@ export default function App() {
           >
             SENSEX
           </button>
+          <button
+            type="button"
+            className={`rounded px-2.5 py-1 text-xs ${
+              mainView === "scanner" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
+            }`}
+            onClick={() => setView("scanner")}
+            data-testid="tab-scanner"
+          >
+            Stock Scanner
+          </button>
         </div>
         {mainView === "chart" ? (
           <>
@@ -452,6 +465,8 @@ export default function App() {
           <span className="text-xs text-white/45">Nifty option chain</span>
         ) : mainView === "sensex" ? (
           <span className="text-xs text-white/45">Sensex chart</span>
+        ) : mainView === "scanner" ? (
+          <span className="text-xs text-white/45">Stock scanner</span>
         ) : (
           <span className="text-xs text-white/45">Paper forward-test desk</span>
         )}
@@ -589,6 +604,13 @@ export default function App() {
       {mainView === "options" && (
         <div className="absolute inset-0" data-testid="options-pane">
           <OptionsTab />
+        </div>
+      )}
+      {mainView === "scanner" && (
+        <div className="absolute inset-0 bg-[#070a0f]" data-testid="scanner-pane-wrap">
+          <SectionBoundary name="Stock scanner">
+            <ScannerPanel />
+          </SectionBoundary>
         </div>
       )}
       {mainView === "paper" && (

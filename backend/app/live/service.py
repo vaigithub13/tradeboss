@@ -683,15 +683,27 @@ class LiveService:
         chart = self._chart_keys()
         spread = self._spread_session().keys() if self.cfg.spread_recorder_enabled else []
         options = order_option_keys(self.paper.held_keys(), self.paper.atm_keys(), spread)
-        if not options:
+        scanner = self._scanner_keys()
+        if not options and not scanner:
             return chart
-        keys = compose_keys(chart, options, enabled=True)
+        keys = compose_keys(chart, options, enabled=bool(options), scanner=scanner)
         taken = set(keys)
         refused = tuple(k for k in options if k not in taken)
         if refused and refused != self._refused_logged:
             log.warning("option cap refused %d option keys: %s", len(refused), ", ".join(refused))
         self._refused_logged = refused
         return keys
+
+    def _scanner_keys(self) -> list[str]:
+        """Stocks for the scanner. Missing source means the options desk is unchanged."""
+        fn = getattr(self, "scanner_key_source", None)
+        if fn is None:
+            return []
+        try:
+            return [str(key) for key in fn()]
+        except Exception:
+            log.exception("scanner keys")
+            return []
 
     def _spread_session(self):
         if self._spreads is None:
@@ -807,4 +819,8 @@ def build_service() -> LiveService:
         option_history_dir=settings.data_dir / "option_history",
     )
     enabled = settings.live_feed_enabled and settings.upstox_token_value() is not None
-    return LiveService(cfg, get_store(), client_factory=make_client, enabled=enabled)
+    service = LiveService(cfg, get_store(), client_factory=make_client, enabled=enabled)
+    from app.scanner.service import scanner_live_keys
+
+    service.scanner_key_source = scanner_live_keys
+    return service
