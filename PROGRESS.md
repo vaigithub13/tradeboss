@@ -2284,9 +2284,10 @@ Slot 8 and auto-take were not touched. `LIVE_TRADING` stays false. The holdout w
 
 ## 23 Nov 2026 — Expiry Straddle 0920 (paper slot 9)
 
-Paper only. Slots 1–8 are unchanged. `LIVE_TRADING` stays false. The Paper panel is unchanged.
+Paper only. Slots 1–8 are unchanged. `LIVE_TRADING` stays false.
 
 - Slot 9 runs `ExpiryStraddle`. Daily auto-start posts it at 09:16 with slots 1–7. `is_expiry` comes from the default calendar. Size is one lot from `lot_sizes.json`. A day that is not a Nifty weekly expiry is saved as `no_trade` and subscribes to nothing.
 - On an expiry day, 09:20–09:21:59 takes the Nifty spot, picks the ATM strike, resolves that week's CE and PE from the instrument master, and subscribes both on the existing feed (held tier, one connection). Each tick of those keys updates the leg. At 15:15 the open legs are bought back at the last LTP, retried each minute until the book is `done`. A clock after 09:21:59 with no entry is `missed_entry`.
 - The day file is `data/paper/slot9/<day>.json` (the book's `to_dict()`). A restart loads it with `from_dict`.
 - Tests: `tests/test_expiry_straddle_slot.py` (fake feed, no socket) and `tests/test_expiry_straddle.py`.
+- The Paper side panel shows slot 9 on its own card: book status, spot, strike, each leg, net / gross / charges from `summary(app_cost_fn(day))`, and that ISO week's totals. Research line: build PF 1.60, validate PF 2.20, forward PF 2.80. Slots 1–8 stay on their own cards.

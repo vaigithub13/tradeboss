@@ -37,11 +37,34 @@ export interface PaperStatus {
   source?: "live" | "replay";
   /** who started the slot: launchd paper_autostart, or the Paper panel */
   start_source?: "auto" | "hand" | null;
+  /** slot 9 only: the expiry straddle book the paper panel draws */
+  book_status?: string | null;
+  book?: ExpiryBookView | null;
+}
+
+export interface ExpiryLegView {
+  kind: string;
+  entry: number;
+  stop: number;
+  exit: number | null;
+  reason: string | null;
+  entry_ms: number;
+  exit_ms: number | null;
+}
+
+export interface ExpiryBookView {
+  status: "waiting" | "open" | "done" | "no_trade" | "missed_entry" | string;
+  spot_at_entry: number | null;
+  strike: number | null;
+  legs: ExpiryLegView[];
+  gross: number;
+  costs: number;
+  net: number;
 }
 
 export interface PaperWeek {
   week: string;
-  totals: { trades: number; net: number; shadow_net?: number; shadow_diff?: number };
+  totals: { trades: number; net: number; gross?: number; costs?: number; shadow_net?: number; shadow_diff?: number };
   exits: ExitCounts;
   excluded: string[];
 }

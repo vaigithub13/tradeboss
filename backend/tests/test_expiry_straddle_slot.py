@@ -13,6 +13,7 @@ from app.backtest.expiry import load_default_calendar
 from app.backtest.lots import load_default_lot_table, lot_size_for_contract
 from app.paper.desk import SLOTS, PaperDesk
 from app.paper.expiry_slot import ExpiryStraddleSlot
+from app.paper.expiry_straddle import app_cost_fn
 from app.paper.live import AlreadyRunning, PaperRunner
 from app.routes.paper import router as paper_router
 from app.upstox.instruments import NIFTY_INDEX_KEY, Instrument, InstrumentIndex
@@ -106,6 +107,13 @@ def test_entry_subscribes_both_keys_on_one_feed_then_a_restart_keeps_the_book(tm
     assert again.book.status == "done"
     done = json.loads((tmp_path / "slot9" / f"{day.isoformat()}.json").read_text())
     assert done["status"] == "done"
+    view = again.status_body()["book"]
+    assert view["spot_at_entry"] == 25010.0 and view["strike"] == 25000
+    assert [(leg["kind"], leg["reason"]) for leg in view["legs"]] == [("CE", "stop"), ("PE", "time")]
+    summary = again.book.summary(app_cost_fn(day.isoformat()))
+    assert view["net"] == summary["net_rs"] and view["gross"] == summary["gross_rs"] and view["costs"] == summary["costs_rs"]
+    week = again.weekly_summary(day)
+    assert week["totals"]["trades"] == 1 and week["totals"]["net"] == summary["net_rs"]
 
 
 def test_a_late_start_is_missed_and_a_second_start_is_refused(tmp_path) -> None:
@@ -157,6 +165,12 @@ def test_autostart_can_post_slot_nine(tmp_path) -> None:
     started = client.post("/api/paper/start", json={"slot": "9", "strategy": "expiry_straddle", "params": {}})
     assert started.status_code == 200
     assert started.json()["slot"] == "9" and started.json()["book_status"] == "no_trade"
+    assert started.json()["book"]["status"] == "no_trade"
+    assert started.json()["book"]["legs"] == []
+    assert started.json()["book"]["net"] == 0 and started.json()["book"]["costs"] == 0
+    week = client.get(f"/api/paper/week?slot=9&day={day.isoformat()}")
+    assert week.status_code == 200
+    assert week.json()["totals"]["net"] == 0 and week.json()["totals"]["trades"] == 0
     again = client.post("/api/paper/start", json={"slot": "9", "strategy": "expiry_straddle", "params": {}})
     assert again.status_code == 409 and "already" in again.json()["detail"].lower()
     listed = client.get("/api/paper/status").json()["slots"]

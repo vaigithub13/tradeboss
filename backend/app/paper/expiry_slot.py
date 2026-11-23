@@ -7,19 +7,44 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from app.backtest.expiry import load_default_calendar
 from app.backtest.lots import lot_size_for_contract, load_default_lot_table
 from app.live.model import ist_ms_of_day
-from app.paper.expiry_straddle import EXIT_MS, ExpiryStraddle
+from app.paper.expiry_straddle import EXIT_MS, ExpiryStraddle, app_cost_fn
 from app.paper.live import AlreadyRunning, PaperError
 from app.upstox.instruments import NIFTY_INDEX_KEY, InstrumentIndex
 
 NAME = "Expiry Straddle 0920"
 LOTS = 1
+
+
+def _book_view(book: ExpiryStraddle) -> dict[str, Any]:
+    """What the paper panel shows. Charges are summary(app_cost_fn(day))."""
+    summary = book.summary(app_cost_fn(book.day))
+    return {
+        "status": book.status,
+        "spot_at_entry": book.spot_at_entry,
+        "strike": book.legs[0].strike if book.legs else None,
+        "legs": [
+            {
+                "kind": leg.kind,
+                "entry": leg.entry,
+                "stop": leg.stop,
+                "exit": leg.exit,
+                "reason": leg.reason,
+                "entry_ms": leg.entry_ms,
+                "exit_ms": leg.exit_ms,
+            }
+            for leg in book.legs
+        ],
+        "gross": summary["gross_rs"],
+        "costs": summary["costs_rs"],
+        "net": summary["net_rs"],
+    }
 
 
 def nifty_weekly_keys(index: InstrumentIndex, expiry: date, strike: int) -> dict[str, str]:
@@ -126,8 +151,36 @@ class ExpiryStraddleSlot:
             "strategy": self.STRATEGY,
             "day": None if book is None else book.day,
             "book_status": None if book is None else book.status,
+            "book": None if book is None else _book_view(book),
             "last_bar_ms": now_ms or None,
         }
+
+    def weekly_summary(self, any_day: date) -> dict[str, Any]:
+        """ISO week of saved slot-9 files, same shape the other slots' week route returns."""
+        monday = any_day - timedelta(days=any_day.weekday())
+        days: list[dict[str, Any]] = []
+        for offset in range(7):
+            d = monday + timedelta(days=offset)
+            loaded = self._read(d)
+            if loaded is None:
+                continue
+            view = _book_view(ExpiryStraddle.from_dict(loaded))
+            days.append({
+                "date": d.isoformat(),
+                "status": view["status"],
+                "trades": 1 if view["status"] == "done" else 0,
+                "net": view["net"],
+                "gross": view["gross"],
+                "costs": view["costs"],
+            })
+        totals = {
+            "trades": sum(row["trades"] for row in days),
+            "net": round(sum(row["net"] for row in days), 2),
+            "gross": round(sum(row["gross"] for row in days), 2),
+            "costs": round(sum(row["costs"] for row in days), 2),
+        }
+        year, week, _ = any_day.isocalendar()
+        return {"week": f"{year}-W{week:02d}", "days": days, "totals": totals, "exits": {}, "excluded": []}
 
     def _fresh(self, day: date) -> ExpiryStraddle:
         calendar = load_default_calendar()

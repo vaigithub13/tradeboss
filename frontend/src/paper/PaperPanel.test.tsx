@@ -70,6 +70,7 @@ describe("PaperPanel compact", () => {
     expect(container.textContent).not.toMatch(/params JSON|Test entry sound|resting-orders/i);
     expect(screen.getByTestId("live-position")).toHaveTextContent("CE");
     expect(screen.getByTestId("live-position")).toHaveTextContent("25200");
+    expect(screen.getByTestId("expiry-straddle-note")).toHaveTextContent("Research: build PF 1.60, validate PF 2.20, forward PF 2.80");
   });
 
   it("opens dashboard via callback", async () => {

@@ -175,6 +175,11 @@ async def trades(request: Request, slot: str | None = Query(None), from_day: dat
 @router.get("/week")
 async def week(request: Request, day: date = Query(...), slot: str = Query("1")) -> dict[str, Any]:
     svc = _service(request)
+    if slot == "9":
+        book = getattr(svc, "expiry_slot", None)
+        if book is None:
+            raise HTTPException(status_code=400, detail="unknown slot '9'")
+        return book.weekly_summary(day)
     return weekly_summary(_runner(svc, slot).directory, day)
 
 

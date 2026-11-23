@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import { ACTIVE_PAPER_SLOTS } from "../paper/slots";
 import { CompactLiveCard } from "../paper/CompactLiveCard";
+import { ExpiryStraddleCard } from "../paper/ExpiryStraddleCard";
 import { todaySummaryFromSlots } from "../paper/dashboard";
 import { formatRupees, SLOT_DEFAULTS, startParams } from "../paper/present";
 import { playAlertSound, unlockAudio } from "../paper/sounds";
@@ -25,6 +26,11 @@ export function PaperPanel({ onOpenDashboard }: { onOpenDashboard?: () => void }
 
   const summary = useMemo(
     () => todaySummaryFromSlots(status?.slots?.filter((s) => ACTIVE_PAPER_SLOTS.includes(s.slot as never)) ?? []),
+    [status],
+  );
+
+  const expiry = useMemo(
+    () => (status?.slots ?? []).find((s) => s.slot === "9") ?? null,
     [status],
   );
 
@@ -104,6 +110,7 @@ export function PaperPanel({ onOpenDashboard }: { onOpenDashboard?: () => void }
         {ACTIVE_PAPER_SLOTS.map((slot, i) => (
           <CompactLiveCard key={slot} slot={slot} status={activeStatuses[i] ?? null} />
         ))}
+        <ExpiryStraddleCard status={expiry} />
       </div>
 
       <button
