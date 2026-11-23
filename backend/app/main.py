@@ -90,8 +90,21 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         from app.scanner.service import scanner_live_keys
 
         live.scanner_key_source = scanner_live_keys
+    lag_task = None
     if scheduler_wanted():
+        from app.runtime.lag import loop_lag_probe
+
+        loop = asyncio.get_running_loop()
+
+        def _notify_scan() -> None:
+            hub = getattr(live, "hub", None) if live is not None else None
+            if hub is None:
+                return
+            loop.call_soon_threadsafe(lambda: asyncio.create_task(hub.broadcast_event({"type": "scanner", "event": "scan"})))
+
+        _app.state.scanner.on_scan_done = _notify_scan
         scanner_task = asyncio.create_task(scanner_loop(_app.state.scanner))
+        lag_task = asyncio.create_task(loop_lag_probe())
         kickoff_rank_if_stale(_app.state.scanner)
     options_rec = None
     if settings.options_recorder_enabled and settings.upstox_token_value() is not None:
@@ -102,10 +115,12 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        if scanner_task is not None:
-            scanner_task.cancel()
+        for task in (scanner_task, lag_task):
+            if task is None:
+                continue
+            task.cancel()
             try:
-                await scanner_task
+                await task
             except asyncio.CancelledError:
                 pass
             except Exception:

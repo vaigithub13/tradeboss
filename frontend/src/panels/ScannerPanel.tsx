@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
-  fetchScannerHeatmap,
-  fetchScannerReport,
   fetchScannerSettings,
-  fetchScannerSignals,
-  fetchScannerStatus,
-  fetchScannerTrades,
-  fetchRankings,
-  fetchUniverses,
+  fetchScannerSnapshot,
   saveScannerSettings,
   scanNow,
   type HeatRow,
@@ -18,6 +12,7 @@ import {
   type ScannerStatus,
   type ScannerTrade,
 } from "../api/scanner";
+import { noteScannerAlerts } from "../scanner/useAlerts";
 import { ScannerChart } from "../scanner/ScannerChart";
 import { decisionClass, sortRows, verdictClass } from "../scanner/sort";
 import { enableScannerSound } from "../scanner/useAlerts";
@@ -68,23 +63,17 @@ export function ScannerPanel() {
   const [busy, setBusy] = useState(false);
 
   const load = useCallback(async (signal?: AbortSignal) => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
     try {
-      const [st, sig, hm, tr, rep, univ, rank] = await Promise.all([
-        fetchScannerStatus(signal),
-        fetchScannerSignals(signal),
-        fetchScannerHeatmap(signal),
-        fetchScannerTrades(signal),
-        fetchScannerReport(signal),
-        fetchUniverses(signal),
-        fetchRankings(signal),
-      ]);
-      setStatus(st);
-      setSignals(sig.signals);
-      setHeat(hm.rows);
-      setTrades(tr.trades);
-      setRankings(rank.pairs || []);
-      setReport(rep.report);
-      setUniverses(Object.fromEntries(Object.entries(univ.universes).map(([id, body]) => [id, { label: body.label }])));
+      const snap = await fetchScannerSnapshot(signal);
+      setStatus(snap.status);
+      setSignals(snap.signals);
+      setHeat(snap.heatmap);
+      setTrades(snap.trades);
+      setRankings(snap.rankings.pairs || []);
+      setReport(snap.report);
+      setUniverses(Object.fromEntries(Object.entries(snap.universes.universes).map(([id, body]) => [id, { label: body.label }])));
+      noteScannerAlerts(snap.status.alerts);
       setError(null);
     } catch (err) {
       if (signal?.aborted) return;
@@ -94,11 +83,28 @@ export function ScannerPanel() {
 
   useEffect(() => {
     const ac = new AbortController();
-    void load(ac.signal);
-    const id = window.setInterval(() => void load(), 15000);
+    let timer = 0;
+    const start = () => {
+      if (document.visibilityState === "hidden") return;
+      void load(ac.signal);
+      timer = window.setInterval(() => void load(), 12000);
+    };
+    const onVis = () => {
+      window.clearInterval(timer);
+      timer = 0;
+      if (document.visibilityState === "visible") start();
+    };
+    const onScan = () => {
+      if (document.visibilityState !== "hidden") void load();
+    };
+    start();
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("tradeboss-scanner-scan", onScan);
     return () => {
       ac.abort();
-      window.clearInterval(id);
+      window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("tradeboss-scanner-scan", onScan);
     };
   }, [load]);
 

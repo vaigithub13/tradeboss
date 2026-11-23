@@ -1,9 +1,5 @@
-import { useEffect, useRef } from "react";
-
-import { fetchScannerStatus, type ScannerAlert } from "../api/scanner";
+import type { ScannerAlert } from "../api/scanner";
 import { playAlertSound, unlockAudio } from "../paper/sounds";
-
-const POLL_MS = 5000;
 
 function notify(alert: ScannerAlert): void {
   try {
@@ -20,38 +16,23 @@ function notify(alert: ScannerAlert): void {
   }
 }
 
-/** Polls slot 8 alerts even when the scanner tab is closed. The first poll is silent. */
-export function useScannerAlerts(): void {
-  const seen = useRef<Set<string> | null>(null);
-  useEffect(() => {
-    let stop = false;
-    const tick = async () => {
-      try {
-        const status = await fetchScannerStatus();
-        if (stop) return;
-        const ids = status.alerts.map((alert) => alert.id);
-        if (seen.current === null) {
-          seen.current = new Set(ids);
-          return;
-        }
-        for (const alert of status.alerts) {
-          if (seen.current.has(alert.id)) continue;
-          seen.current.add(alert.id);
-          const sound = alert.kind === "exit" || alert.kind === "flat" ? "exit" : "entry";
-          playAlertSound(sound, 0.8);
-          notify(alert);
-        }
-      } catch {
-        // backend down: try again on the next tick
-      }
-    };
-    void tick();
-    const id = window.setInterval(() => void tick(), POLL_MS);
-    return () => {
-      stop = true;
-      window.clearInterval(id);
-    };
-  }, []);
+const seen = new Set<string>();
+let primed = false;
+
+/** Called from the scanner tab's snapshot. No request of its own, and nothing runs while the tab is hidden. */
+export function noteScannerAlerts(alerts: ScannerAlert[]): void {
+  if (!primed) {
+    for (const alert of alerts) seen.add(alert.id);
+    primed = true;
+    return;
+  }
+  for (const alert of alerts) {
+    if (seen.has(alert.id)) continue;
+    seen.add(alert.id);
+    const sound = alert.kind === "exit" || alert.kind === "flat" ? "exit" : "entry";
+    playAlertSound(sound, 0.8);
+    notify(alert);
+  }
 }
 
 export function enableScannerSound(): void {

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { fetchPaperStatus, startPaper, stopPaper, type PaperDeskStatus } from "../api/paper";
+import { coalesce } from "../api/sharedPoll";
 
 interface PaperState {
   status: PaperDeskStatus | null;
@@ -16,13 +17,14 @@ const messageOf = (e: unknown): string => (e instanceof Error ? e.message : "req
 export const usePaperStore = create<PaperState>((set, get) => ({
   status: null,
   errors: {},
-  refresh: async () => {
-    try {
-      set({ status: await fetchPaperStatus(), errors: { ...get().errors, "": null } });
-    } catch (e) {
-      set({ errors: { ...get().errors, "": messageOf(e) } });
-    }
-  },
+  refresh: () =>
+    coalesce("paper", async () => {
+      try {
+        set({ status: await fetchPaperStatus(), errors: { ...get().errors, "": null } });
+      } catch (e) {
+        set({ errors: { ...get().errors, "": messageOf(e) } });
+      }
+    }),
   start: async (slot, strategy, params) => {
     try {
       await startPaper(slot, strategy, params, "hand");

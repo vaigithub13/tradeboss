@@ -209,6 +209,10 @@ class LiveHub:
             if any(symbols is None or v.symbol in symbols for v in views):
                 c.dirty = True
 
+    async def broadcast_event(self, msg: dict[str, Any]) -> None:
+        for c in list(self.clients):
+            await self._send(c, msg)
+
     async def broadcast_reload(self, symbols: set[str] | None = None) -> None:
         for c in list(self.clients):
             views = c.views or ([c.view] if c.view is not None else [])

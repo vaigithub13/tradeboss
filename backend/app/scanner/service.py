@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,12 +25,23 @@ from app.scanner.runner import (
     note_entries,
     proven_pairs,
     scan_feed,
+    unique_plans,
     walk_day,
 )
 from app.scanner.backtest import rank_pairs
 from app.scanner.universe import load_universes, resolve_universe, universe_names
 
 HEATMAP_EMPTY: list[dict[str, Any]] = []
+log = logging.getLogger("tradeboss.scanner")
+_WORKERS: ThreadPoolExecutor | None = None
+
+
+def scanner_executor() -> ThreadPoolExecutor:
+    """One worker, separate from the default pool that serves HTTP and the live feed."""
+    global _WORKERS
+    if _WORKERS is None:
+        _WORKERS = ThreadPoolExecutor(max_workers=1, thread_name_prefix="scanner")
+    return _WORKERS
 
 
 def _write(path: Path, payload: dict) -> None:
@@ -52,6 +65,9 @@ class ScannerService:
         self.instruments_dir = instruments_dir
         self._state: dict[str, Any] | None = None
         self._executor: Any = None
+        self._heat: list[dict[str, Any]] | None = None
+        self._heat_day: str | None = None
+        self.on_scan_done: Any = None
 
     def _run_tm(self, spec: dict) -> dict:
         """Run one Time Machine outside the request thread when we are not under pytest."""
@@ -142,7 +158,10 @@ class ScannerService:
         sectors: dict[str, str] = {}
         self._folders: dict[str, str] = {}
         if self.store is not None:
+            from app.runtime.lag import pace
+
             for stock in resolved:
+                pace()
                 try:
                     result = get_candles(self.store, stock.folder, "5m", from_time=start, to_time=end)
                 except SymbolNotFound:
@@ -162,6 +181,8 @@ class ScannerService:
     # ---------------------------------------------------------------- actions
     def scan(self, now: datetime | None = None) -> dict[str, Any]:
         now = (now or datetime.now(IST)).astimezone(IST)
+        started = datetime.now(IST)
+        log.info("scanner scan start %s", now.isoformat(timespec="seconds"))
         symbols, sectors, nifty, unmapped = self._live_feed(now)
         day = now.date()
         state = self._load_state(day)
@@ -182,12 +203,21 @@ class ScannerService:
             tm=self._run_tm,
         )
         merge_signals(state, rows)
+        state["signals"] = unique_plans(state.get("signals") or [])
         note_alerts(state, rows, [])
         taken = take_from(state, settings)
         note_entries(state, taken)
         state["last_scan"] = now.isoformat()
         state["unmapped"] = unmapped
+        self._cache_heat(symbols, sectors, nifty, now)
         self._save_state(state)
+        log.info("scanner scan done in %.1fs", (datetime.now(IST) - started).total_seconds())
+        notify = self.on_scan_done
+        if notify is not None:
+            try:
+                notify()
+            except Exception:
+                log.exception("scanner scan notify failed")
         return self.status(now)
 
     def flatten_now(self, now: datetime | None = None) -> dict[str, Any]:
@@ -336,7 +366,12 @@ class ScannerService:
 
     def heatmap(self, now: datetime | None = None) -> list[dict]:
         now = (now or datetime.now(IST)).astimezone(IST)
+        if self._heat is not None and self._heat_day == now.date().isoformat():
+            return self._heat
         symbols, sectors, nifty, _unmapped = self._live_feed(now)
+        return self._cache_heat(symbols, sectors, nifty, now)
+
+    def _cache_heat(self, symbols: dict, sectors: dict, nifty: list, now: datetime) -> list[dict]:
         from app.scanner.context import context_row, nifty_change_pct
         from app.scanner.bars import split_sessions
         from app.scanner.runner import _prev_close
@@ -360,7 +395,28 @@ class ScannerService:
                 )
             )
         rows.sort(key=lambda r: float(r["change_pct"] or 0), reverse=True)
+        self._heat = rows
+        self._heat_day = now.date().isoformat()
         return rows
+
+    def snapshot(self, now: datetime | None = None) -> dict[str, Any]:
+        """One read for the scanner tab. Does not start a scan."""
+        now = (now or datetime.now(IST)).astimezone(IST)
+        spec = load_universes()
+        names = {
+            uid: {"label": body.get("label") or uid, "symbols": [row["symbol"] for row in body.get("stocks") or []]}
+            for uid, body in (spec.get("universes") or {}).items()
+        }
+        report = self.report(now.date())
+        return {
+            "status": self.status(now),
+            "signals": self.signals(now.date()),
+            "heatmap": self.heatmap(now),
+            "trades": self.trades(now.date()),
+            "report": report,
+            "universes": {"as_of": spec.get("as_of"), "universes": names, "selected": self.settings().universe},
+            "rankings": self.rankings() or {"as_of": None, "pairs": []},
+        }
 
     def trades(self, day: date | None = None) -> list[dict]:
         day = day or datetime.now(IST).date()
@@ -457,11 +513,9 @@ async def scanner_loop(service: ScannerService) -> None:
     while True:
         now = datetime.now(IST)
         try:
-            await asyncio.to_thread(service.tick, now)
+            await asyncio.get_running_loop().run_in_executor(scanner_executor(), service.tick, now)
         except Exception:
-            import logging
-
-            logging.getLogger("tradeboss.scanner").exception("scanner tick failed")
+            log.exception("scanner tick failed")
         wake = next_wake(datetime.now(IST))
         delay = max(1.0, (wake - datetime.now(IST)).total_seconds())
         await asyncio.sleep(min(delay, 60.0))

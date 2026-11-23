@@ -124,6 +124,7 @@ class LiveEngine:
         self._new_requests: list[BackfillRequest] = []
         self._trading = False
         self.last_live_wall_ms: int | None = None  # receive time of the newest live_feed frame (badge)
+        self.last_nifty_wall_ms: int | None = None  # receive time of the newest Nifty 50 tick
         #: last trade price of each instrument that ticked in the latest frame (paper stops read the index's)
         self.ticked: dict[str, float] = {}
 
@@ -162,6 +163,7 @@ class LiveEngine:
         else:
             if frame.kind == "live_feed" and recv_wall_ms is not None:
                 self.last_live_wall_ms = recv_wall_ms
+                self._note_nifty(frame, recv_wall_ms)
             self._on_feed(frame, idx)
         self._after_frame(frame)
 
@@ -228,6 +230,16 @@ class LiveEngine:
                 b.begin_resume()  # cold start mid-session: everything since the open is a gap
             self.builders[key] = b
         return b
+
+    def _note_nifty(self, frame: Frame, recv_wall_ms: int) -> None:
+        from app.upstox.instruments import NIFTY_INDEX_KEY
+
+        if not any(item.key == NIFTY_INDEX_KEY and item.ltp > 0 for item in frame.items):
+            return
+        prev = self.last_nifty_wall_ms
+        self.last_nifty_wall_ms = recv_wall_ms
+        if prev is not None and recv_wall_ms - prev > 1000:
+            log.warning("nifty tick gap %.1fs ending at recv %d", (recv_wall_ms - prev) / 1000, recv_wall_ms)
 
     def _on_feed(self, frame: Frame, idx: int) -> None:
         self._release_held(frame.current_ts)

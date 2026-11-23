@@ -9,6 +9,9 @@ from app.scanner.config import ScannerSettings
 from app.scanner.models import Hit, Plan
 
 
+MIN_STOP_FRACTION = 0.005  # 0.5% of price; tighter stops lose to charges
+
+
 def _target_r(settings: ScannerSettings) -> float:
     if settings.target_mode == "3r":
         return 3.0
@@ -92,33 +95,37 @@ def build_plan(
     else:
         stop = hit.stop
 
-    empty = Plan(
-        instrument="equity_intraday",
-        symbol=symbol,
-        setup=hit.setup,
-        side=side,
-        status="triggered",
-        entry=entry,
-        stop=stop,
-        target=None,
-        qty=0,
-        risk_per_share=None,
-        rupee_risk=None,
-        rupee_reward=None,
-        capital=None,
-        rr=None,
-        resistance=hit.resistance,
-        support=hit.support,
-        entry_time=entry_time,
-        target_r=target_r,
-        note="stop is not on the right side of entry",
-    )
+    def _skip(note: str) -> Plan:
+        return Plan(
+            instrument="equity_intraday",
+            symbol=symbol,
+            setup=hit.setup,
+            side=side,
+            status="skipped",
+            entry=entry,
+            stop=None,
+            target=None,
+            qty=0,
+            risk_per_share=None,
+            rupee_risk=None,
+            rupee_reward=None,
+            capital=None,
+            rr=None,
+            resistance=hit.resistance,
+            support=hit.support,
+            entry_time=entry_time,
+            target_r=target_r,
+            note=note,
+        )
+
     if stop is None:
-        empty.note = "no stop"
-        return empty
+        return _skip("no stop")
+    wrong_side = (side == "long" and stop >= entry) or (side == "short" and stop <= entry)
+    if wrong_side:
+        return _skip("stop is not on the right side of entry")
     risk = abs(entry - stop)
-    if risk <= 0 or (side == "long" and stop >= entry) or (side == "short" and stop <= entry):
-        return empty
+    if risk <= 0 or (entry > 0 and risk / entry < MIN_STOP_FRACTION):
+        return _skip("stop is tighter than 0.5% of price")
 
     level = hit.resistance if side == "long" else hit.support
     if settings.target_mode == "next_level" and level is not None:

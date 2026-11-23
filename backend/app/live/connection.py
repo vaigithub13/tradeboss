@@ -232,6 +232,7 @@ class FeedConnection:
                 continue
             started = time.monotonic()
             auth_failed = False
+            self._reconnect_cause = "feed session ended"
             try:
                 await self._session()
             except UpstoxAuthError as exc:
@@ -241,7 +242,8 @@ class FeedConnection:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:  # noqa: BLE001 - network drops are expected
-                log.warning("feed connection error: %s: %s", type(exc).__name__, redact(str(exc)[:200], []))
+                self._reconnect_cause = f"{type(exc).__name__}: {redact(str(exc)[:200], [])}"
+                log.warning("feed connection error: %s", self._reconnect_cause)
             finally:
                 if self.lock is not None:
                     self.lock.release()
@@ -256,6 +258,7 @@ class FeedConnection:
                 continue
             attempt += 1
             if not auth_failed:
+                log.warning("reconnect cause: %s", self._reconnect_cause)
                 self._set_state("reconnecting")
             await self._nap(self.backoff.delay(attempt, self.rng, auth=auth_failed))
 
@@ -283,7 +286,7 @@ class FeedConnection:
                             msg = await asyncio.wait_for(ws.recv(), timeout=self.read_timeout_s)
                         except TimeoutError:
                             if self.market_open():
-                                log.warning("no data for %.0fs while the market is open: reconnecting", self.read_timeout_s)
+                                self._reconnect_cause = f"no data for {self.read_timeout_s:.0f}s while the market is open"
                                 break
                             continue
                         wall = self.now_ms()

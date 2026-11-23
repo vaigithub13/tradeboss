@@ -46,7 +46,7 @@ import { gexLevels, gexSummary } from "./chart/gex";
 import { OptionsTab } from "./options/OptionsTab";
 import { SensexPanel } from "./panels/SensexPanel";
 import { ScannerPanel } from "./panels/ScannerPanel";
-import { useScannerAlerts } from "./scanner/useAlerts";
+import { holdLeader } from "./api/sharedPoll";
 import { ChartScopeProvider, NIFTY_SCOPE } from "./store/chartScope";
 import { useSensexChartStore } from "./store/chartStore";
 import { useSensexIndicatorStore } from "./store/indicatorStore";
@@ -97,13 +97,15 @@ export default function App() {
   const refreshIndicators = useIndicatorStore((s) => s.refresh);
 
   useEffect(() => {
-    const controller = new AbortController();
-    void poll(controller.signal);
-    const id = window.setInterval(() => void poll(controller.signal), POLL_INTERVAL_MS);
-    return () => {
-      controller.abort();
-      window.clearInterval(id);
-    };
+    return holdLeader("tradeboss-health", () => {
+      const controller = new AbortController();
+      void poll(controller.signal);
+      const id = window.setInterval(() => void poll(controller.signal), POLL_INTERVAL_MS);
+      return () => {
+        controller.abort();
+        window.clearInterval(id);
+      };
+    });
   }, [poll]);
 
   // (Re)load chart data once the backend is reachable.
@@ -222,7 +224,6 @@ export default function App() {
   const replayCursorTime = useReplayStore((s) => s.cursor);
   useReplayClock();
   usePaperAlerts();
-  useScannerAlerts();
   usePineLiveHost();
   const setPanelOpen = useBacktestStore((s) => s.setPanelOpen);
   const [pineOpen, setPineOpen] = useState(false);

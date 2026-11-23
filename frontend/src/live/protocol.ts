@@ -6,6 +6,8 @@ export type LiveState = "live" | "stale" | "reconnecting" | "closed" | "auth_fai
 export interface LiveStatus {
   state: LiveState;
   since_last_tick_s: number | null;
+  /** Seconds since the server received a Nifty 50 tick. Null until the first one. */
+  nifty_since_tick_s?: number | null;
   market: "open" | "closed" | "unknown";
   connection?: string;
   recording?: boolean;
@@ -41,7 +43,12 @@ export interface ErrorMessage {
   symbol?: string;
 }
 
-export type ServerMessage = StatusMessage | BarMessage | ReloadMessage | ErrorMessage | { type: "pong" };
+export interface ScannerMessage {
+  type: "scanner";
+  event: "scan";
+}
+
+export type ServerMessage = StatusMessage | BarMessage | ReloadMessage | ErrorMessage | ScannerMessage | { type: "pong" };
 
 /** What the tab is looking at: sent to the server so it knows which tail to compute. */
 export interface LiveView {

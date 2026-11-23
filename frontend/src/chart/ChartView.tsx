@@ -69,6 +69,7 @@ import { useDrawStore } from "../draw/store";
 import { usePaperTradesStore } from "../store/paperTradesStore";
 import { closedTimeOnAppend, scheduleClosedBar } from "../pine/closedBars";
 import { useChartScope } from "../store/chartScope";
+import { feedIsStale } from "../live/feedStale";
 import { useLiveStore } from "../store/liveStore";
 import {
   DEFAULT_BAR_SPACING,
@@ -167,8 +168,8 @@ export function ChartView({
   const [countdownY, setCountdownY] = useState<number | null>(null);
   const [priceScaleWidth, setPriceScaleWidth] = useState(56);
   const [feedStale, setFeedStale] = useState(false);
-  const lastBarAt = useLiveStore((s) => s.lastBarAt);
   const liveStatus = useLiveStore((s) => s.status);
+  const statusAt = useLiveStore((s) => s.statusAt);
   const liveReconnect = useLiveStore((s) => s.reconnect);
   const resyncTip = useChartStore((s) => s.resyncTip);
 
@@ -661,57 +662,36 @@ export function ChartView({
     }
   }, [levels, fhbAxisKey, fhbEnabled, fhbOpts.colors, fhbPaint.current]);
 
-  // Stale-feed safety: 15s without a bar during market hours → pill + reconnect + tip resync.
-  const staleRecoveryAt = useRef(0);
+  // The pill follows the server's Nifty tick age. A busy page or a quiet chart bar does not reconnect.
   useEffect(() => {
-    const STALE_MS = 15_000;
-    const RECOVERY_COOLDOWN_MS = 20_000;
-    const tick = (): void => {
-      const marketOpen = liveStatus?.market === "open";
-      if (!marketOpen || cursor != null) {
-        setFeedStale(false);
-        return;
-      }
-      const last = lastBarAt ?? 0;
-      // No bar yet this session: wait until we have seen at least one before declaring stale.
-      if (last <= 0) {
-        setFeedStale(false);
-        return;
-      }
-      const stale = Date.now() - last >= STALE_MS;
-      setFeedStale(stale);
-      if (stale && Date.now() - staleRecoveryAt.current >= RECOVERY_COOLDOWN_MS) {
-        staleRecoveryAt.current = Date.now();
-        liveReconnect();
-        void resyncTip();
-      }
-    };
+    const tick = (): void => setFeedStale(feedIsStale(liveStatus, statusAt, Date.now(), cursor));
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [lastBarAt, liveStatus?.market, cursor, liveReconnect, resyncTip]);
+  }, [liveStatus, statusAt, cursor]);
 
   useEffect(() => {
     const RESYNC_COOLDOWN_MS = 10_000;
     let lastAt = 0;
-    const resync = (): void => {
+    const resync = (cause: string): void => {
       const now = Date.now();
       if (now - lastAt < RESYNC_COOLDOWN_MS) return;
       lastAt = now;
-      liveReconnect();
+      liveReconnect(cause);
       void resyncTip();
     };
     const onVisible = (): void => {
       if (document.visibilityState !== "visible") return;
-      resync();
+      resync("window focused");
     };
+    const onOnline = (): void => resync("browser online");
     window.addEventListener("focus", onVisible);
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("online", resync);
+    window.addEventListener("online", onOnline);
     return () => {
       window.removeEventListener("focus", onVisible);
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("online", resync);
+      window.removeEventListener("online", onOnline);
     };
   }, [liveReconnect, resyncTip]);
 

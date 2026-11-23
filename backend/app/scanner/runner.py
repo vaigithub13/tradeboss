@@ -22,6 +22,7 @@ from app.scanner.config import ScannerSettings
 from app.scanner.context import context_row, nifty_change_pct
 from app.scanner.history import history_for
 from app.scanner.judge import judge
+from app.runtime.lag import pace
 from app.scanner.plan import build_plan
 from app.scanner.risk import assess
 from app.scanner.setups import run_setups
@@ -126,6 +127,8 @@ def evaluate_symbol(
             if nxt is not None and (as_of is None or int(nxt["time"]) <= as_of):
                 next_bar = nxt
         plan = build_plan(hit, settings, symbol=symbol, next_bar=next_bar)
+        if plan.status == "skipped":
+            continue
         if hit.forming and as_of is not None and minute_of(as_of) >= ENTRY_CUTOFF_MIN:
             plan.status = "expired"
         row_id = f"orb15:{symbol}:{day.isoformat()}:waiting" if hit.forming else f"{hit.setup}:{symbol}:{hit.time}:{hit.side}"
@@ -252,6 +255,7 @@ def scan_feed(
         history_cache = {}
     found: list[dict[str, Any]] = []
     for symbol, bars in symbols.items():
+        pace()
         found.extend(
             evaluate_symbol(
                 symbol=symbol,
@@ -272,7 +276,31 @@ def scan_feed(
                 history_cache=history_cache,
             )
         )
-    return found
+    return unique_plans(found)
+
+
+def unique_plans(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One identical entry/stop/target per stock. A later setup with the same prices is dropped."""
+    seen: set[tuple] = set()
+    kept: list[dict[str, Any]] = []
+    for row in rows:
+        entry, stop, target = row.get("entry"), row.get("stop"), row.get("target")
+        closed = row.get("status") in ("in_trade", "target", "stop", "time_exit")
+        if closed or entry is None or stop is None or target is None:
+            kept.append(row)
+            continue
+        key = (
+            row.get("symbol"),
+            row.get("side"),
+            round(float(entry), 2),
+            round(float(stop), 2),
+            round(float(target), 2),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        kept.append(row)
+    return kept
 
 
 def merge_signals(state: dict[str, Any], rows: list[dict[str, Any]]) -> None:

@@ -82,8 +82,15 @@ def signal(signal_id: str, request: Request, day: date | None = None) -> dict[st
 
 @router.post("/scan")
 async def scan(request: Request) -> dict[str, Any]:
+    from app.scanner.service import scanner_executor
+
     svc = get_service(request)
-    return await asyncio.to_thread(svc.scan)
+    return await asyncio.get_running_loop().run_in_executor(scanner_executor(), svc.scan)
+
+
+@router.get("/snapshot")
+def snapshot(request: Request) -> dict[str, Any]:
+    return get_service(request).snapshot()
 
 
 @router.get("/heatmap")

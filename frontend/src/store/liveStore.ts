@@ -22,7 +22,7 @@ interface LiveState {
   /** Nifty + Sensex together: one WS message with `views: [...]`. */
   setViews: (views: LiveView[]) => void;
   /** Close the socket so the client reconnects and re-sends the current view. */
-  reconnect: () => void;
+  reconnect: (cause?: string) => void;
 }
 
 let client: LiveClient | null = null;
@@ -80,6 +80,12 @@ export const useLiveStore = create<LiveState>((set) => ({
           console.error("[live]", message);
           set({ lastError: message });
         },
+        onReconnect: (cause) => {
+          console.warn("[live] reconnect cause: %s", cause);
+        },
+        onScanner: () => {
+          window.dispatchEvent(new Event("tradeboss-scanner-scan"));
+        },
       },
     );
     client.start();
@@ -95,8 +101,8 @@ export const useLiveStore = create<LiveState>((set) => ({
 
   setViews: (views) => client?.setViews(views),
 
-  reconnect: () => {
-    client?.reconnect();
+  reconnect: (cause = "requested") => {
+    client?.reconnect(cause);
   },
 }));
 

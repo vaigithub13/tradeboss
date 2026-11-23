@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ScannerPanel } from "./ScannerPanel";
-import { saveScannerSettings, type ScannerSettings } from "../api/scanner";
+import type { ScannerSettings } from "../api/scanner";
 
 vi.mock("../scanner/ScannerChart", () => ({
   ScannerChart: () => <div data-testid="scanner-chart" />,
@@ -15,29 +15,13 @@ vi.mock("../paper/sounds", () => ({
 }));
 
 vi.mock("../api/scanner", () => ({
-  fetchScannerStatus: vi.fn(),
-  fetchScannerSignals: vi.fn(),
-  fetchScannerHeatmap: vi.fn(),
-  fetchScannerTrades: vi.fn(),
-  fetchScannerReport: vi.fn(),
-  fetchUniverses: vi.fn(),
-  fetchRankings: vi.fn(),
+  fetchScannerSnapshot: vi.fn(),
   fetchScannerSettings: vi.fn(),
   saveScannerSettings: vi.fn(),
   scanNow: vi.fn(),
 }));
 
-import {
-  fetchRankings,
-  fetchScannerHeatmap,
-  fetchScannerReport,
-  fetchScannerSettings,
-  fetchScannerSignals,
-  fetchScannerStatus,
-  fetchScannerTrades,
-  fetchUniverses,
-  scanNow,
-} from "../api/scanner";
+import { fetchScannerSettings, fetchScannerSnapshot, saveScannerSettings, scanNow } from "../api/scanner";
 
 const settings: ScannerSettings = {
   account_size: 200000,
@@ -68,7 +52,8 @@ const settings: ScannerSettings = {
 };
 
 function prime() {
-  vi.mocked(fetchScannerStatus).mockResolvedValue({
+  vi.mocked(fetchScannerSnapshot).mockResolvedValue({
+    status: {
     now: "2026-11-23T09:35:00+05:30",
     trading_day: true,
     universe: "nifty50",
@@ -85,25 +70,22 @@ function prime() {
     auto_trade: true,
     alerts: [],
     open: [],
-  });
-  vi.mocked(fetchScannerSignals).mockResolvedValue({
+    },
     signals: [
       { id: "b", symbol: "INFY", setup: "orb15", side: "long", status: "triggered", rr: 1, verdict: "AVOID", decision: "BLOCK" },
       { id: "a", symbol: "HDFCBANK", setup: "flag", side: "long", status: "triggered", rr: 3, verdict: "GOOD", decision: "PASS", entry: 100, stop: 99, target: 102, qty: 10, histogram: { target: 70, stop: 20, open: 10 }, occurrences: [], history_source: "pooled", fires: 12, win_rate: 0.5 },
     ],
-  });
-  vi.mocked(fetchScannerHeatmap).mockResolvedValue({
-    rows: [{ symbol: "HDFCBANK", sector: "Financial Services", change_pct: 0.4, vwap_dist_pct: 0.1, rvol: 1.2, vs_nifty: 0.2 }],
-  });
-  vi.mocked(fetchScannerTrades).mockResolvedValue({ trades: [] });
-  vi.mocked(fetchScannerReport).mockResolvedValue({ report: null });
-  vi.mocked(fetchUniverses).mockResolvedValue({
-    universes: { nifty50: { label: "Nifty 50", symbols: ["HDFCBANK"] }, banknifty: { label: "Nifty Bank", symbols: ["HDFCBANK"] } },
-    selected: "nifty50",
-  });
-  vi.mocked(fetchRankings).mockResolvedValue({
-    as_of: "2026-11-21",
-    pairs: [{ symbol: "HDFCBANK", setup: "orb15", trades: 9, win_rate: 0.5, avg_r: 0.2, profit_factor: 1.4, max_drawdown: 100, net: 250 }],
+    heatmap: [{ symbol: "HDFCBANK", sector: "Financial Services", change_pct: 0.4, vwap_dist_pct: 0.1, rvol: 1.2, vs_nifty: 0.2 }],
+    trades: [],
+    report: null,
+    universes: {
+      universes: { nifty50: { label: "Nifty 50", symbols: ["HDFCBANK"] }, banknifty: { label: "Nifty Bank", symbols: ["HDFCBANK"] } },
+      selected: "nifty50",
+    },
+    rankings: {
+      as_of: "2026-11-21",
+      pairs: [{ symbol: "HDFCBANK", setup: "orb15", trades: 9, win_rate: 0.5, avg_r: 0.2, profit_factor: 1.4, max_drawdown: 100, net: 250 }],
+    },
   });
   vi.mocked(fetchScannerSettings).mockResolvedValue(settings);
   vi.mocked(saveScannerSettings).mockImplementation(async (patch) => ({ ...settings, ...patch }) as ScannerSettings);
@@ -149,5 +131,14 @@ describe("Stock Scanner tab", () => {
     expect(saveScannerSettings).toHaveBeenCalledWith(expect.objectContaining({ max_trades_per_day: 4 }));
     await user.click(screen.getByRole("button", { name: "Rankings" }));
     expect(screen.getByTestId("scanner-rankings")).toHaveTextContent("orb15");
+  });
+
+  it("does not poll while the tab is hidden", async () => {
+    vi.mocked(fetchScannerSnapshot).mockClear();
+    const spy = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    render(<ScannerPanel />);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(fetchScannerSnapshot).not.toHaveBeenCalled();
+    spy.mockRestore();
   });
 });

@@ -132,6 +132,23 @@ export interface ScannerTrade {
   verdict?: string | null;
 }
 
+export interface ScannerSnapshot {
+  status: ScannerStatus;
+  signals: ScannerSignal[];
+  heatmap: HeatRow[];
+  trades: ScannerTrade[];
+  report: Record<string, unknown> | null;
+  universes: {
+    universes: Record<string, { label: string; symbols: string[] }>;
+    selected: string;
+  };
+  rankings: { as_of: string | null; pairs: RankPair[] };
+}
+
+export function fetchScannerSnapshot(signal?: AbortSignal): Promise<ScannerSnapshot> {
+  return getJson("/api/scanner/snapshot", signal);
+}
+
 export function fetchScannerStatus(signal?: AbortSignal): Promise<ScannerStatus> {
   return getJson("/api/scanner/status", signal);
 }

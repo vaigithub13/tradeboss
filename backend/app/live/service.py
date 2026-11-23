@@ -762,12 +762,15 @@ class LiveService:
         now = self.now_ms()
         last = self.engine.last_live_wall_ms
         since = None if last is None else max(0.0, (now - last) / 1000.0)
+        nifty_at = self.engine.last_nifty_wall_ms
+        nifty_since = None if nifty_at is None else max(0.0, (now - nifty_at) / 1000.0)
         conn_state: State | str = "disabled" if not self.enabled else self.connection.state
         mo = self.market_open()
         return {
             "state": badge_state(conn_state, mo, since),
             "connection": conn_state,
             "since_last_tick_s": None if since is None else round(since, 1),
+            "nifty_since_tick_s": None if nifty_since is None else round(nifty_since, 1),
             "market": {None: "unknown", True: "open", False: "closed"}[mo],
             "day": None if self.engine.day is None else self.engine.day.isoformat(),
             "recording": self.recorder.active,

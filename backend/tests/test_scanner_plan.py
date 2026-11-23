@@ -47,8 +47,36 @@ def test_next_open_uses_the_following_bar() -> None:
 def test_a_stop_on_the_wrong_side_has_no_quantity() -> None:
     hit = Hit(setup="flag", side="long", time=1, close=100, stop=101)
     plan = build_plan(hit, ScannerSettings(), symbol="INFY")
+    assert plan.status == "skipped"
+    assert plan.stop is None
     assert plan.qty == 0
     assert plan.target is None
+
+
+def test_short_stop_below_entry_is_skipped() -> None:
+    hit = Hit(setup="vwap_cross", side="short", time=1, close=100, stop=99)
+    plan = build_plan(hit, ScannerSettings(), symbol="BHARTIARTL")
+    assert plan.status == "skipped"
+    assert plan.stop is None
+    assert "right side" in plan.note
+
+
+def test_stop_tighter_than_half_a_percent_is_skipped() -> None:
+    hit = Hit(setup="flag", side="long", time=1, close=1000, stop=996)
+    plan = build_plan(hit, ScannerSettings(max_capital_per_trade=10_000_000), symbol="BSE")
+    assert plan.status == "skipped"
+    assert plan.target is None
+    assert "0.5%" in plan.note
+
+
+def test_identical_plans_for_one_stock_collapse_to_one() -> None:
+    from app.scanner.runner import unique_plans
+
+    first = {"symbol": "ADANIENT", "setup": "vwap_cross", "side": "long", "status": "triggered", "entry": 100.0, "stop": 99.0, "target": 102.0}
+    second = {"symbol": "ADANIENT", "setup": "gap_fill", "side": "long", "status": "triggered", "entry": 100.0, "stop": 99.0, "target": 102.0}
+    other = {"symbol": "ADANIENT", "setup": "orb15", "side": "short", "status": "triggered", "entry": 100.0, "stop": 101.0, "target": 98.0}
+    kept = unique_plans([first, second, other])
+    assert [row["setup"] for row in kept] == ["vwap_cross", "orb15"]
 
 
 def test_waiting_range_is_not_a_trade() -> None:

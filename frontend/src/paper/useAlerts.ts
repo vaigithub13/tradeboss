@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 
+import { holdLeader } from "../api/sharedPoll";
 import { useAlertStore } from "../store/alertStore";
 import { usePaperStore } from "../store/paperStore";
 import { alertNotification, deskAlerts, type AlertMemory, type PaperAlert } from "./alerts";
@@ -21,11 +22,11 @@ function notify(a: PaperAlert): void {
  * exit. Mounted once, in App. */
 export function usePaperAlerts(): void {
   const refresh = usePaperStore((s) => s.refresh);
-  useEffect(() => {
+  useEffect(() => holdLeader("tradeboss-paper", () => {
     void refresh();
     const id = window.setInterval(() => void refresh(), POLL_MS);
     return () => window.clearInterval(id);
-  }, [refresh]);
+  }), [refresh]);
 
   useEffect(() => {
     let memory: AlertMemory = {};

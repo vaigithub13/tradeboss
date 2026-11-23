@@ -128,8 +128,11 @@ def occurrences(
             seen.add(d)
             days.append(d)
     days = days[-limit:]
+    from app.runtime.lag import pace
+
     rows: list[dict] = []
     for day in days:
+        pace()
         prev = _prev_close(bars, day)
         window_from = day - timedelta(days=21)
         window = [b for b in bars if window_from <= day_of(int(b["time"])) <= day]

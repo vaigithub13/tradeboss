@@ -71,6 +71,7 @@ function setup(opts: { throttleMs?: number; watchdogMs?: number } = {}) {
   const statuses: { status: LiveStatus; at: number }[] = [];
   const bars: BarMessage[] = [];
   const reloads: string[] = [];
+  const causes: string[] = [];
   const client = new LiveClient(
     {
       url: "ws://x/api/live/ws",
@@ -87,9 +88,10 @@ function setup(opts: { throttleMs?: number; watchdogMs?: number } = {}) {
       onStatus: (status, at) => statuses.push({ status, at }),
       onBar: (m) => bars.push(m),
       onReload: (s) => reloads.push(s),
+      onReconnect: (cause) => causes.push(cause),
     },
   );
-  return { clock, sockets, links, statuses, bars, reloads, client };
+  return { clock, sockets, links, statuses, bars, reloads, causes, client };
 }
 
 const VIEW = { symbol: "NIFTY50", timeframe: "5m", sessions: ["normal"], indicators: [] };
@@ -145,7 +147,7 @@ describe("LiveClient connection", () => {
   });
 
   it("closes and reopens a socket that went silent", () => {
-    const { clock, sockets, links, client } = setup({ watchdogMs: 6000 });
+    const { clock, sockets, links, causes, client } = setup({ watchdogMs: 6000 });
     client.start();
     sockets[0]!.open();
     clock.advance(5000);
@@ -154,6 +156,7 @@ describe("LiveClient connection", () => {
     expect(sockets).toHaveLength(1);
     clock.advance(1500);
     expect(sockets[0]!.closed).toBe(true);
+    expect(causes.at(-1)).toBe("no websocket message for 6000ms");
     expect(links.at(-1)).toBe("closed");
     clock.advance(1000);
     expect(sockets).toHaveLength(2);

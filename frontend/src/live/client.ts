@@ -35,6 +35,8 @@ export interface LiveHandlers {
   onBar: (msg: BarMessage) => void;
   onReload: (symbol: string) => void;
   onError?: (message: string) => void;
+  onReconnect?: (cause: string) => void;
+  onScanner?: () => void;
 }
 
 export interface LiveClientOptions {
@@ -110,8 +112,9 @@ export class LiveClient {
   }
 
   /** Drop the current socket so backoff reconnect runs and re-sends the view. */
-  reconnect(): void {
+  reconnect(cause = "requested"): void {
     if (this.stopped) return;
+    this.handlers.onReconnect?.(cause);
     const s = this.socket;
     if (!s) {
       this.scheduleReconnect();
@@ -191,6 +194,7 @@ export class LiveClient {
       this.watchdogTimer = null;
       const s = this.socket;
       if (!s) return;
+      this.handlers.onReconnect?.(`no websocket message for ${this.watchdogMs}ms`);
       this.socket = null;
       s.onopen = s.onmessage = s.onclose = s.onerror = null;
       try {
@@ -225,6 +229,9 @@ export class LiveClient {
         break;
       case "error":
         this.handlers.onError?.(msg.message);
+        break;
+      case "scanner":
+        this.handlers.onScanner?.();
         break;
       default:
         break;

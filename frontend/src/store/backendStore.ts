@@ -1,6 +1,7 @@
 import { create } from "zustand";
 
 import { fetchHealth, type HealthResponse } from "../api/client";
+import { coalesce } from "../api/sharedPoll";
 
 export type BackendStatus = "checking" | "connected" | "disconnected";
 
@@ -13,13 +14,14 @@ interface BackendState {
 export const useBackendStore = create<BackendState>((set) => ({
   status: "checking",
   health: null,
-  poll: async (signal) => {
-    try {
-      const health = await fetchHealth(signal);
-      set({ status: "connected", health });
-    } catch (err) {
-      if (err instanceof DOMException && err.name === "AbortError") return;
-      set({ status: "disconnected", health: null });
-    }
-  },
+  poll: (signal) =>
+    coalesce("health", async () => {
+      try {
+        const health = await fetchHealth(signal);
+        set({ status: "connected", health });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        set({ status: "disconnected", health: null });
+      }
+    }),
 }));
