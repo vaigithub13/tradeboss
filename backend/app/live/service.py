@@ -46,6 +46,7 @@ from app.live.session_days import listed_session
 from app.options.history import OptionHistoryStore, capture_session
 from app.paper.catchup import PAPER_BAR_SOURCES, bar_minute, replay_into
 from app.paper.desk import SLOTS, PaperDesk
+from app.paper.expiry_slot import ExpiryStraddleSlot
 from app.paper.live import PaperError, PaperRunner, session_factory
 from app.paper.pricing import VixSeries
 from app.upstox.instruments import NIFTY_INDEX_KEY, SENSEX_INDEX_KEY, VIX_KEY, current_index
@@ -205,6 +206,11 @@ class LiveService:
             )
             for slot in SLOTS
         })
+        self.expiry_slot = ExpiryStraddleSlot(
+            PaperDesk.slot_dir(paper_base, ExpiryStraddleSlot.SLOT),
+            instruments=lambda: current_index(cfg.instruments_dir),
+            on_wanted=self.refresh_subscriptions,
+        )
         self.connection = FeedConnection(
             authorize=authorize or (lambda: authorize_feed(_token())),
             on_frame=self._on_frame,
@@ -260,7 +266,11 @@ class LiveService:
                 "spread report will not run unless the backend is started again before %s",
                 local.strftime("%H:%M"), self.cfg.reconcile_at, self.cfg.reconcile_until,
             )
-        for name, step in (("spread report", self._close_spreads), ("paper day file", self.paper.flush)):
+        for name, step in (
+            ("spread report", self._close_spreads),
+            ("paper day file", self.paper.flush),
+            ("expiry straddle", self.expiry_slot.flush),
+        ):
             try:
                 step()
             except Exception as exc:  # noqa: BLE001 - one failure must not stop the other
@@ -288,6 +298,7 @@ class LiveService:
             for key, ltp in option_prices.items():
                 self.paper.on_option_tick(key, ltp, now_ms=now_ms)  # premium exits on the contract's traded price
             self.paper.on_clock(now_ms)  # 15:15:00 square-off at this frame's quote (exchange time)
+            self._drive_expiry(now_ms, index_ticks, option_prices)
         self._record_spreads(raw)
 
     def _on_disconnect(self) -> None:
@@ -345,6 +356,11 @@ class LiveService:
                 log.info("resumed the paper strategy for today from its day file")
         except PaperError as exc:
             log.warning("paper strategy not resumed: %s", exc)
+        try:
+            if self.expiry_slot.resume(ist_date(self.now_ms())):
+                log.info("resumed expiry straddle slot 9 from its day file")
+        except Exception:
+            log.exception("expiry straddle slot not resumed")
 
     def _paper_catch_up(self, session: Any, day: date) -> Any:
         """Bring a paper session up to now from today's recorded frames: the bars it has not decided yet trade,
@@ -682,7 +698,11 @@ class LiveService:
 
         chart = self._chart_keys()
         spread = self._spread_session().keys() if self.cfg.spread_recorder_enabled else []
-        options = order_option_keys(self.paper.held_keys(), self.paper.atm_keys(), spread)
+        held = set(self.paper.held_keys())
+        slot = getattr(self, "expiry_slot", None)
+        if slot is not None:
+            held |= set(slot.wanted_keys())
+        options = order_option_keys(held, self.paper.atm_keys(), spread)
         scanner = self._scanner_keys()
         if not options and not scanner:
             return chart
@@ -693,6 +713,16 @@ class LiveService:
             log.warning("option cap refused %d option keys: %s", len(refused), ", ".join(refused))
         self._refused_logged = refused
         return keys
+
+    def _drive_expiry(self, now_ms: int, index_ticks: dict[str, float], option_prices: dict[str, float]) -> None:
+        """Slot 9 sees Nifty spot and option LTPs on this connection. A failure stays off the other slots."""
+        slot = getattr(self, "expiry_slot", None)
+        if slot is None:
+            return
+        try:
+            slot.on_frame(now_ms, spot=index_ticks.get(NIFTY_INDEX_KEY), quotes=option_prices)
+        except Exception:
+            log.exception("expiry straddle slot")
 
     def _scanner_keys(self) -> list[str]:
         """Stocks for the scanner. Missing source means the options desk is unchanged."""

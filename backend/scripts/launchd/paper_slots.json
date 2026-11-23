@@ -1,5 +1,5 @@
 {
-  "_note": "Paper slots started automatically on a normal trading day only (scripts/paper_autostart.py; skips Muhurat and other special sessions). Same as MARKET_DAY_CHECKLIST.md. Set enabled to false to start them by hand. Slot 7 = SENSEX DD Quantman long (strike_premium 800, slip 0.65); slots 1-6 unchanged.",
+  "_note": "Paper slots started automatically on a normal trading day only (scripts/paper_autostart.py; skips Muhurat and other special sessions). Same as MARKET_DAY_CHECKLIST.md. Set enabled to false to start them by hand. Slot 7 = SENSEX DD Quantman long (strike_premium 800, slip 0.65); slots 1-6 unchanged. Slot 9 = Expiry Straddle 0920 (paper only; no_trade when the day is not a Nifty weekly expiry). Slot 8 is the scanner and is not in this list.",
   "enabled": true,
   "start_at_ist": "09:16",
   "give_up_at_ist": "09:45",
@@ -10,6 +10,7 @@
     {"slot": "4", "strategy": "price_channel", "params": {"length": 20, "exit_rule": "premium_1to2"}},
     {"slot": "5", "strategy": "dd_five_confirm", "params": {"mode": "long_only", "use_wr": true, "max_trades_per_day": 10, "last_entry": "15:10", "timeframe": "3m", "strike_premium": 250, "exit_rule": "premium_trail_10"}},
     {"slot": "6", "strategy": "dd_five_confirm", "params": {"mode": "short_only", "use_wr": true, "max_trades_per_day": 10, "last_entry": "15:10", "timeframe": "3m", "strike_premium": 250, "exit_rule": "premium_trail_10"}},
-    {"slot": "7", "strategy": "dd_five_confirm", "params": {"mode": "long_only", "use_wr": true, "max_trades_per_day": 10, "last_entry": "15:10", "timeframe": "3m", "strike_premium": 800, "exit_rule": "premium_trail_10", "symbol": "SENSEX", "slippage_points": 0.65}}
+    {"slot": "7", "strategy": "dd_five_confirm", "params": {"mode": "long_only", "use_wr": true, "max_trades_per_day": 10, "last_entry": "15:10", "timeframe": "3m", "strike_premium": 800, "exit_rule": "premium_trail_10", "symbol": "SENSEX", "slippage_points": 0.65}},
+    {"slot": "9", "strategy": "expiry_straddle", "params": {}}
   ]
 }

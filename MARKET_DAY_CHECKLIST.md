@@ -47,7 +47,9 @@ For every trading day (first used for Monday sessions). Times are IST.
   -10% trailing +10% per +15% (`premium_trail_10`), at most 10 entries a day. All in `paper_slots.json`.
   Strategy 6: the same rules for puts only (`mode: short_only`: close < Supertrend, RSI < 30, close < S1, close < lower
   BB, %R < -70). Strategy 7: same as strategy 5 on **SENSEX** (Friday weeklies, strike_premium **800**, slip **0.65**,
-  BSE_FO keys; Nifty option keys still rank first under the 40-cap). Slots 5–7 show an order-helper table (buy CE/PE,
+  BSE_FO keys; Nifty option keys still rank first under the 40-cap). Slot 9 (Expiry Straddle 0920) paper-sells the
+  Nifty weekly ATM straddle at 09:20 on an expiry day and buys it back at 15:15 or a 30% stop; any other day it
+  records `no_trade` and subscribes to nothing. It is not on the Paper panel. Slots 5–7 show an order-helper table (buy CE/PE,
   strike, paper entry, current stop) for manual orders. A Start late in the day catches up from the recording, so the
   signals are the same.
 - Paper squares off at 15:15:00 at the live bid.

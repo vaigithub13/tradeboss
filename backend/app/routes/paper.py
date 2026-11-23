@@ -70,6 +70,26 @@ def _slot_status(svc: LiveService, slot: str, now: int) -> dict[str, Any]:
     return {"slot": slot, **_runner(svc, slot).status(now)}
 
 
+def _start_expiry(svc: LiveService, slot: str) -> dict[str, Any]:
+    """Slot 9 only. The desk's strategies stay on slots 1-7."""
+    if slot != "9":
+        raise HTTPException(status_code=400, detail="expiry_straddle runs on slot 9")
+    book = getattr(svc, "expiry_slot", None)
+    if book is None:
+        raise HTTPException(status_code=400, detail="unknown slot '9'")
+    now = _now_ms(svc)
+    try:
+        book.start(ist_date(now))
+    except AlreadyRunning as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except PaperError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
+    refresh = getattr(svc, "refresh_subscriptions", None)
+    if refresh is not None:
+        refresh()
+    return book.status_body(now)
+
+
 EXIT_RULES = {"premium_1to2": "1:2 premium (-20% / +40%)", "atr_1to2": "1:2 index ATR(14) (1x / 2x)",
               "premium_trail_10": "premium -10% / no target, trail +10% per +15%"}
 
@@ -87,12 +107,18 @@ async def status(request: Request) -> dict[str, Any]:
     svc = getattr(request.app.state, "live", None)
     if svc is None:
         return {"state": "disabled", "slots": []}
-    return svc.paper.status(_now_ms(svc))
+    body = svc.paper.status(_now_ms(svc))
+    slot = getattr(svc, "expiry_slot", None)
+    if slot is not None:
+        body = {**body, "slots": [*body["slots"], slot.status_body(_now_ms(svc))]}
+    return body
 
 
 @router.post("/start")
 async def start(body: StartBody, request: Request) -> dict[str, Any]:
     svc = _service(request)
+    if body.strategy == "expiry_straddle":
+        return _start_expiry(svc, body.slot)
     if body.strategy not in STRATEGIES:
         raise HTTPException(status_code=400, detail=f"unknown strategy {body.strategy!r}")
     runner = _runner(svc, body.slot)

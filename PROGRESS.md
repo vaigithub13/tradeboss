@@ -2281,3 +2281,12 @@ Slot 8 and auto-take were not touched. `LIVE_TRADING` stays false. The holdout w
 - Universe in the gate: the 29 resolved research equities (bars in both windows). TATAMOTORS stays unresolved. The 23 Nifty 50 names backfilled today have no bars inside DEV or OOS, so those files were not read.
 - **None passed.** Costs are about 0.12–0.21R against a gross R near zero. Closest: gap_fill at ₹600, breadth 17% (ASIANPAINT, BAJFINANCE, ITC, SUNPHARMA, TITAN), walk-forward DEV +3.2k and OOS −2.1k PF 0.80. Report: `data/validation/phase_c_scanner_setups_2026-11-23.md`.
 - The scanner's positive mark is GOOD, not BUY. No taken trade was marked GOOD. COIN FLIP lost less than AVOID on vwap_cross (both risks) and on gap_fill at ₹300. It did not on gap_fill at ₹600 or on orb15.
+
+## 23 Nov 2026 — Expiry Straddle 0920 (paper slot 9)
+
+Paper only. Slots 1–8 are unchanged. `LIVE_TRADING` stays false. The Paper panel is unchanged.
+
+- Slot 9 runs `ExpiryStraddle`. Daily auto-start posts it at 09:16 with slots 1–7. `is_expiry` comes from the default calendar. Size is one lot from `lot_sizes.json`. A day that is not a Nifty weekly expiry is saved as `no_trade` and subscribes to nothing.
+- On an expiry day, 09:20–09:21:59 takes the Nifty spot, picks the ATM strike, resolves that week's CE and PE from the instrument master, and subscribes both on the existing feed (held tier, one connection). Each tick of those keys updates the leg. At 15:15 the open legs are bought back at the last LTP, retried each minute until the book is `done`. A clock after 09:21:59 with no entry is `missed_entry`.
+- The day file is `data/paper/slot9/<day>.json` (the book's `to_dict()`). A restart loads it with `from_dict`.
+- Tests: `tests/test_expiry_straddle_slot.py` (fake feed, no socket) and `tests/test_expiry_straddle.py`.
