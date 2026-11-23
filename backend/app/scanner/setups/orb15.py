@@ -28,7 +28,19 @@ def _range(session: list[Bar]) -> tuple[float, float, float] | None:
     return hi, lo, (hi - lo) / mid
 
 
-def find_orb(bars: list[Bar], *, as_of: int | None = None) -> list[Hit]:
+WIDTH_MIN = 0.003
+WIDTH_MAX = 0.02
+VOLUME_MULT = 1.5
+
+
+def find_orb(
+    bars: list[Bar],
+    *,
+    as_of: int | None = None,
+    min_width: float = WIDTH_MIN,
+    max_width: float = WIDTH_MAX,
+    volume_mult: float = VOLUME_MULT,
+) -> list[Hit]:
     bars = closed_bars(bars, as_of)
     hits: list[Hit] = []
     for session in split_sessions(bars):
@@ -36,7 +48,7 @@ def find_orb(bars: list[Bar], *, as_of: int | None = None) -> list[Hit]:
         if rng is None:
             continue
         hi, lo, width = rng
-        if not (0.003 <= width <= 0.02):
+        if not (min_width <= width <= max_width):
             continue
         later = [b for b in session if minute_of(int(b["time"])) >= RANGE_END_MIN]
         if not later:
@@ -80,7 +92,7 @@ def find_orb(bars: list[Bar], *, as_of: int | None = None) -> list[Hit]:
             continue
         idx = next(i for i, b in enumerate(bars) if int(b["time"]) == int(trigger["time"]) and day_of(int(b["time"])) == day_of(int(trigger["time"])))
         avg = prior_avg_volume(bars, idx, 20)
-        if avg is None or avg <= 0 or float(trigger["volume"]) < 1.5 * avg:
+        if avg is None or avg <= 0 or float(trigger["volume"]) < volume_mult * avg:
             continue
         hits.append(
             Hit(

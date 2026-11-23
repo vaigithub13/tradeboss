@@ -2272,3 +2272,12 @@ Paper only. No order route. Slots 1–7, GEX, the option chain, and the Sensex p
 - **UI:** Stock Scanner tab hides the Nifty chart the same way the other desks do. Detail chart is its own small 5-minute view.
 - Tests: `tests/test_scanner_*.py` (55 with the key-cap checks) and frontend tab, sort, and settings tests.
 - **23 Nov follow-up:** under 8 fires, history falls back to the whole universe (`history_source` stock or pooled). `max_open_positions` defaults to 1, beside `max_trades_per_day` 3. `auto_trade` defaults off and the settings toggle stays disabled until `data/scanner/replay/` has a finished file stamped `SCANNER_CODE_VERSION`. Live switch left off.
+
+## 23 Nov 2026 — Phase C on the scanner setups (research only)
+
+Slot 8 and auto-take were not touched. `LIVE_TRADING` stays false. The holdout was not opened. `data/` is not committed.
+
+- Setups `vwap_cross`, `gap_fill`, `orb15` as scanner code `2026-11-23.2`: stop on the correct side, minimum stop 0.5% of price, same-day duplicate plans merged. Phase C gate unchanged: equity_intraday costs, ₹300 and ₹600, ₹75k cap (quantity capped), live timing, square-off 15:15, entries before 14:30. DEV 2022-01-03..2024-12-31, OOS 2025-01-01..2026-06-30.
+- Universe in the gate: the 29 resolved research equities (bars in both windows). TATAMOTORS stays unresolved. The 23 Nifty 50 names backfilled today have no bars inside DEV or OOS, so those files were not read.
+- **None passed.** Costs are about 0.12–0.21R against a gross R near zero. Closest: gap_fill at ₹600, breadth 17% (ASIANPAINT, BAJFINANCE, ITC, SUNPHARMA, TITAN), walk-forward DEV +3.2k and OOS −2.1k PF 0.80. Report: `data/validation/phase_c_scanner_setups_2026-11-23.md`.
+- The scanner's positive mark is GOOD, not BUY. No taken trade was marked GOOD. COIN FLIP lost less than AVOID on vwap_cross (both risks) and on gap_fill at ₹300. It did not on gap_fill at ₹600 or on orb15.

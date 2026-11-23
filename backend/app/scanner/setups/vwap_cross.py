@@ -15,12 +15,25 @@ from app.scanner.bars import (
 from app.scanner.models import Hit
 
 
-def find_vwap_crosses(bars: list[Bar], *, as_of: int | None = None) -> list[Hit]:
+VOLUME_MULT = 1.2
+
+
+def find_vwap_crosses(
+    bars: list[Bar],
+    *,
+    as_of: int | None = None,
+    volume_mult: float = VOLUME_MULT,
+    hold_time: int | None = None,
+) -> list[Hit]:
     bars = closed_bars(bars, as_of)
     vwaps = session_vwap(bars)
     atrs = wilder_atr(bars, 14)
     hits: list[Hit] = []
-    for i in range(21, len(bars)):
+    if hold_time is None:
+        indexes: range | list[int] = range(21, len(bars))
+    else:
+        indexes = [i for i, bar in enumerate(bars) if int(bar["time"]) == int(hold_time) and i >= 21]
+    for i in indexes:
         hold = i
         cross = i - 1
         prior = i - 2
@@ -29,7 +42,7 @@ def find_vwap_crosses(bars: list[Bar], *, as_of: int | None = None) -> list[Hit]
         if not entry_allowed(int(bars[hold]["time"])):
             continue
         avg = prior_avg_volume(bars, cross, 20)
-        if avg is None or avg <= 0 or float(bars[cross]["volume"]) < 1.2 * avg:
+        if avg is None or avg <= 0 or float(bars[cross]["volume"]) < volume_mult * avg:
             continue
         prev_c, cross_c, hold_c = float(bars[prior]["close"]), float(bars[cross]["close"]), float(bars[hold]["close"])
         prev_v, cross_v, hold_v = float(vwaps[prior]), float(vwaps[cross]), float(vwaps[hold])

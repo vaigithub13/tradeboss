@@ -25,7 +25,16 @@ def _opening_range(session: list[Bar]) -> tuple[float, float] | None:
     return max(float(b["high"]) for b in window), min(float(b["low"]) for b in window)
 
 
-def find_gaps(bars: list[Bar], *, prev_close: float | None, as_of: int | None = None) -> list[Hit]:
+GAP_MIN = 0.01
+
+
+def find_gaps(
+    bars: list[Bar],
+    *,
+    prev_close: float | None,
+    as_of: int | None = None,
+    gap_min: float = GAP_MIN,
+) -> list[Hit]:
     """`prev_close` applies to the last session in `bars`. Earlier sessions are context for ATR and swings."""
     if prev_close is None or prev_close <= 0:
         return []
@@ -42,12 +51,12 @@ def find_gaps(bars: list[Bar], *, prev_close: float | None, as_of: int | None = 
         return []
     open_px = float(session[0]["open"])
     gap = (open_px - prev_close) / prev_close
-    if abs(gap) <= 0.01:
+    if abs(gap) <= gap_min:
         return []
     atrs = wilder_atr(bars, 14)
     rng = _opening_range(session)
     hits: list[Hit] = []
-    if gap > 0.01 and rng is not None:
+    if gap > gap_min and rng is not None:
         hi, _lo = rng
         for bar in session:
             if minute_of(int(bar["time"])) < RANGE_END_MIN:
@@ -57,7 +66,7 @@ def find_gaps(bars: list[Bar], *, prev_close: float | None, as_of: int | None = 
             if float(bar["close"]) > hi:
                 hits.append(_hit(bars, bar, "gap_go", "long", atrs))
                 break
-    if gap < -0.01 and rng is not None:
+    if gap < -gap_min and rng is not None:
         _hi, lo = rng
         for bar in session:
             if minute_of(int(bar["time"])) < RANGE_END_MIN:
@@ -72,10 +81,10 @@ def find_gaps(bars: list[Bar], *, prev_close: float | None, as_of: int | None = 
         if not entry_allowed(int(bar["time"])):
             break
         close = float(bar["close"])
-        if gap > 0.01 and close < open_px:
+        if gap > gap_min and close < open_px:
             hits.append(_hit(bars, bar, "gap_fill", "short", atrs))
             break
-        if gap < -0.01 and close > open_px:
+        if gap < -gap_min and close > open_px:
             hits.append(_hit(bars, bar, "gap_fill", "long", atrs))
             break
     return hits

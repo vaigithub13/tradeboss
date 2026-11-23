@@ -32,6 +32,7 @@ def build_plan(
     *,
     symbol: str,
     next_bar: Bar | None = None,
+    min_stop_fraction: float = MIN_STOP_FRACTION,
 ) -> Plan:
     """`next_bar` is the bar after the trigger. Required when entry_mode is next_open and the bar has opened."""
     target_r = _target_r(settings)
@@ -124,8 +125,9 @@ def build_plan(
     if wrong_side:
         return _skip("stop is not on the right side of entry")
     risk = abs(entry - stop)
-    if risk <= 0 or (entry > 0 and risk / entry < MIN_STOP_FRACTION):
-        return _skip("stop is tighter than 0.5% of price")
+    if risk <= 0 or (entry > 0 and risk / entry < min_stop_fraction):
+        pct = "0.5%" if abs(min_stop_fraction - MIN_STOP_FRACTION) < 1e-12 else f"{min_stop_fraction * 100:g}%"
+        return _skip(f"stop is tighter than {pct} of price")
 
     level = hit.resistance if side == "long" else hit.support
     if settings.target_mode == "next_level" and level is not None:
