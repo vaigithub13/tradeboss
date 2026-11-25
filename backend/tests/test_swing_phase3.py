@@ -145,12 +145,12 @@ def test_entry_is_the_next_open_size_follows_equity_and_a_week_ends_on_friday():
     bars["sma5"] = 90.0
     bars["prev_close"] = [99, 100, 100, 100, 100, 100]
     signals = pd.DataFrame([_signal(days[0], atr=1.0)])
-    spec = BookSpec(Decimal("10000"), 2, days[0], days[-1])
+    spec = BookSpec(Decimal("30000"), 3, days[0], days[-1])
     result = run_research(bars, signals, DeliveryTable.load(), spec, calendar=days)
     trade = result["trades"].iloc[0]
     assert trade["signal_date"] == days[0].isoformat()
     assert trade["entry_date"] == days[1].isoformat()
-    assert trade["qty"] == int(Decimal("5000") // Decimal(str(trade["entry_fill"])))
+    assert trade["qty"] == int(Decimal("10000") // Decimal(str(trade["entry_fill"])))
     assert trade["qty"] < 100
     assert trade["reason"] == "time"
     assert trade["hold_sessions"] == 5
@@ -164,7 +164,7 @@ def test_entry_is_the_next_open_size_follows_equity_and_a_week_ends_on_friday():
         short,
         pd.DataFrame([_signal(week[0], exit_kind="week", atr=10.0)]),
         DeliveryTable.load(),
-        BookSpec(Decimal("10000"), 2, week[0], week[-1]),
+        BookSpec(Decimal("20000"), 2, week[0], week[-1]),
         calendar=week,
         week_ends=ends,
     )
@@ -244,3 +244,91 @@ def test_event_guard_and_the_gate_numbers():
     assert pnl_without_top_winners([10, 9, 8, -3, -2], 2) == pytest.approx(10 + 9 + 8 - 3 - 2 - 10 - 9)
     assert cliff_labels(0.10, 50.0, [("atr -20%", 0.04, 10.0)])
     assert cliff_labels(0.10, 50.0, [("atr +20%", 0.09, 40.0)]) == []
+
+
+def test_a_split_in_the_raw_series_does_not_change_the_fill():
+    """The hold uses px, the adjusted series. A raw 2-for-1 print is not a 50% loss."""
+    days = _sessions(8)
+    bars = _frame(days, close=[100.0] * 8, high=[101.0] * 8, low=[99.0] * 8, open_=[100.0] * 8)
+    bars["sma5"] = 90.0
+    bars["prev_close"] = 100.0
+    bars["open"] = [200.0, 200.0, 200.0, 50.0, 50.0, 50.0, 50.0, 50.0]
+    bars["close"] = [200.0, 200.0, 200.0, 50.0, 50.0, 50.0, 50.0, 50.0]
+    result = run_research(
+        bars,
+        pd.DataFrame([_signal(days[0], atr=20.0)]),
+        DeliveryTable.load(),
+        BookSpec(Decimal("20000"), 1, days[0], days[-1]),
+        calendar=days,
+    )
+    trade = result["trades"].iloc[0]
+    assert trade["entry_open"] == pytest.approx(100.0)
+    assert trade["exit_px"] == pytest.approx(100.0)
+    assert trade["exit_date"] == days[5].isoformat()
+    assert trade["pnl"] / trade["notional"] > -0.05
+
+
+def test_five_sessions_without_a_bar_sells_the_last_close_and_equity_stays_positive():
+    days = _sessions(12)
+    present = [days[0], days[1], days[2], days[8]]
+    bars = _frame(present, close=[100.0, 100.0, 110.0, 110.0], high=[101.0] * 4, low=[99.0] * 4, open_=[100.0] * 4)
+    bars["sma5"] = 200.0
+    bars["prev_close"] = 100.0
+    held = run_research(
+        bars,
+        pd.DataFrame([_signal(days[0], atr=30.0)]),
+        DeliveryTable.load(),
+        BookSpec(Decimal("20000"), 1, days[0], days[-1]),
+        calendar=days,
+    )
+    trade = held["trades"].iloc[0]
+    assert trade["reason"] == "no_bar"
+    assert trade["exit_date"] == days[7].isoformat()
+    assert trade["exit_px"] == pytest.approx(110.0)
+
+    ended = _frame(days[:3], close=[100.0, 100.0, 105.0], high=[101.0] * 3, low=[99.0] * 3, open_=[100.0] * 3)
+    ended["sma5"] = 200.0
+    ended["prev_close"] = 100.0
+    listed = run_research(
+        ended,
+        pd.DataFrame([_signal(days[0], atr=30.0)]),
+        DeliveryTable.load(),
+        BookSpec(Decimal("20000"), 1, days[0], days[-1]),
+        calendar=days,
+    )
+    gone = listed["trades"].iloc[0]
+    assert gone["reason"] == "delisted"
+    assert gone["exit_date"] == days[3].isoformat()
+    assert gone["exit_px"] == pytest.approx(105.0)
+
+    dust = _frame(
+        days[:6],
+        close=[100.0, 100.0, 0.01, 0.01, 0.01, 0.01],
+        high=[101.0, 101.0, 0.02, 0.02, 0.02, 0.02],
+        low=[99.0, 99.0, 0.01, 0.01, 0.01, 0.01],
+        open_=[100.0, 100.0, 0.01, 0.01, 0.01, 0.01],
+    )
+    dust["sma5"] = 200.0
+    dust["prev_close"] = [99.0, 100.0, 100.0, 0.01, 0.01, 0.01]
+    wiped = run_research(
+        dust,
+        pd.DataFrame([_signal(days[0], atr=50.0)]),
+        DeliveryTable.load(),
+        BookSpec(Decimal("5050"), 1, days[0], days[5]),
+        calendar=days[:6],
+    )
+    assert wiped["trades"].iloc[0]["notional"] >= 5000
+    assert float(wiped["daily"]["equity"].min()) >= 0
+    assert float(wiped["daily"]["cash"].min()) >= 0
+
+    pricey = _frame(days[:3], close=[4000.0] * 3, high=[4001.0] * 3, low=[3999.0] * 3, open_=[4000.0] * 3)
+    pricey["sma5"] = 200.0
+    pricey["prev_close"] = 4000.0
+    small = run_research(
+        pricey,
+        pd.DataFrame([_signal(days[0], atr=30.0)]),
+        DeliveryTable.load(),
+        BookSpec(Decimal("7000"), 1, days[0], days[2]),
+        calendar=days[:3],
+    )
+    assert small["trades"].empty

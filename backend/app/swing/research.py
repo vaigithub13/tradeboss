@@ -8,9 +8,11 @@ Holdout 2026-07-01 through 2026-10-01 is refused unless the caller has already
 decided the strategy passed and sets `holdout=True`.
 
 Sizing is equity divided by the slot count at the entry, then cut so the buy
-does not spend more cash than the account has. A position still sells at the
-previous close when the next session is an event-guard flag, and a lower
-circuit lock is not sold.
+does not spend more cash than the account has. A fill below ₹5,000 is skipped.
+A position still sells at the previous close when the next session is an
+event-guard flag, and a lower circuit lock is not sold. Five sessions with no
+bar, or a series that has ended, are sold at the last close. Cash is not
+allowed to go below zero.
 """
 
 from __future__ import annotations
@@ -37,6 +39,7 @@ FORWARD_START = date(2026, 10, 2)
 PRIMARY_CAPITAL = Decimal("50000")
 PRIMARY_SLOTS = 5
 PRIMARY_BROKERAGE = "upstox"
+MIN_NOTIONAL = Decimal("5000")
 RANDOM_SEEDS = tuple(range(1, 21))
 MIN_OOS_TRADES = 100
 MIN_AVG_TRADE = 0.005
@@ -162,6 +165,10 @@ def run_research(
         lookup = bar_lookup(work)
     ends = week_ends or set()
     index = {day: i for i, day in enumerate(calendar)}
+    last_bar: dict[str, date] = {}
+    if not work.empty and "lineage" in work.columns and "date" in work.columns:
+        last_seen = work.groupby(work["lineage"].astype(str), sort=False)["date"].max()
+        last_bar = {str(lineage): as_date(day) for lineage, day in last_seen.items()}
     nxt = {calendar[i]: calendar[i + 1] for i in range(len(calendar) - 1)}
     blocked = blocked_entries(flags, calendar, 2)
     flag_set = set()
@@ -196,8 +203,15 @@ def run_research(
         nonlocal cash
         slip = _slip(pos["size"], spec)
         fill = slipped("SELL", price, slip)
+        proceeds = fill * pos["qty"]
         charges = _charge(costs, spec, "SELL", fill, pos["qty"], day).total
-        cash += fill * pos["qty"] - charges
+        # A cash account cannot pay charges it does not have. Equity stays at or above zero.
+        affordable = cash + proceeds
+        if charges > affordable:
+            charges = affordable
+        cash += proceeds - charges
+        if cash < 0:
+            cash = Decimal(0)
         bought = pos["entry_fill"] * pos["qty"] + pos["entry_charges"]
         slip_rupees = (pos["entry_fill"] - pos["entry_open"]) * pos["qty"] + (price - fill) * pos["qty"]
         cost = pos["entry_charges"] + charges + slip_rupees
@@ -230,7 +244,22 @@ def run_research(
         exited: set[str] = set()
         for lineage, pos in list(positions.items()):
             bar = row(lineage, today)
-            if bar is None or _lower_lock(bar[0], bar[1], bar[2], bar[3], bar[5]):
+            if bar is None:
+                pos["absent"] = int(pos.get("absent", 0)) + 1
+                last = last_close.get(lineage)
+                ended = last_bar.get(lineage, today) < today
+                if last is not None and (ended or pos["absent"] >= 5 or today == window[-1]):
+                    if ended:
+                        reason = "delisted"
+                    elif pos["absent"] >= 5:
+                        reason = "no_bar"
+                    else:
+                        reason = "sample_end"
+                    sell(pos, today, Decimal(str(last)), reason)
+                    exited.add(lineage)
+                continue
+            pos["absent"] = 0
+            if _lower_lock(bar[0], bar[1], bar[2], bar[3], bar[5]):
                 continue
             open_ = Decimal(str(bar[0]))
             if (lineage, today) in flag_set or open_ <= pos["stop"]:
@@ -253,7 +282,7 @@ def run_research(
             open_ = Decimal(str(bar[0]))
             fill = slipped("BUY", open_, _slip(str(signal.size), spec))
             qty = _buy_qty(cash, fill, slot, costs, spec, today)
-            if qty < 1:
+            if qty < 1 or fill * qty < MIN_NOTIONAL:
                 continue
             charges = _charge(costs, spec, "BUY", fill, qty, today).total
             cash -= fill * qty + charges
@@ -327,6 +356,8 @@ def run_research(
             if price is not None:
                 marked += Decimal(str(price)) * pos["qty"]
         equity = cash + marked
+        if equity < 0:
+            equity = Decimal(0)
         daily.append(
             {
                 "date": today.isoformat(),

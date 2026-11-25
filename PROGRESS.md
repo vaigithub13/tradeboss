@@ -2420,6 +2420,20 @@ Forward, primary book, not part of the gate: S1 16 trades ₹−6,204, S2 15 ₹
 
 A held name with no bar stays at its last close and is not sold, including on the last day. S4 DEV shows it in 2021: no trades, equity stuck at ₹5,661, exposure 100%. Closed trades on that book already lost ₹44,207. Sanity found no fill on the signal day and no entry inside the holdout. The worker exited 0.
 
+## 26 Nov 2026 — Swing Phase 3 sanity: the prices were fine, the book was not
+
+The −8% average trade was a fixed delivery charge on positions of a few rupees, not a mixed price series. Every entry matched the research open. A ₹1 crore book with no costs and no slippage has an average trade near the universe's 5-day open-to-close return (about 0%), and win rates of 39–64%, not 21–29%. The book now skips a fill under ₹5,000, sells a name with no bar for 5 sessions (or a series that has ended) at the last close, and does not let cash go below zero. Same gate, same windows. Holdout stayed sealed.
+
+| Strategy | DEV CAGR | DEV DD | OOS CAGR | OOS DD | PF | Trades | Win | Avg trade | Cost | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| S1 Breakout | −11.3% | 52.5% | −15.2% | 57.0% | 0.63 | 214 | 30.8% | −1.7% | 1.6% | FAIL |
+| S2 Momentum rank | −11.4% | 58.0% | −14.3% | 51.9% | 0.38 | 69 | 34.8% | −4.8% | 1.6% | FAIL |
+| S3 Pullback | −11.0% | 52.0% | −14.8% | 52.7% | 0.37 | 205 | 41.5% | −1.8% | 1.7% | FAIL |
+| S4 Near 52-week high | −11.4% | 54.7% | −16.2% | 55.0% | 0.45 | 179 | 25.7% | −2.2% | 1.7% | FAIL |
+| S5 Gap-and-go | −11.0% | 50.5% | −14.5% | 51.9% | 0.53 | 174 | 32.8% | −1.9% | 1.7% | FAIL |
+
+All five still fail. S2 also has fewer than 100 OOS trades. Gross, zero-cost, ₹1 crore, 5 positions: S1 DEV −0.53% / OOS −0.32% (universe about 0%, random about −0.1%). S2 DEV −0.03% / OOS −0.54%. S3 DEV +0.34% / OOS +0.28% (random about −0.2%). S4 DEV +0.38% / OOS −0.03%. S5 DEV −1.10% / OOS −0.27%. S2's gross book lags the Nifty 500 price index by more than 30 points in 2021 (−3.9% vs +30%), 2022 (−33.6% vs +2.8%), 2023 (−21.3% vs +25.5%), and 2024 (−23.8% vs +15.0%). Those years are strings of 10–30% stop-gaps, listed in `data/validation/swing_phase3_sanity_2026-11-26.md`. OOS large and small both lose except S2 large, which is one trade, ₹+264.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
