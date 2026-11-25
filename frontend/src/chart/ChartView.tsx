@@ -62,6 +62,7 @@ import {
 import type { GexResponse } from "../api/gex";
 import { gexBars } from "./gex";
 import { GexPrimitive } from "./gexPrimitive";
+import { SimilarShadePrimitive, type PatternShade } from "./similarShade";
 import { whitespaceTimes } from "../draw/model";
 import { loadOptionNotes, loadPositionLots, loadPositionMinutes, positionViews, publishPositionViews } from "../draw/positionFeed";
 import { isPositionTool } from "../draw/position";
@@ -122,11 +123,13 @@ interface Props {
   cursor?: number | null;
   /** Nifty gamma exposure: net GEX bars per strike at the right edge (null = hidden) */
   gex?: GexResponse | null;
+  /** Similar-pattern window and the candles that followed it. */
+  patternShade?: PatternShade | null;
 }
 
 export function ChartView({
   symbol, displayName, timeframe, scope, candles: loadedCandles, loadingOlder, loadingNewer, onNeedOlder, onNeedNewer,
-  markers = [], focus = null, onPickTime, tradeCard, levels = [], cursor = null, gex = null,
+  markers = [], focus = null, onPickTime, tradeCard, levels = [], cursor = null, gex = null, patternShade = null,
 }: Props) {
   // Nifty by default; the Sensex tab provides its own chart + indicator stores.
   const { id: scopeId, chart: useChartStore, indicators: useIndicatorStore } = useChartScope();
@@ -140,6 +143,7 @@ export function ChartView({
   const fvgPrimitiveRef = useRef<FvgPrimitive | null>(null);
   const fhbPrimitiveRef = useRef<FirstHourBoxPrimitive | null>(null);
   const gexPrimitiveRef = useRef<GexPrimitive | null>(null);
+  const similarShadeRef = useRef<SimilarShadePrimitive | null>(null);
   const drawBagRef = useRef<DrawBag>({ candles: [], timeframe, cursor });
   const timeframeRef = useRef(timeframe);
   const candlesRef = useRef<readonly Candle[]>(candles);
@@ -359,6 +363,9 @@ export function ChartView({
     candleSeries.attachPrimitive(fhb);
     const gexBarsPrimitive = new GexPrimitive();
     candleSeries.attachPrimitive(gexBarsPrimitive);
+    const similarShade = new SimilarShadePrimitive();
+    candleSeries.attachPrimitive(similarShade);
+    similarShadeRef.current = similarShade;
     const unbind = bindDrawings(chart, candleSeries, el, drawings, drawBagRef);
 
     chartRef.current = chart;
@@ -383,6 +390,7 @@ export function ChartView({
       fvgPrimitiveRef.current = null;
       fhbPrimitiveRef.current = null;
       gexPrimitiveRef.current = null;
+      similarShadeRef.current = null;
       layerRef.current = null;
     };
   }, []);
@@ -454,6 +462,10 @@ export function ChartView({
     if (!primitive) return;
     primitive.setBars(gex?.available && gex.spot ? gexBars(gex.strikes, gex.spot) : []);
   }, [gex]);
+
+  useEffect(() => {
+    similarShadeRef.current?.setSpan(patternShade);
+  }, [patternShade]);
 
   // ---- push candle data first (never blocked by indicators)
   useEffect(() => {

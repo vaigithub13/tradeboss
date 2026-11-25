@@ -2291,3 +2291,13 @@ Paper only. Slots 1–8 are unchanged. `LIVE_TRADING` stays false.
 - The day file is `data/paper/slot9/<day>.json` (the book's `to_dict()`). A restart loads it with `from_dict`.
 - Tests: `tests/test_expiry_straddle_slot.py` (fake feed, no socket) and `tests/test_expiry_straddle.py`.
 - The Paper side panel shows slot 9 on its own card: book status, spot, strike, each leg, net / gross / charges from `summary(app_cost_fn(day))`, and that ISO week's totals. Research line: build PF 1.60, validate PF 2.20, forward PF 2.80. Slots 1–8 stay on their own cards.
+
+## 25 Nov 2026 — Similar patterns (read-only context)
+
+No signal, no slot, no order. `LIVE_TRADING` stays false. The holdout 2026-07-01..2026-10-01 is excluded from the walk-forward calls and from the match library. Cache lives under `data/similar/` and is not committed.
+
+- Intraday windows that cross the overnight gap are dropped. The gap is not a feature. Only `normal` sessions are read, so muhurat, special, and weekend bars stay out.
+- Walk-forward is a sampled numpy search: 10:15, 11:30, 13:15, and 14:15 IST, one process, 120s cap. It does not run on the live-feed loop.
+- NIFTY 5m, window 30, 2,276 sample points, all evaluated, 11.2s, not capped. Hit rate vs the majority base rate: 5 candles 49.0% vs 51.7% (n=1,952); 10 candles 50.3% vs 51.2% (n=1,954); 20 candles 48.8% vs 50.5% (n=946). All three are no better than a coin flip.
+- A 30-bar 15m window cannot sit inside one cash session (25 bars), so that window has no matches. The 15m study uses window 8. 3,414 sample points, all evaluated, 0.9s, not capped. 5 candles: 50.7% vs 51.6% (n=2,898), coin flip. 10 candles: 47.9% vs 51.2% (n=974), below the base rate. 20 candles: no forward stays inside the session (n=0).
+- Similar days, NIFTY at 10:15, close above the open: hit 50.7% vs base 50.1% on 946 calls (1,136 sessions evaluated, 0.9s, not capped). No better than a coin flip. Each outcome line shows the match count and the all-day base rate. Verdict colour stays off when n is under 10.

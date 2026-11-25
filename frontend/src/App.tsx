@@ -51,6 +51,9 @@ import { ChartScopeProvider, NIFTY_SCOPE } from "./store/chartScope";
 import { useSensexChartStore } from "./store/chartStore";
 import { useSensexIndicatorStore } from "./store/indicatorStore";
 import { chartHidden, type MainView } from "./chart/controls";
+import type { PatternShade } from "./chart/similarShade";
+import { SimilarPanel } from "./panels/SimilarPanel";
+import type { CandleMatch, SimilarTimeframe } from "./api/similar";
 
 const POLL_INTERVAL_MS = 3000;
 const NO_PAPER_SIGNALS: PaperSignal[] = [];
@@ -308,7 +311,22 @@ export default function App() {
   }
   const tradeOverlay = usePaperTradesStore((s) => s.overlay);
   const paperFocus = usePaperTradesStore((s) => s.focus);
-  const chartFocus = !paperFocus ? focus : !focus || paperFocus.token > focus.token ? paperFocus : focus;
+  const [similarOpen, setSimilarOpen] = useState(false);
+  const [patternShade, setPatternShade] = useState<PatternShade | null>(null);
+  const [similarFocus, setSimilarFocus] = useState<{ token: number; time: number } | null>(null);
+  const chartFocus = [focus, paperFocus, similarFocus].reduce<{ token: number; time: number } | null>(
+    (best, item) => (!item ? best : !best || item.token > best.token ? item : best),
+    null,
+  );
+  const openSimilarMatch = useCallback((match: CandleMatch, tf: SimilarTimeframe) => {
+    void (async () => {
+      const chart = useChartStore.getState();
+      if (chart.timeframe !== tf) await chart.setTimeframe(tf);
+      await useChartStore.getState().showRange(match.start, match.forward_end);
+      setPatternShade({ start: match.start, end: match.end, forwardEnd: match.forward_end });
+      setSimilarFocus({ token: Date.now(), time: match.start });
+    })();
+  }, []);
   if ((symbol === "NIFTY50" || symbol === "SENSEX") && tradeOverlay) {
     for (const m of tradeOverlay.markers) {
       markers.push({
@@ -422,6 +440,16 @@ export default function App() {
           }}
         >
           Analyse
+        </button>
+        <button
+          type="button"
+          className={`rounded border px-2 py-1 text-xs ${
+            similarOpen ? "border-sky-400/60 bg-sky-400/10 text-sky-200" : "border-white/15 text-white/80"
+          }`}
+          onClick={() => setSimilarOpen((open) => !open)}
+          data-testid="similar-toggle"
+        >
+          Similar
         </button>
         <button
           type="button"
@@ -549,6 +577,7 @@ export default function App() {
             ]}
             cursor={replayActive ? replayCursorTime : null}
             gex={gexShown}
+            patternShade={patternShade}
           />
           {!marketPanelOpen && <MarketViewBox />}
           {gexOn && (gexData || gexError) && (
@@ -579,6 +608,17 @@ export default function App() {
           </div>
         )}
         {marketPanelOpen && <MarketViewPanel />}
+        {similarOpen && (
+          <SimilarPanel
+            symbol={symbol}
+            asOf={replayActive ? replayCursorTime : null}
+            onOpenMatch={openSimilarMatch}
+            onClose={() => {
+              setSimilarOpen(false);
+              setPatternShade(null);
+            }}
+          />
+        )}
         {paperOpen && (
           <PaperPanel
             onOpenDashboard={() => {

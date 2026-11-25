@@ -27,6 +27,7 @@ from app.routes.options import router as options_router
 from app.routes.paper import router as paper_router
 from app.routes.pine import router as pine_router
 from app.routes.scanner import router as scanner_router
+from app.routes.similar import router as similar_router
 from app.routes.upstox import router as upstox_router
 from app.upstox.instruments import snapshot_due, take_bse_snapshot, take_snapshot
 
@@ -149,6 +150,7 @@ app.include_router(upstox_router)
 app.include_router(live_router)
 app.include_router(paper_router)
 app.include_router(scanner_router)
+app.include_router(similar_router)
 app.include_router(pine_router)
 app.include_router(ai_router)
 app.add_middleware(
