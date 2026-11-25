@@ -2312,3 +2312,14 @@ No order, no slot, no signal. `LIVE_TRADING` stays false. The log under `data/si
 - "See what happened next" steps through the next 5, then 10, then 20 candles, and only once those candles have closed.
 - After 15:30, and again from the 16:35 session-stop before the backend is signalled, each prediction is marked hit or miss in a separate daily file: hypothetical index points in the called direction, and the 1-hour adverse move. Points have no costs.
 - The review panel shows today's table and week, month, slot, and overall totals with none excluded and included. The plain verdict appears once there are 50 directional calls.
+
+## 25 Nov 2026 — Similar days, magnitude instead of direction (offline)
+
+No UI, no slot, no order. Holdout 2026-07-01..2026-10-01 stayed out of the queries and the match library. Same 20-neighbour sample as the similar-days walk, NIFTY only, 1,136 sessions. A call is useful only if it beats yesterday's range plus India VIX.
+
+Trend day is the market view's realised rule: the close-to-open move is at least half the session range. Rest-of-day range is high−low after the clock. A first-hour break is any completed 30-minute close outside the 09:15 and 09:45 box.
+
+- **09:30 rest-of-day range:** hit 58.4% vs majority base 51.8% on 560 calls (above the base rate). Baseline 62.0% on the same calls. Spearman 0.388 versus baseline 0.451. No better than the baseline.
+- **10:15 rest-of-day range:** hit 59.6% vs base 52.7% on 520 calls (above the base rate). Baseline 62.5%. Spearman 0.377 versus 0.428. No better than the baseline.
+- **Trend vs range:** 09:30 hit 46.7% vs base 50.2% on 897 calls (below the base rate). 10:15 hit 50.5% vs 51.9% on 916 calls (coin flip). Neither beats the baseline. Rank correlation is about zero.
+- **First-hour break:** the outcome is yes on 86.6% of days, and the 20 neighbours say yes on every call (1,116 calls, both clocks). Hit rate equals that base rate. The baseline does the same. No better than a coin flip.
