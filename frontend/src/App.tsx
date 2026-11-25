@@ -316,7 +316,7 @@ export default function App() {
   const [patternShade, setPatternShade] = useState<PatternShade | null>(null);
   const [similarFocus, setSimilarFocus] = useState<{ token: number; time: number } | null>(null);
   const [predictionArrows, setPredictionArrows] = useState(true);
-  const [snapshots, setSnapshots] = useState<{ query: { end: number }; direction: "up" | "down" | "none"; up_count: number; match_n: number; kind: string }[]>([]);
+  const [snapshots, setSnapshots] = useState<{ query: { end: number }; direction: "up" | "down" | "none"; up_count: number; match_n: number; kind: string; status?: string }[]>([]);
   const snapshotDay = replayActive && replayCursorTime != null ? istDay(replayCursorTime) : istDay();
   useEffect(() => {
     if (!symbol || !["NIFTY50", "SENSEX", "BANKNIFTY"].includes(symbol)) {

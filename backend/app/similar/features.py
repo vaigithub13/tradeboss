@@ -102,10 +102,9 @@ def window_ends(times: np.ndarray, window: int, timeframe: str, *, span_sessions
     """End index of every window of ``window`` bars.
 
     Daily windows are sequences of daily bars. Intraday windows must sit on one
-    IST date and cover ``window`` adjacent bars of that timeframe. The prediction
-    log is the exception: ``span_sessions`` keeps a window that reaches into the
-    previous cash session, because a 30-bar 15-minute window cannot fit in one
-    session. The overnight gap is still not a feature.
+    IST date and cover ``window`` adjacent bars of that timeframe. The overnight
+    gap is not a feature. ``span_sessions`` is only for a caller that has already
+    decided to keep a window reaching into the previous session.
     """
     n = len(times)
     if window < 2 or n < window:

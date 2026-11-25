@@ -104,17 +104,27 @@ export function fetchSimilarCandles(
   return getJson<CandleResult>(`/api/similar/candles?${q}`, signal);
 }
 
+export interface PredictionSettings {
+  timeframe: string | null;
+  window: number | null;
+  horizon_bars: number | null;
+  library_version: string;
+  span_sessions?: boolean;
+}
+
 export interface SavedPrediction {
   id: string;
   slot: string;
   symbol: string;
   kind: "candles" | "days";
   direction: "up" | "down" | "none";
+  status?: string;
   confidence: number | null;
   base_rate: number | null;
   up_count: number;
   match_n: number;
   query: { start: number; end: number };
+  settings?: PredictionSettings;
   points_label: string;
 }
 
@@ -129,6 +139,8 @@ export interface ReviewRow {
   up_count: number;
   match_n: number;
   label: string;
+  status?: string;
+  settings?: PredictionSettings;
   query_end: number;
   query_start: number;
   hit: boolean | null;
@@ -152,11 +164,18 @@ export interface ReviewPair {
   included: ReviewBlock;
 }
 
-export interface ReviewTotals {
+export interface ReviewVersion {
+  key: string;
+  settings: PredictionSettings;
+  insufficient: number;
   overall: ReviewPair;
   month: ({ key: string } & ReviewPair)[];
   week: ({ key: string } & ReviewPair)[];
   slot: ({ key: string } & ReviewPair)[];
+}
+
+export interface ReviewTotals {
+  versions: ReviewVersion[];
   points_label: string;
 }
 

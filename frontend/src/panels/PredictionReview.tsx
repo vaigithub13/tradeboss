@@ -1,15 +1,34 @@
 import { useEffect, useState } from "react";
 
-import { fetchReview, type ReviewPair, type ReviewPayload, type ReviewRow } from "../api/similar";
-import { POINTS_LABEL, nextRevealCount, reviewLine } from "../similar/present";
+import { fetchReview, type ReviewPair, type ReviewPayload, type ReviewRow, type ReviewVersion } from "../api/similar";
+import { POINTS_LABEL, nextRevealCount, reviewLine, settingsLine } from "../similar/present";
 
 interface Props {
   onReveal: (row: ReviewRow, count: number) => Promise<"shown" | "waiting">;
 }
 
-function Pair({ title, pair }: { title: string; pair: ReviewPair }) {
+function VersionBlock({ version }: { version: ReviewVersion }) {
   return (
-    <div data-testid={`review-${title}`}>
+    <div data-testid={`review-version-${version.settings.library_version}`}>
+      <p className="text-white/70">{settingsLine(version.settings)}</p>
+      {version.insufficient > 0 && <p className="text-white/40">{version.insufficient} insufficient window</p>}
+      <Pair title="overall" testId={`${version.key}-overall`} pair={version.overall} />
+      {version.week.map((group) => (
+        <Pair key={group.key} title={group.key} testId={`${version.key}-${group.key}`} pair={group} />
+      ))}
+      {version.month.map((group) => (
+        <Pair key={group.key} title={group.key} testId={`${version.key}-${group.key}`} pair={group} />
+      ))}
+      {version.slot.map((group) => (
+        <Pair key={group.key} title={group.key} testId={`${version.key}-${group.key}`} pair={group} />
+      ))}
+    </div>
+  );
+}
+
+function Pair({ title, pair, testId }: { title: string; pair: ReviewPair; testId: string }) {
+  return (
+    <div data-testid={`review-${testId}`}>
       <p className="text-white/50">{title}</p>
       <p>Calls only: {reviewLine(pair.excluded)}</p>
       <p>None included: {reviewLine(pair.included)}</p>
@@ -93,16 +112,10 @@ export function PredictionReview({ onReveal }: Props) {
             </tbody>
           </table>
           {data.today.length === 0 && <p className="text-white/40">No snapshot saved today.</p>}
-          <Pair title="overall" pair={data.totals.overall} />
-          {data.totals.week.map((group) => (
-            <Pair key={group.key} title={group.key} pair={group} />
+          {data.totals.versions.map((version) => (
+            <VersionBlock key={version.key} version={version} />
           ))}
-          {data.totals.month.map((group) => (
-            <Pair key={group.key} title={group.key} pair={group} />
-          ))}
-          {data.totals.slot.map((group) => (
-            <Pair key={group.key} title={group.key} pair={group} />
-          ))}
+          {data.totals.versions.length === 0 && <p className="text-white/40">No scored predictions yet.</p>}
         </>
       )}
     </section>

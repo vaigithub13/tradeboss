@@ -2,21 +2,27 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import numpy as np
 
-from app.similar.features import window_ends
+from app.similar.features import ist_day, window_ends
 from app.similar.predictions import (
+    CANDLE_HORIZON,
+    CANDLE_WINDOW,
+    DAY_CLOCKS,
+    INSUFFICIENT,
+    LIBRARY_VERSION,
+    SNAPSHOT_CLOCKS,
     append_prediction,
-    build_candle_record,
     direction_of,
     log_path,
     review_verdict,
     score_record,
     snapshot_cursor,
     tally,
+    take_snapshots,
     write_review_if_due,
 )
 from scripts import session_stop
@@ -57,22 +63,84 @@ def test_direction_is_none_inside_the_band():
     assert direction_of(None) == "none"
 
 
-def test_thirty_bar_snapshot_may_span_the_previous_session():
-    start = int(datetime(2024, 1, 8, 9, 15, tzinfo=IST).timestamp())
-    times = np.concatenate([
-        start + np.arange(25, dtype=np.int64) * 900,
-        start + 86_400 + np.arange(25, dtype=np.int64) * 900,
-    ])
-    assert len(window_ends(times, 30, "15m")) == 0
-    assert len(window_ends(times, 30, "15m", span_sessions=True)) > 0
-    bars = _clip(_days(4), snapshot_cursor(date(2024, 1, 11), "11:15"))
-    record = build_candle_record(bars, symbol="NIFTY50", day="2024-01-11", clock="11:15", as_of=snapshot_cursor(date(2024, 1, 11), "11:15"))
-    assert record is not None
-    assert record["spans_gap"] is True
-    assert record["horizon_label"] == "1h"
-    assert record["query"]["end"] <= snapshot_cursor(date(2024, 1, 11), "11:15")
-    for match in record["matches"]:
-        assert match["end"] <= record["query"]["start"] - 86_400
+def _weekdays(count: int) -> list[date]:
+    day = date(2024, 1, 8)
+    found: list[date] = []
+    while len(found) < count:
+        if day.weekday() < 5:
+            found.append(day)
+        day += timedelta(days=1)
+    return found
+
+
+def _series(days: list[date], step: int, per_day: int) -> dict[str, np.ndarray]:
+    parts = []
+    for i, day in enumerate(days):
+        start = int(datetime(day.year, day.month, day.day, 9, 15, tzinfo=IST).timestamp())
+        times = start + np.arange(per_day, dtype=np.int64) * step
+        close = 100.0 + i * 3.0 + np.arange(per_day) * (0.2 + i * 0.01)
+        parts.append({
+            "times": times,
+            "open": close - 0.15,
+            "high": close + 0.4,
+            "low": close - 0.35,
+            "close": close,
+        })
+    return {key: np.concatenate([part[key] for part in parts]) for key in parts[0]}
+
+
+def _same_session(start: int, end: int) -> bool:
+    days = ist_day(np.array([start, end], dtype=np.int64))
+    return int(days[0]) == int(days[1]) and end - start <= (CANDLE_WINDOW - 1) * 900
+
+
+def test_each_clock_uses_the_studied_window(monkeypatch):
+    days = _weekdays(8)
+    bars_15 = _series(days, 900, 25)
+    bars_5 = _series(days, 300, 75)
+    empty = {"times": np.empty(0, dtype=np.int64), "open": np.empty(0), "high": np.empty(0), "low": np.empty(0), "close": np.empty(0)}
+
+    def fake_load(store, symbol, timeframe, as_of=None):
+        if "VIX" in symbol:
+            return empty
+        source = bars_15 if timeframe == "15m" else bars_5
+        if as_of is None:
+            return source
+        keep = int(np.searchsorted(source["times"], int(as_of), side="right"))
+        return {key: value[:keep] for key, value in source.items()}
+
+    monkeypatch.setattr("app.similar.predictions.load_normal", fake_load)
+    last = days[-1]
+    assert len(window_ends(bars_15["times"], 30, "15m")) == 0
+    for clock in SNAPSHOT_CLOCKS:
+        rows = take_snapshots(object(), day=last, clock=clock, symbols=("NIFTY50",))  # type: ignore[arg-type]
+        candle = next(row for row in rows if row["kind"] == "candles")
+        assert candle["settings"] == {
+            "timeframe": "15m",
+            "window": CANDLE_WINDOW,
+            "horizon_bars": CANDLE_HORIZON,
+            "library_version": LIBRARY_VERSION,
+            "span_sessions": False,
+        }
+        assert candle["window"] == 8
+        assert candle["spans_gap"] is False
+        assert candle["query"]["end"] <= snapshot_cursor(last, clock)
+        if clock in ("09:30", "10:15"):
+            assert candle["status"] == INSUFFICIENT
+            assert candle["direction"] == "none"
+            assert candle["matches"] == []
+        else:
+            assert candle["status"] == "call"
+            assert candle["matches"]
+            assert _same_session(candle["query"]["start"], candle["query"]["end"])
+            for match in candle["matches"]:
+                assert _same_session(match["start"], match["end"])
+                assert match["end"] <= candle["query"]["start"] - 86_400
+        if clock in DAY_CLOCKS:
+            day_row = next(row for row in rows if row["kind"] == "days")
+            assert day_row["settings"]["library_version"] == LIBRARY_VERSION
+            assert day_row["settings"]["span_sessions"] is False
+            assert day_row["status"] == "call"
 
 
 def test_append_never_rewrites_a_saved_prediction(tmp_path):
@@ -163,11 +231,55 @@ def test_verdict_waits_for_fifty_calls_and_splits_none():
     for i in range(10):
         rows.append({"day": "2024-01-08", "slot": "10:15", "direction": "none", "hit": None, "points": None, "raw_points": 1.0, "base_rate": 50.0})
     totals = tally(rows)
-    assert totals["overall"]["excluded"]["predictions"] == 40
-    assert totals["overall"]["included"]["predictions"] == 50
-    assert totals["overall"]["excluded"]["points"] == 80.0
-    assert totals["overall"]["included"]["points"] == 90.0
+    version = totals["versions"][0]
+    assert version["overall"]["excluded"]["predictions"] == 40
+    assert version["overall"]["included"]["predictions"] == 50
+    assert version["overall"]["excluded"]["points"] == 80.0
+    assert version["overall"]["included"]["points"] == 90.0
     assert totals["points_label"].startswith("Hypothetical index points")
+
+
+def test_review_keeps_each_settings_version_separate():
+    def row(version: str, hit: bool) -> dict:
+        return {
+            "day": "2024-01-08",
+            "slot": "11:15",
+            "direction": "up",
+            "hit": hit,
+            "points": 1.0,
+            "raw_points": 1.0,
+            "base_rate": 50.0,
+            "status": "call",
+            "settings": {
+                "timeframe": "15m",
+                "window": 8 if version == LIBRARY_VERSION else 30,
+                "horizon_bars": 4,
+                "library_version": version,
+                "span_sessions": version != LIBRARY_VERSION,
+            },
+        }
+
+    current = row(LIBRARY_VERSION, False)
+    rows = [row("legacy-n30", True) for _ in range(50)]
+    rows.extend(current for _ in range(50))
+    rows.append({
+        "day": "2024-01-08",
+        "slot": "09:30",
+        "direction": "none",
+        "status": INSUFFICIENT,
+        "hit": None,
+        "points": None,
+        "raw_points": None,
+        "base_rate": None,
+        "settings": current["settings"],
+    })
+    by_version = {item["settings"]["library_version"]: item for item in tally(rows)["versions"]}
+    assert by_version["legacy-n30"]["overall"]["excluded"]["hit_rate"] == 100.0
+    assert by_version["legacy-n30"]["overall"]["excluded"]["predictions"] == 50
+    assert by_version[LIBRARY_VERSION]["overall"]["excluded"]["hit_rate"] == 0.0
+    assert by_version[LIBRARY_VERSION]["overall"]["excluded"]["predictions"] == 50
+    assert by_version[LIBRARY_VERSION]["insufficient"] == 1
+    assert by_version[LIBRARY_VERSION]["overall"]["included"]["predictions"] == 50
 
 
 def test_session_stop_records_the_review_before_it_looks_for_the_backend(tmp_path, monkeypatch):

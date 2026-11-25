@@ -45,9 +45,17 @@ export function istStamp(seconds: number): string {
 export const POINTS_LABEL = "Hypothetical index points. No costs. Not a trade.";
 export const REVEAL_STEPS = [5, 10, 20] as const;
 
-export function predictionLabel(upCount: number, matchN: number): string {
+export function predictionLabel(upCount: number, matchN: number, status?: string | null): string {
+  if (status === "insufficient window") return "insufficient window";
   if (matchN <= 0) return "no match";
   return `${upCount}/${matchN} up`;
+}
+
+export function settingsLine(settings: { timeframe?: string | null; window?: number | null; horizon_bars?: number | null; library_version?: string }): string {
+  const timeframe = settings.timeframe ?? "—";
+  const width = settings.window == null ? "session" : `N=${settings.window}`;
+  const horizon = settings.horizon_bars == null ? "day close" : `${settings.horizon_bars} bars`;
+  return `${timeframe} ${width}, horizon ${horizon}, ${settings.library_version ?? "unversioned"}`;
 }
 
 export function nextRevealCount(shown: number): number | null {
@@ -75,7 +83,7 @@ export interface SnapshotMark {
 }
 
 export function snapshotMarkers(
-  rows: { query_end?: number; query?: { end: number }; direction: "up" | "down" | "none"; up_count: number; match_n: number; kind: string }[],
+  rows: { query_end?: number; query?: { end: number }; direction: "up" | "down" | "none"; up_count: number; match_n: number; kind: string; status?: string | null }[],
 ): SnapshotMark[] {
   const byTime = new Map<number, typeof rows>();
   for (const row of rows) {
@@ -87,7 +95,7 @@ export function snapshotMarkers(
   }
   return [...byTime.entries()].map(([time, group]) => {
     const candle = group.find((row) => row.kind === "candles") ?? group[0]!;
-    return { time, direction: candle.direction, text: predictionLabel(candle.up_count, candle.match_n) };
+    return { time, direction: candle.direction, text: predictionLabel(candle.up_count, candle.match_n, candle.status) };
   });
 }
 

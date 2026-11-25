@@ -2323,3 +2323,11 @@ Trend day is the market view's realised rule: the close-to-open move is at least
 - **10:15 rest-of-day range:** hit 59.6% vs base 52.7% on 520 calls (above the base rate). Baseline 62.5%. Spearman 0.377 versus 0.428. No better than the baseline.
 - **Trend vs range:** 09:30 hit 46.7% vs base 50.2% on 897 calls (below the base rate). 10:15 hit 50.5% vs 51.9% on 916 calls (coin flip). Neither beats the baseline. Rank correlation is about zero.
 - **First-hour break:** the outcome is yes on 86.6% of days, and the 20 neighbours say yes on every call (1,116 calls, both clocks). Hit rate equals that base rate. The baseline does the same. No better than a coin flip.
+
+## 25 Nov 2026 — Similar snapshots use the studied 15m window
+
+Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
+
+- Candle snapshots are 15m, N=8, horizon 4 bars, library `2026-11-25.n8`. The window stays inside the session. A 30-bar window is no longer used, because it always crossed the overnight gap and the walk-forward study had no matches for it.
+- 09:30 has one closed 15m bar and 10:15 has four, so both candle lines are recorded as "insufficient window" and are not calls. Similar days still run at those two clocks.
+- Each line stores timeframe, N, horizon, and library version. The review totals are split by that settings key, so an older N=30 line is not averaged with these. An insufficient window is counted beside its version and left out of the hit rate.

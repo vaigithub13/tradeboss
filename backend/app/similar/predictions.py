@@ -37,12 +37,59 @@ RECORD_NOTE = "Record only. Not a signal. No order is sent."
 SNAPSHOT_CLOCKS = ("09:30", "10:15", "11:15", "12:15", "13:15", "14:15")
 DAY_CLOCKS = ("09:30", "10:15")
 CANDLE_TIMEFRAME = "15m"
-CANDLE_WINDOW = 30
+CANDLE_WINDOW = 8
 CANDLE_HORIZON = 4
+LIBRARY_VERSION = "2026-11-25.n8"
+INSUFFICIENT = "insufficient window"
 NONE_LO = 45.0
 NONE_HI = 55.0
 VERDICT_N = 50
 SESSION_LAST_MINUTE = 15 * 60 + 15
+
+
+def study_settings(*, kind: str) -> dict:
+    """The settings a new line is scored under. Candles match the 15m N=8 study."""
+    if kind == "candles":
+        return {
+            "timeframe": CANDLE_TIMEFRAME,
+            "window": CANDLE_WINDOW,
+            "horizon_bars": CANDLE_HORIZON,
+            "library_version": LIBRARY_VERSION,
+            "span_sessions": False,
+        }
+    return {
+        "timeframe": "5m",
+        "window": None,
+        "horizon_bars": None,
+        "library_version": LIBRARY_VERSION,
+        "span_sessions": False,
+    }
+
+
+def settings_of(record: dict) -> dict:
+    """Settings stored on the line, or the pre-version shape for an older line."""
+    raw = record.get("settings")
+    if isinstance(raw, dict) and raw.get("library_version"):
+        return raw
+    return {
+        "timeframe": record.get("timeframe") or record.get("kind"),
+        "window": record.get("window"),
+        "horizon_bars": record.get("horizon_bars"),
+        "library_version": "unversioned",
+        "span_sessions": bool(record.get("spans_gap")),
+    }
+
+
+def settings_key(record: dict) -> str:
+    """One bucket per timeframe, window, horizon, and library version."""
+    settings = settings_of(record)
+    return "|".join([
+        str(settings.get("timeframe")),
+        f"n={settings.get('window')}",
+        f"h={settings.get('horizon_bars')}",
+        str(settings.get("library_version")),
+        f"gap={int(bool(settings.get('span_sessions')))}",
+    ])
 
 
 def direction_of(pct_up: float | None) -> str:
@@ -96,6 +143,12 @@ def _round(value: float | None, places: int = 2) -> float | None:
     return round(float(value), places)
 
 
+def _closed_today(times: np.ndarray, q_end: int) -> int:
+    days = ist_day(times)
+    today = int(days[q_end])
+    return int(np.sum((days == today) & (times <= int(times[q_end]))))
+
+
 def build_candle_record(
     bars: dict[str, np.ndarray],
     *,
@@ -104,18 +157,24 @@ def build_candle_record(
     clock: str,
     as_of: int,
 ) -> dict | None:
-    """One 15-minute snapshot. The window may reach into the previous session."""
+    """One 15-minute snapshot. The window stays inside today's session.
+
+    Fewer than eight closed 15-minute bars (09:30 has one, 10:15 has four) is
+    recorded as insufficient window, not as a call.
+    """
     times = bars["times"]
-    if len(times) < CANDLE_WINDOW:
+    if len(times) == 0:
         return None
     target = candle_bar_start(date.fromisoformat(day), clock)
     hits = np.flatnonzero(times == target)
     if len(hits) == 0:
         return None
     q_end = int(hits[0])
-    ends = window_ends(times, CANDLE_WINDOW, CANDLE_TIMEFRAME, span_sessions=True)
+    if _closed_today(times, q_end) < CANDLE_WINDOW:
+        return _insufficient(symbol=symbol, day=day, clock=clock, as_of=as_of, query_end=int(times[q_end]))
+    ends = window_ends(times, CANDLE_WINDOW, CANDLE_TIMEFRAME, span_sessions=False)
     if q_end not in set(int(item) for item in ends):
-        return None
+        return _insufficient(symbol=symbol, day=day, clock=clock, as_of=as_of, query_end=int(times[q_end]))
     features = candle_features(bars["open"], bars["high"], bars["low"], bars["close"])
     vectors = stack_windows(features, ends, CANDLE_WINDOW)
     pos = int(np.flatnonzero(ends == q_end)[0])
@@ -154,7 +213,8 @@ def build_candle_record(
         as_of=as_of,
         query_start=query_start,
         query_end=int(times[q_end]),
-        spans_gap=int(ist_day(times[query_start_i : query_start_i + 1])[0]) != int(ist_day(times[q_end : q_end + 1])[0]),
+        spans_gap=False,
+        status="call",
         matches=matches,
         up_count=sum(ups),
         match_n=len(ups),
@@ -210,6 +270,7 @@ def build_day_record(
         query_start=candle_end,
         query_end=candle_end,
         spans_gap=False,
+        status="call",
         matches=matches,
         up_count=sum(ups),
         match_n=len(ups),
@@ -221,11 +282,34 @@ def build_day_record(
     )
 
 
+def _insufficient(*, symbol: str, day: str, clock: str, as_of: int, query_end: int) -> dict:
+    return _record(
+        symbol=symbol,
+        day=day,
+        clock=clock,
+        kind="candles",
+        as_of=as_of,
+        query_start=query_end,
+        query_end=query_end,
+        spans_gap=False,
+        status=INSUFFICIENT,
+        matches=[],
+        up_count=0,
+        match_n=0,
+        direction="none",
+        confidence=None,
+        base_rate=None,
+        horizon_label="1h",
+        horizon_bars=CANDLE_HORIZON,
+    )
+
+
 def _record(**fields: object) -> dict:
     day = str(fields["day"])
     symbol = str(fields["symbol"])
     kind = str(fields["kind"])
     clock = str(fields["clock"])
+    settings = study_settings(kind=kind)
     return {
         "id": prediction_id(day, symbol, kind, clock),
         "saved_at": datetime.now(IST).isoformat(timespec="seconds"),
@@ -234,10 +318,12 @@ def _record(**fields: object) -> dict:
         "slot": clock,
         "symbol": symbol,
         "kind": kind,
-        "timeframe": CANDLE_TIMEFRAME,
-        "window": CANDLE_WINDOW if kind == "candles" else None,
+        "status": fields.get("status") or "call",
+        "timeframe": settings["timeframe"],
+        "window": settings["window"],
         "horizon_bars": fields["horizon_bars"],
         "horizon_label": fields["horizon_label"],
+        "settings": settings,
         "as_of": fields["as_of"],
         "query": {"start": fields["query_start"], "end": fields["query_end"]},
         "spans_gap": fields["spans_gap"],
@@ -307,15 +393,44 @@ def _closed(times: np.ndarray, index: int, closed_through: int | None) -> bool:
     return int(times[index]) + bar_seconds(CANDLE_TIMEFRAME) <= int(closed_through)
 
 
+def _scored(record: dict, *, hit: bool | None, points: float | None, raw_points: float | None, adverse_1h: float | None) -> dict:
+    return {
+        "id": record["id"],
+        "day": record["day"],
+        "symbol": record["symbol"],
+        "kind": record["kind"],
+        "slot": record["slot"],
+        "direction": str(record["direction"]),
+        "status": record.get("status") or "call",
+        "settings": settings_of(record),
+        "base_rate": record.get("base_rate"),
+        "hit": hit,
+        "points": points,
+        "raw_points": raw_points,
+        "adverse_1h": adverse_1h,
+        "points_label": POINTS_LABEL,
+    }
+
+
+def _candle_horizon(record: dict) -> int:
+    value = record.get("horizon_bars")
+    if value is None:
+        return CANDLE_HORIZON
+    return int(value)
+
+
 def score_record(record: dict, bars: dict[str, np.ndarray], *, closed_through: int | None = None) -> dict | None:
     """Hit, hypothetical points, and the 1h adverse move. None until the horizon bar has closed."""
+    if record.get("status") == INSUFFICIENT:
+        return _scored(record, hit=None, points=None, raw_points=None, adverse_1h=None)
     times = bars["times"]
     end = _index_at(times, int(record["query"]["end"]))
     if end is None:
         return None
     direction = str(record["direction"])
     if record["kind"] == "candles":
-        last = end + CANDLE_HORIZON
+        horizon = _candle_horizon(record)
+        last = end + horizon
         if last >= len(times) or not _closed(times, last, closed_through):
             return None
         if int(ist_day(times[end:end + 1])[0]) != int(ist_day(times[last:last + 1])[0]):
@@ -340,20 +455,7 @@ def score_record(record: dict, bars: dict[str, np.ndarray], *, closed_through: i
             adverse = _adverse(direction, ref, bars["high"][end + 1:hour + 1], bars["low"][end + 1:hour + 1])
     hit = _hit(direction, raw)
     points = None if direction == "none" else _round(raw if direction == "up" else -raw, 2)
-    return {
-        "id": record["id"],
-        "day": record["day"],
-        "symbol": record["symbol"],
-        "kind": record["kind"],
-        "slot": record["slot"],
-        "direction": direction,
-        "base_rate": record.get("base_rate"),
-        "hit": hit,
-        "points": points,
-        "raw_points": _round(raw, 2),
-        "adverse_1h": _round(adverse, 2),
-        "points_label": POINTS_LABEL,
-    }
+    return _scored(record, hit=hit, points=points, raw_points=_round(raw, 2), adverse_1h=_round(adverse, 2))
 
 
 def _hit(direction: str, raw: float) -> bool | None:
@@ -417,7 +519,7 @@ def _block(rows: list[dict], *, include_none: bool) -> dict:
     }
 
 
-def tally(rows: list[dict]) -> dict:
+def _pack_group(rows: list[dict]) -> dict:
     def pack(group: list[dict]) -> dict:
         return {"excluded": _block(group, include_none=False), "included": _block(group, include_none=True)}
 
@@ -435,8 +537,36 @@ def tally(rows: list[dict]) -> dict:
         "month": [{"key": key, **pack(by_month[key])} for key in sorted(by_month)],
         "week": [{"key": key, **pack(by_week[key])} for key in sorted(by_week)],
         "slot": [{"key": key, **pack(by_slot[key])} for key in SNAPSHOT_CLOCKS if key in by_slot],
-        "points_label": POINTS_LABEL,
     }
+
+
+def tally(rows: list[dict]) -> dict:
+    """Hit rates stay inside one settings version. Versions are not pooled."""
+    grouped: dict[str, list[dict]] = {}
+    order: list[str] = []
+    for row in rows:
+        if row.get("status") == INSUFFICIENT:
+            key = settings_key(row)
+            grouped.setdefault(key, [])
+            if key not in order:
+                order.append(key)
+            continue
+        key = settings_key(row)
+        if key not in grouped:
+            order.append(key)
+            grouped[key] = []
+        grouped[key].append(row)
+    versions = []
+    for key in order:
+        group = grouped[key]
+        sample = next((row for row in rows if settings_key(row) == key), group[0] if group else None)
+        versions.append({
+            "key": key,
+            "settings": settings_of(sample) if sample else {},
+            "insufficient": sum(1 for row in rows if settings_key(row) == key and row.get("status") == INSUFFICIENT),
+            **_pack_group(group),
+        })
+    return {"versions": versions, "points_label": POINTS_LABEL}
 
 
 def _day_bars(store: CandleStore, symbol: str, day: str) -> dict[str, np.ndarray]:
@@ -544,7 +674,9 @@ def today_table(root: Path, store: CandleStore | None, day: str) -> list[dict]:
             "base_rate": record["base_rate"],
             "up_count": record["up_count"],
             "match_n": record["match_n"],
-            "label": _label(int(record["up_count"]), int(record["match_n"])),
+            "label": _label(int(record["up_count"]), int(record["match_n"]), record.get("status")),
+            "status": record.get("status") or "call",
+            "settings": settings_of(record),
             "query_end": record["query"]["end"],
             "query_start": record["query"]["start"],
             "hit": None if scored is None else scored["hit"],
@@ -557,7 +689,9 @@ def today_table(root: Path, store: CandleStore | None, day: str) -> list[dict]:
     return table
 
 
-def _label(up_count: int, match_n: int) -> str:
+def _label(up_count: int, match_n: int, status: object = None) -> str:
+    if status == INSUFFICIENT:
+        return INSUFFICIENT
     if match_n <= 0:
         return "no match"
     return f"{up_count}/{match_n} up"
@@ -578,25 +712,27 @@ def take_snapshots(store: CandleStore, *, day: date, clock: str, symbols: tuple[
         candle = build_candle_record(bars, symbol=symbol, day=day_text, clock=clock, as_of=as_of)
         if candle is not None:
             records.append(candle)
-        if clock in DAY_CLOCKS and candle is not None:
-            try:
-                intraday = load_normal(store, symbol, "5m", as_of=as_of)
-            except Exception:
-                continue
-            try:
-                vix = load_normal(store, VIX_SYMBOL, "5m", as_of=as_of)
-            except Exception:
-                vix = {"times": np.empty(0, dtype=np.int64), "close": np.empty(0, dtype=np.float64)}
-            day_record = build_day_record(
-                intraday,
-                symbol=symbol,
-                day=day_text,
-                clock=clock,
-                as_of=as_of,
-                vix_times=vix["times"],
-                vix_close=vix["close"],
-                candle_end=int(candle["query"]["end"]),
-            )
-            if day_record is not None:
-                records.append(day_record)
+        if clock not in DAY_CLOCKS:
+            continue
+        try:
+            intraday = load_normal(store, symbol, "5m", as_of=as_of)
+        except Exception:
+            continue
+        try:
+            vix = load_normal(store, VIX_SYMBOL, "5m", as_of=as_of)
+        except Exception:
+            vix = {"times": np.empty(0, dtype=np.int64), "close": np.empty(0, dtype=np.float64)}
+        candle_end = int(candle["query"]["end"]) if candle is not None else candle_bar_start(day, clock)
+        day_record = build_day_record(
+            intraday,
+            symbol=symbol,
+            day=day_text,
+            clock=clock,
+            as_of=as_of,
+            vix_times=vix["times"],
+            vix_close=vix["close"],
+            candle_end=candle_end,
+        )
+        if day_record is not None:
+            records.append(day_record)
     return records

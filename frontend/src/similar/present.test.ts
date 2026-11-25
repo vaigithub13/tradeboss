@@ -38,6 +38,7 @@ describe("similar pattern honesty", () => {
 
   it("labels a snapshot with the match count and refuses a candle that is not closed", () => {
     expect(predictionLabel(7, 10)).toBe("7/10 up");
+    expect(predictionLabel(0, 0, "insufficient window")).toBe("insufficient window");
     const marks = snapshotMarkers([
       { query: { end: 100 }, direction: "up", up_count: 7, match_n: 10, kind: "candles" },
       { query: { end: 100 }, direction: "down", up_count: 4, match_n: 20, kind: "days" },
