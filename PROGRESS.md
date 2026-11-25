@@ -2324,6 +2324,33 @@ Trend day is the market view's realised rule: the close-to-open move is at least
 - **Trend vs range:** 09:30 hit 46.7% vs base 50.2% on 897 calls (below the base rate). 10:15 hit 50.5% vs 51.9% on 916 calls (coin flip). Neither beats the baseline. Rank correlation is about zero.
 - **First-hour break:** the outcome is yes on 86.6% of days, and the 20 neighbours say yes on every call (1,116 calls, both clocks). Hit rate equals that base rate. The baseline does the same. No better than a coin flip.
 
+## 25 Nov 2026 — Swing Phase 1: universe and daily bars (research only)
+
+No UI, no slot, no order. A separate worker (`python -m scripts.swing_phase1`) wrote `data/candles_daily/`. That directory is not committed. `LIVE_TRADING` stays false.
+
+- Universe `swing_universe_v1` as of 2026-11-25: current Nifty 500, tagged large (Nifty 50 + Next 50, 100), mid (Midcap 150, 150), small (Smallcap 250, 250). Plus Nifty 50, Nifty 500, Midcap 150, Smallcap 250, and 18 sector indices. All 22 index keys were on the Upstox snapshot.
+- Survivorship: NSE publishes today's constituent CSV, not a 2015-present membership tape, so stocks that left or were delisted since 2015 could not be named and none were added. Of the 500 names on today's list, 0 were missing from Upstox (5 are BE or REIT series, not the EQ type the live index keeps). That 0 is not the count of departed names. The departed count is unknown.
+- Daily bars 2015-01-01 through the last print Upstox returned (2026-11-23). 2026-11-24 is an NSE holiday. 2026-11-25 was not in the historical response yet; the open tail is left uncovered so the next run asks again. Two decade windows, resumable. Kotak 1:5 ex 2026-01-14 closes 426.50 then 421.00, the same already-adjusted result as Phase A, so `daily_adj` is a copy of `daily`.
+- Filters are point-in-time: 20-day average turnover at least ₹5 crore, close at least ₹50, first stored bar at least a year earlier. No ASM/GSM history (today's list is not copied backwards). A current circuit-band file exists (3,616 rows) and is not stored as history.
+- Missing weekdays use a holiday list that starts 2022-01-26, so earlier holidays count as missing. Median missing weekdays is 100 and the median largest gap is 5 days.
+
+Stocks passing all three filters on the last session of the year:
+
+| Year | As of | Large | Mid | Small |
+|---:|---|---:|---:|---:|
+| 2015 | 2015-12-31 | 0 | 0 | 0 |
+| 2016 | 2016-12-30 | 71 | 62 | 45 |
+| 2017 | 2017-12-29 | 78 | 80 | 85 |
+| 2018 | 2018-12-31 | 77 | 73 | 57 |
+| 2019 | 2019-12-31 | 79 | 74 | 62 |
+| 2020 | 2020-12-31 | 82 | 98 | 105 |
+| 2021 | 2021-12-31 | 87 | 104 | 123 |
+| 2022 | 2022-12-30 | 91 | 118 | 152 |
+| 2023 | 2023-12-29 | 93 | 123 | 190 |
+| 2024 | 2024-12-31 | 94 | 131 | 203 |
+| 2025 | 2025-12-31 | 95 | 138 | 217 |
+| 2026 | 2026-11-23 | 98 | 145 | 231 |
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
