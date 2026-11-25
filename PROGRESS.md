@@ -2377,6 +2377,17 @@ Names passing on the last session of the year. "Outside today's 500" is the surv
 | 2025 | 2025-12-31 | 90 | 140 | 215 | 432 | 429 | 3 |
 | 2026 | 2026-11-25 | 92 | 139 | 214 | 627 | 601 | 0 |
 
+## 26 Nov 2026 — Swing Phase 2: daily book, 2016–2018 dry run (research only)
+
+No UI, no slot, no order. A separate worker (`python -m scripts.swing_phase2`) runs outside the backend. `LIVE_TRADING` stays false. Outputs under `data/swing_phase2/` and `data/validation/` are not committed. The book stops at 2018-12-31. 2019+ was not run.
+
+- Of the 52 Nifty 500 names whose adjusted bhavcopy still differs from Upstox, 10 were replaced with the Upstox daily bar. Each replacement is one price step lined up with a demerger, scheme, or rights subject: NMDC (demerger 2022-10-27, 59% step), SCI (demerger 2023-03-31), PNBHOUSING and SAMMAANCAP (rights), MOTHERSON (demerger 2022-01-14), plus ABB, ANANTRAJ, BSOFT, IDEA, and M&MFIN, whose gap sits in the years before a later event. The other 42 stay on the bhavcopy. VEDL, IOC, and SUZLON are a drift of several percent, not one step. CGCL has an 80% step on 2016-11-23 with no demerger, scheme, or rights subject.
+- An overnight move above 15% on the research series is flagged. The dry run found 507 such sessions. The book sells at the previous close, and it does not enter on the flagged session or the next two. A lower-circuit lock (open = high = low = close, below the previous close) is not sold that day. No trade in this run was open across a flagged session.
+- Bhavcopy turnover is in rupees on both sides of the 2024-07-08 file change. For EQ and BE from June through August 2024, median (turnover / volume) / close is 1.001 before the change and 1.002 after. The ratio of the two is 1.0004. Nothing was rescaled.
+- Delivery costs are a dated table in `backend/app/swing/data/cost_rates_equity_delivery.json`, separate from the options and intraday tables. STT is 0.1% on both sides. Brokerage is ₹20 or 2.5%, whichever is lower. The 2016–2018 rows use exchange 0.00325% (the NSE cash first slab NSE/FA/46730 calls the existing rate; that circular is dated 18 Dec 2020), stamp 0.01% on the buy, DP ₹18.5 on the sell, and service tax 14.5% then 15% then GST 18% from 1 Jul 2017. Every rate is unverified: no contract note was checked. The card is https://upstox.com/brokerage-charges/ retrieved 2026-11-26. Slippage is 0.10% per side for large and mid, 0.25% for small and the rest.
+- One strategy, to check the mechanics: buy a close above the prior 20-session high when Nifty 500 is above its 200-day average. Stop is the entry open minus 2×ATR(14). Exit at the close of the fifth session. Signal at the close of day D, fill at the open of D+1. Capital ₹50,000, at most 5 positions, ₹10,000 each, one position per stock, no leverage.
+- 536 trades. Realised P&L ₹−48,498. Equity finished at ₹1,502. Mean exposure 60.9%. By size: large 86 trades ₹−8,384, mid 178 ₹−19,492, small 264 ₹−19,532, rest 8 ₹−1,091. By year: 2016 ₹−25,925 (equity ₹24,075), 2017 ₹−13,970 (₹10,219), 2018 ₹−8,603 (₹1,502). Exits: time 401, stop 116, gap-through-stop 17, event guard 2. This is a mechanics check. It is not evidence of an edge.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

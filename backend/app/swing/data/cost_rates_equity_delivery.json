@@ -1,0 +1,211 @@
+{
+  "note": "Equity delivery for swing research. Not the options or intraday tables. Every rate is unverified: no contract note has been checked. STT is on both sides. DP is a flat rupee charge on the sell only. GST is on brokerage, exchange, SEBI, DP, and IPFT. Stamp is on the buy. Percent rates are percent (0.1 means 0.1%). A row is the full schedule from that date.",
+  "retrieved": "2026-11-26",
+  "page": "https://upstox.com/brokerage-charges/",
+  "gst_on": ["brokerage", "exchange", "sebi", "dp", "ipft"],
+  "rows": [
+    {
+      "effective_from": "2016-01-01",
+      "verification": "unverified",
+      "note": "Service tax 14% plus Swachh Bharat 0.5% through 31 May 2016. Stamp 0.01% is the Maharashtra delivery-buy rate used before the uniform duty; it is not on the current Upstox card. Exchange is Rs 3.25 per lakh, the cash first slab NSE/FA/46730 (18 Dec 2020) calls the existing rate; that circular does not by itself prove the 2016 start. DP Rs 18.5 is the figure in the Upstox announcement of 3 Oct 2024; no earlier card was retrieved.",
+      "sources": {
+        "brokerage_flat": "https://upstox.com/brokerage-charges/ retrieved 2026-11-26: Equity Delivery Rs 20 per executed order, or the SEBI limit if lower",
+        "brokerage_pct": "SEBI cap 2.5% of turnover. The Upstox card says the SEBI prescribed limit applies when it is lower than Rs 20",
+        "stt_pct": "Upstox card, delivery rows from 1 Apr 2023, 1 Oct 2024, and 1 Apr 2026: 0.1% on buy and sell. The same rate is used from 2016; the card does not print a 2016 row",
+        "exchange_pct": "NSE/FA/46730 (18 Dec 2020), existing cash first slab Rs 3.25 per lakh. https://nsearchives.nseindia.com/content/circulars/FA46730.pdf",
+        "sebi_per_crore": "Upstox card retrieved 2026-11-26: Rs 10 per crore",
+        "stamp_buy_pct": "Pre-uniform Maharashtra delivery stamp, widely published as 0.01% on the buy. Not on the current Upstox card. Unverified",
+        "gst_pct": "Service tax 14% + Swachh Bharat cess 0.5% from 15 Nov 2015 through 31 May 2016",
+        "dp_sell": "https://upstox.com/announcements/updates/revision-in-transaction-charges-from-1-october-2024/ (3 Oct 2024) states DP Rs 18.5 + GST. Applied here from 2016 because no earlier figure was found",
+        "ipft_pct": "NSE/FA/56129: cash IPFT was Rs 0.01 per crore before 1 Apr 2023, which rounds to nothing on a retail order. Treated as 0"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00325",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.01",
+        "gst_pct": "14.5",
+        "dp_sell": "18.5",
+        "ipft_pct": "0"
+      }
+    },
+    {
+      "effective_from": "2016-06-01",
+      "verification": "unverified",
+      "note": "Krishi Kalyan cess 0.5% from 1 Jun 2016. Service tax 15% through 30 Jun 2017.",
+      "sources": {
+        "gst_pct": "Service tax 14% + Swachh Bharat 0.5% + Krishi Kalyan 0.5% from 1 Jun 2016"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00325",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.01",
+        "gst_pct": "15",
+        "dp_sell": "18.5",
+        "ipft_pct": "0"
+      }
+    },
+    {
+      "effective_from": "2017-07-01",
+      "verification": "unverified",
+      "note": "GST 18%. The Upstox card (retrieved 2026-11-26) charges 18% on brokerage, transaction charges, demat, and IPFT. SEBI is included in the GST base here, as on a typical Upstox contract note.",
+      "sources": {
+        "gst_pct": "https://upstox.com/brokerage-charges/ retrieved 2026-11-26, GST 18%. Statutory start 1 Jul 2017"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00325",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.01",
+        "gst_pct": "18",
+        "dp_sell": "18.5",
+        "ipft_pct": "0"
+      }
+    },
+    {
+      "effective_from": "2020-07-01",
+      "verification": "unverified",
+      "note": "Uniform stamp duty 0.015% on the delivery buy from 1 Jul 2020. The Upstox card states this and notes that stamp duty was uniform from 2020.",
+      "sources": {
+        "stamp_buy_pct": "https://upstox.com/brokerage-charges/ retrieved 2026-11-26: 0.015% on the buy (Rs 1500 per crore)"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00325",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.015",
+        "gst_pct": "18",
+        "dp_sell": "18.5",
+        "ipft_pct": "0"
+      }
+    },
+    {
+      "effective_from": "2021-01-01",
+      "verification": "unverified",
+      "note": "NSE cash first slab raised to Rs 3.45 per lakh.",
+      "sources": {
+        "exchange_pct": "NSE/FA/46730, effective 1 Jan 2021. https://nsearchives.nseindia.com/content/circulars/FA46730.pdf"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00345",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.015",
+        "gst_pct": "18",
+        "dp_sell": "18.5",
+        "ipft_pct": "0"
+      }
+    },
+    {
+      "effective_from": "2023-04-01",
+      "verification": "unverified",
+      "note": "Exchange back to Rs 3.25 per lakh. IPFT recalibrated to Rs 10 per crore (0.0001%), and GST applies to it. Delivery STT stays 0.1% on both sides.",
+      "sources": {
+        "exchange_pct": "NSE/FA/56129 (24 Mar 2023), from 1 Apr 2023. https://archives.nseindia.com/content/circulars/FA56129.pdf",
+        "ipft_pct": "NSE/FA/56129: cash IPFT from Rs 0.01 per crore to Rs 10 per crore. Upstox card: NSE Rs 0.10 per lakh",
+        "stt_pct": "Upstox card row 'From 1st April 2023': delivery 0.1% on buy and sell"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00325",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.015",
+        "gst_pct": "18",
+        "dp_sell": "18.5",
+        "ipft_pct": "0.0001"
+      }
+    },
+    {
+      "effective_from": "2024-04-01",
+      "verification": "unverified",
+      "note": "NSE cash first slab Rs 3.22 per lakh through 30 Sep 2024.",
+      "sources": {
+        "exchange_pct": "NSE/FA/61137 (14 Mar 2024) and the Upstox card row 'From 1st April 2024 to 30th September 2024'. https://nsearchives.nseindia.com/content/circulars/FA61137.pdf"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00322",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.015",
+        "gst_pct": "18",
+        "dp_sell": "18.5",
+        "ipft_pct": "0.0001"
+      }
+    },
+    {
+      "effective_from": "2024-10-01",
+      "verification": "unverified",
+      "note": "NSE cash 0.00297% through 28 Feb 2026. Delivery STT still 0.1% on both sides.",
+      "sources": {
+        "exchange_pct": "https://upstox.com/brokerage-charges/ row 'From 1st October 2024 to 28 February 2026'",
+        "stt_pct": "Same Upstox row: delivery 0.1% on buy and sell"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00297",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.015",
+        "gst_pct": "18",
+        "dp_sell": "18.5",
+        "ipft_pct": "0.0001"
+      }
+    },
+    {
+      "effective_from": "2024-11-01",
+      "verification": "unverified",
+      "note": "DP Rs 20 per scrip per day on the sell (CDSL plus Upstox). The 3 Oct 2024 announcement said commercial charges change from 1 Nov 2024.",
+      "sources": {
+        "dp_sell": "https://upstox.com/brokerage-charges/ retrieved 2026-11-26: Rs 20 per scrip per day, sell only. Announcement: https://upstox.com/announcements/updates/revision-in-transaction-charges-from-1-october-2024/"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00297",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.015",
+        "gst_pct": "18",
+        "dp_sell": "20",
+        "ipft_pct": "0.0001"
+      }
+    },
+    {
+      "effective_from": "2026-03-01",
+      "verification": "unverified",
+      "note": "NSE cash 0.00307%. The Upstox card says IPFT is combined into the transaction charge, so IPFT is 0 here and is not charged twice. Delivery STT remains 0.1% on both sides.",
+      "sources": {
+        "exchange_pct": "https://upstox.com/brokerage-charges/ row 'From 1st April 2026' path and the 1 Mar 2026 transaction-charge row: NSE 0.00307%",
+        "ipft_pct": "Same card: IPFT combined into transaction charges from 1 Mar 2026",
+        "stt_pct": "Same card, delivery row from 1 Apr 2026: 0.1% on buy and sell"
+      },
+      "rates": {
+        "brokerage_flat": "20",
+        "brokerage_pct": "2.5",
+        "stt_pct": "0.1",
+        "exchange_pct": "0.00307",
+        "sebi_per_crore": "10",
+        "stamp_buy_pct": "0.015",
+        "gst_pct": "18",
+        "dp_sell": "20",
+        "ipft_pct": "0"
+      }
+    }
+  ]
+}
