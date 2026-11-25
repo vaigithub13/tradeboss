@@ -36,8 +36,21 @@ def _pgrep() -> list[str]:
     return [p for p in out.split() if p]
 
 
+def _record_prediction_review() -> None:
+    """Score the day's similar-pattern log before the backend is stopped. Never rewrites a prediction."""
+    try:
+        from app.data.store import CandleStore
+        from app.similar.predictions import write_review_if_due
+
+        wrote = write_review_if_due(settings.data_dir / "similar", CandleStore(settings.data_dir / "candles"))
+        log("similar-pattern review written" if wrote else "similar-pattern review already saved or not due")
+    except Exception as exc:
+        log(f"similar-pattern review skipped: {type(exc).__name__}")
+
+
 def stop(*, wait_s: int = WAIT_S, state_dir: Path | None = None) -> int:
     """Send one SIGINT to the owned backend (or pgrep fallback). Exit 0 always for launchd."""
+    _record_prediction_review()
     own_path = path_for(state_dir or settings.live_state_dir)
     own = read(own_path)
     pids: list[str] = []

@@ -104,6 +104,84 @@ export function fetchSimilarCandles(
   return getJson<CandleResult>(`/api/similar/candles?${q}`, signal);
 }
 
+export interface SavedPrediction {
+  id: string;
+  slot: string;
+  symbol: string;
+  kind: "candles" | "days";
+  direction: "up" | "down" | "none";
+  confidence: number | null;
+  base_rate: number | null;
+  up_count: number;
+  match_n: number;
+  query: { start: number; end: number };
+  points_label: string;
+}
+
+export interface ReviewRow {
+  id: string;
+  slot: string;
+  symbol: string;
+  kind: string;
+  direction: "up" | "down" | "none";
+  confidence: number | null;
+  base_rate: number | null;
+  up_count: number;
+  match_n: number;
+  label: string;
+  query_end: number;
+  query_start: number;
+  hit: boolean | null;
+  points: number | null;
+  adverse_1h: number | null;
+  pending: boolean;
+  points_label: string;
+}
+
+export interface ReviewBlock {
+  predictions: number;
+  hits: number;
+  hit_rate: number | null;
+  base_rate: number | null;
+  points: number;
+  verdict: string | null;
+}
+
+export interface ReviewPair {
+  excluded: ReviewBlock;
+  included: ReviewBlock;
+}
+
+export interface ReviewTotals {
+  overall: ReviewPair;
+  month: ({ key: string } & ReviewPair)[];
+  week: ({ key: string } & ReviewPair)[];
+  slot: ({ key: string } & ReviewPair)[];
+  points_label: string;
+}
+
+export interface ReviewPayload {
+  day: string;
+  today: ReviewRow[];
+  totals: ReviewTotals;
+  note: string;
+  points_label: string;
+}
+
+export function istDay(seconds?: number | null): string {
+  const when = seconds == null ? new Date() : new Date(seconds * 1000);
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Kolkata" }).format(when);
+}
+
+export function fetchPredictions(symbol: string, day: string, signal?: AbortSignal): Promise<SavedPrediction[]> {
+  const q = new URLSearchParams({ symbol, day });
+  return getJson<{ predictions: SavedPrediction[] }>(`/api/similar/predictions?${q}`, signal).then((body) => body.predictions);
+}
+
+export function fetchReview(signal?: AbortSignal): Promise<ReviewPayload> {
+  return getJson<ReviewPayload>("/api/similar/review", signal);
+}
+
 export function fetchSimilarDays(
   symbol: string,
   at: "09:30" | "10:15" | "now",

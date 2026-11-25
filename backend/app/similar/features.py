@@ -98,11 +98,14 @@ def candle_features(open_: np.ndarray, high: np.ndarray, low: np.ndarray, close:
     return np.column_stack([log_ret, range_atr, body, loc]).astype(np.float64)
 
 
-def window_ends(times: np.ndarray, window: int, timeframe: str) -> np.ndarray:
-    """End index of every window of ``window`` bars that does not cross an overnight gap.
+def window_ends(times: np.ndarray, window: int, timeframe: str, *, span_sessions: bool = False) -> np.ndarray:
+    """End index of every window of ``window`` bars.
 
     Daily windows are sequences of daily bars. Intraday windows must sit on one
-    IST date and cover ``window`` adjacent bars of that timeframe.
+    IST date and cover ``window`` adjacent bars of that timeframe. The prediction
+    log is the exception: ``span_sessions`` keeps a window that reaches into the
+    previous cash session, because a 30-bar 15-minute window cannot fit in one
+    session. The overnight gap is still not a feature.
     """
     n = len(times)
     if window < 2 or n < window:
@@ -111,7 +114,7 @@ def window_ends(times: np.ndarray, window: int, timeframe: str) -> np.ndarray:
     span = (window - 1) * bar_seconds(timeframe)
     ends = np.arange(window - 1, n, dtype=np.int64)
     starts = ends - (window - 1)
-    if not intraday:
+    if not intraday or span_sessions:
         return ends
     days = ist_day(times)
     same = days[starts] == days[ends]

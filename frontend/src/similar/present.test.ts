@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { reliabilityLine, summaryLine, verdictClass } from "./present";
+import { forwardEndTime, predictionLabel, reliabilityLine, reviewLine, snapshotMarkers, summaryLine, verdictClass } from "./present";
 
 describe("similar pattern honesty", () => {
   it("hides verdict colour until there are 10 samples", () => {
@@ -34,5 +34,25 @@ describe("similar pattern honesty", () => {
     expect(line).toContain("no better than coin flip");
     expect(line).toContain("900/900");
     expect(line).toContain("12.4s");
+  });
+
+  it("labels a snapshot with the match count and refuses a candle that is not closed", () => {
+    expect(predictionLabel(7, 10)).toBe("7/10 up");
+    const marks = snapshotMarkers([
+      { query: { end: 100 }, direction: "up", up_count: 7, match_n: 10, kind: "candles" },
+      { query: { end: 100 }, direction: "down", up_count: 4, match_n: 20, kind: "days" },
+    ]);
+    expect(marks).toEqual([{ time: 100, direction: "up", text: "7/10 up" }]);
+    expect(forwardEndTime([100, 200, 300, 400], 100, 5, 400)).toBeNull();
+    expect(forwardEndTime([100, 200, 300, 400, 500, 600], 100, 5, 600)).toBe(600);
+    expect(forwardEndTime([100, 200, 300, 400, 500, 600], 100, 5, 500)).toBeNull();
+  });
+
+  it("keeps the review verdict off until 50 predictions", () => {
+    const thin = reviewLine({ predictions: 49, hits: 40, hit_rate: 80, base_rate: 50, points: 12, verdict: "better than base rate" });
+    expect(thin).not.toContain("better than base rate");
+    const ready = reviewLine({ predictions: 50, hits: 40, hit_rate: 80, base_rate: 50, points: 12.5, verdict: "better than base rate" });
+    expect(ready).toContain("better than base rate");
+    expect(ready).toContain("12.5 pts");
   });
 });

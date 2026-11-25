@@ -61,7 +61,7 @@ export class SimilarShadePrimitive implements ISeriesPrimitive<Time> {
     ctx.save();
     ctx.fillStyle = "rgba(96, 165, 250, 0.18)";
     ctx.fillRect(Math.min(x1, x2), 0, Math.abs(x2 - x1) + 4, height);
-    if (x3 != null) {
+    if (x3 != null && span.forwardEnd > span.end) {
       ctx.fillStyle = "rgba(251, 191, 36, 0.16)";
       ctx.fillRect(Math.min(x2, x3), 0, Math.abs(x3 - x2) + 4, height);
     }

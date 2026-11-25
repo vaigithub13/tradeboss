@@ -53,7 +53,8 @@ import { useSensexIndicatorStore } from "./store/indicatorStore";
 import { chartHidden, type MainView } from "./chart/controls";
 import type { PatternShade } from "./chart/similarShade";
 import { SimilarPanel } from "./panels/SimilarPanel";
-import type { CandleMatch, SimilarTimeframe } from "./api/similar";
+import { fetchPredictions, istDay, type CandleMatch, type SimilarTimeframe } from "./api/similar";
+import { forwardEndTime, snapshotMarkers } from "./similar/present";
 
 const POLL_INTERVAL_MS = 3000;
 const NO_PAPER_SIGNALS: PaperSignal[] = [];
@@ -314,6 +315,29 @@ export default function App() {
   const [similarOpen, setSimilarOpen] = useState(false);
   const [patternShade, setPatternShade] = useState<PatternShade | null>(null);
   const [similarFocus, setSimilarFocus] = useState<{ token: number; time: number } | null>(null);
+  const [predictionArrows, setPredictionArrows] = useState(true);
+  const [snapshots, setSnapshots] = useState<{ query: { end: number }; direction: "up" | "down" | "none"; up_count: number; match_n: number; kind: string }[]>([]);
+  const snapshotDay = replayActive && replayCursorTime != null ? istDay(replayCursorTime) : istDay();
+  useEffect(() => {
+    if (!symbol || !["NIFTY50", "SENSEX", "BANKNIFTY"].includes(symbol)) {
+      setSnapshots([]);
+      return;
+    }
+    const controller = new AbortController();
+    const load = () => {
+      void fetchPredictions(symbol, snapshotDay, controller.signal)
+        .then((rows) => setSnapshots(rows))
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+        });
+    };
+    load();
+    const id = window.setInterval(load, 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(id);
+    };
+  }, [symbol, snapshotDay]);
   const chartFocus = [focus, paperFocus, similarFocus].reduce<{ token: number; time: number } | null>(
     (best, item) => (!item ? best : !best || item.token > best.token ? item : best),
     null,
@@ -322,9 +346,25 @@ export default function App() {
     void (async () => {
       const chart = useChartStore.getState();
       if (chart.timeframe !== tf) await chart.setTimeframe(tf);
-      await useChartStore.getState().showRange(match.start, match.forward_end);
-      setPatternShade({ start: match.start, end: match.end, forwardEnd: match.forward_end });
+      await useChartStore.getState().showRange(match.start, match.end);
+      setPatternShade({ start: match.start, end: match.end, forwardEnd: match.end });
       setSimilarFocus({ token: Date.now(), time: match.start });
+    })();
+  }, []);
+  const revealNext = useCallback((target: { start: number; end: number; timeframe: SimilarTimeframe }, count: number) => {
+    return (async (): Promise<"shown" | "waiting"> => {
+      const chart = useChartStore.getState();
+      if (chart.timeframe !== target.timeframe) await chart.setTimeframe(target.timeframe);
+      const bar = target.timeframe === "1D" ? 86_400 : target.timeframe === "1h" ? 3_600 : Number(target.timeframe.replace("m", "")) * 60;
+      const replayTo = useReplayStore.getState().active ? useReplayStore.getState().cursor : null;
+      const limit = replayTo ?? Math.floor(Date.now() / 1000) - bar;
+      await useChartStore.getState().showRange(target.start, target.end + count * bar);
+      const times = useChartStore.getState().candles.map((candle) => candle.time);
+      const forward = forwardEndTime(times, target.end, count, limit);
+      if (forward == null) return "waiting";
+      setPatternShade({ start: target.start, end: target.end, forwardEnd: forward });
+      setSimilarFocus({ token: Date.now(), time: target.start });
+      return "shown";
     })();
   }, []);
   if ((symbol === "NIFTY50" || symbol === "SENSEX") && tradeOverlay) {
@@ -335,6 +375,17 @@ export default function App() {
         shape: m.kind === "exit" ? "circle" : m.long ? "arrowUp" : "arrowDown",
         color: m.kind === "exit" ? "#e2e8f0" : m.long ? "#26a69a" : "#ef5350",
         text: m.kind === "entry" ? "entry" : "exit",
+      });
+    }
+  }
+  if (predictionArrows) {
+    for (const mark of snapshotMarkers(snapshots)) {
+      markers.push({
+        time: mark.time as UTCTimestamp,
+        position: mark.direction === "down" ? "belowBar" : "aboveBar",
+        shape: mark.direction === "up" ? "arrowUp" : mark.direction === "down" ? "arrowDown" : "circle",
+        color: mark.direction === "up" ? "#26a69a" : mark.direction === "down" ? "#ef5350" : "#94a3b8",
+        text: mark.text,
       });
     }
   }
@@ -450,6 +501,16 @@ export default function App() {
           data-testid="similar-toggle"
         >
           Similar
+        </button>
+        <button
+          type="button"
+          className={`rounded border px-2 py-1 text-xs ${
+            predictionArrows ? "border-emerald-400/50 text-emerald-200" : "border-white/15 text-white/50"
+          }`}
+          onClick={() => setPredictionArrows((on) => !on)}
+          data-testid="prediction-arrows"
+        >
+          Arrows
         </button>
         <button
           type="button"
@@ -613,6 +674,7 @@ export default function App() {
             symbol={symbol}
             asOf={replayActive ? replayCursorTime : null}
             onOpenMatch={openSimilarMatch}
+            onReveal={revealNext}
             onClose={() => {
               setSimilarOpen(false);
               setPatternShade(null);

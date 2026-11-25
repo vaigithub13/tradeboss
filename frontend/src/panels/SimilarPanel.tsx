@@ -10,17 +10,22 @@ import {
   type DayResult,
   type SimilarTimeframe,
 } from "../api/similar";
-import { istStamp, reliabilityLine, summaryLine, verdictClass } from "../similar/present";
+import { istStamp, nextRevealCount, reliabilityLine, summaryLine, verdictClass } from "../similar/present";
+import { PredictionReview } from "./PredictionReview";
+import type { ReviewRow } from "../api/similar";
 
 interface Props {
   symbol: string | null;
   /** Replay cursor. Null on the live chart, and never a time after the cursor is sent. */
   asOf: number | null;
   onOpenMatch: (match: CandleMatch, timeframe: SimilarTimeframe) => void;
+  onReveal?: (target: { start: number; end: number; timeframe: SimilarTimeframe }, count: number) => Promise<"shown" | "waiting">;
   onClose: () => void;
 }
 
-export function SimilarPanel({ symbol, asOf, onOpenMatch, onClose }: Props) {
+export function SimilarPanel({ symbol, asOf, onOpenMatch, onReveal, onClose }: Props) {
+  const [revealShown, setRevealShown] = useState<Record<string, number>>({});
+  const [revealNote, setRevealNote] = useState<string | null>(null);
   const [timeframe, setTimeframe] = useState<SimilarTimeframe>("5m");
   const [window, setWindow] = useState(30);
   const [method, setMethod] = useState<"euclidean" | "dtw">("euclidean");
@@ -64,6 +69,14 @@ export function SimilarPanel({ symbol, asOf, onOpenMatch, onClose }: Props) {
           Close
         </button>
       </div>
+      {onReveal && (
+        <PredictionReview
+          onReveal={(row: ReviewRow, count: number) =>
+            onReveal({ start: row.query_start, end: row.query_end, timeframe: "15m" }, count)
+          }
+        />
+      )}
+      {revealNote && <p className="text-amber-200">{revealNote}</p>}
       <p className="rounded border border-white/10 bg-white/5 p-2 text-white/70" data-testid="similar-note">
         Read-only context. Not a signal. No order is sent. Intraday windows that cross the overnight gap are excluded.
       </p>
@@ -129,6 +142,24 @@ export function SimilarPanel({ symbol, asOf, onOpenMatch, onClose }: Props) {
                     {istStamp(match.start)} – {istStamp(match.end)}
                   </span>
                 </button>
+                {onReveal && nextRevealCount(revealShown[`${match.start}-${match.end}`] ?? 0) != null && (
+                  <button
+                    type="button"
+                    className="mt-1 rounded border border-white/15 px-1.5 py-0.5 text-[11px] text-white/70"
+                    onClick={() => {
+                      const count = nextRevealCount(revealShown[`${match.start}-${match.end}`] ?? 0);
+                      if (count == null) return;
+                      void onReveal({ start: match.start, end: match.end, timeframe }, count).then((result) => {
+                        if (result === "shown") {
+                          setRevealNote(null);
+                          setRevealShown((prev) => ({ ...prev, [`${match.start}-${match.end}`]: count }));
+                        } else setRevealNote("Those candles are not in yet.");
+                      });
+                    }}
+                  >
+                    See what happened next
+                  </button>
+                )}
                 <p className="text-[11px] text-white/40">
                   {["5", "10", "20"].map((horizon) => {
                     const fwd = match.forward[horizon];

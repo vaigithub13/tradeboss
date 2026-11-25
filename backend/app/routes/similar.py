@@ -7,6 +7,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query
 
 from app.config import settings
+from app.data.store import CandleStore
+from app.similar.predictions import POINTS_LABEL, RECORD_NOTE, read_predictions, read_reviews, tally, today_table
 from app.similar.worker import candles_job, days_job, pool
 
 router = APIRouter(prefix="/api")
@@ -60,3 +62,28 @@ def similar_days(
         return pool().submit(days_job, spec).result(timeout=60)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+
+@router.get("/similar/predictions")
+def similar_predictions(day: str | None = Query(None), symbol: str | None = Query(None)) -> dict:
+    rows = read_predictions(_cache_dir(), day)
+    if symbol:
+        rows = [row for row in rows if row.get("symbol") == symbol]
+    return {"predictions": rows, "note": RECORD_NOTE, "points_label": POINTS_LABEL}
+
+
+@router.get("/similar/review")
+def similar_review(day: str | None = Query(None)) -> dict:
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    root = _cache_dir()
+    today = day or datetime.now(ZoneInfo("Asia/Kolkata")).date().isoformat()
+    store = CandleStore(_candles_dir())
+    return {
+        "day": today,
+        "today": today_table(root, store, today),
+        "totals": tally(read_reviews(root)),
+        "note": RECORD_NOTE,
+        "points_label": POINTS_LABEL,
+    }

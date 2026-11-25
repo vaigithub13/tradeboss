@@ -107,6 +107,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         scanner_task = asyncio.create_task(scanner_loop(_app.state.scanner))
         lag_task = asyncio.create_task(loop_lag_probe())
         kickoff_rank_if_stale(_app.state.scanner)
+    prediction_schedule = None
     options_rec = None
     if settings.options_recorder_enabled and settings.upstox_token_value() is not None:
         from app.options.chain_scheduler import build_scheduler as build_options_scheduler
@@ -114,6 +115,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         options_rec = build_options_scheduler()
         await options_rec.start()
     try:
+        from app.similar.schedule import PredictionSchedule, predictions_wanted
+
+        if predictions_wanted():
+            prediction_schedule = PredictionSchedule()
+            prediction_schedule.start()
         yield
     finally:
         for task in (scanner_task, lag_task):
@@ -132,6 +138,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await gex.stop()
         if live is not None:
             await live.stop()
+        if prediction_schedule is not None:
+            prediction_schedule.stop()
         clear(own_path)
 
 

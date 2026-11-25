@@ -2301,3 +2301,14 @@ No signal, no slot, no order. `LIVE_TRADING` stays false. The holdout 2026-07-01
 - NIFTY 5m, window 30, 2,276 sample points, all evaluated, 11.2s, not capped. Hit rate vs the majority base rate: 5 candles 49.0% vs 51.7% (n=1,952); 10 candles 50.3% vs 51.2% (n=1,954); 20 candles 48.8% vs 50.5% (n=946). All three are no better than a coin flip.
 - A 30-bar 15m window cannot sit inside one cash session (25 bars), so that window has no matches. The 15m study uses window 8. 3,414 sample points, all evaluated, 0.9s, not capped. 5 candles: 50.7% vs 51.6% (n=2,898), coin flip. 10 candles: 47.9% vs 51.2% (n=974), below the base rate. 20 candles: no forward stays inside the session (n=0).
 - Similar days, NIFTY at 10:15, close above the open: hit 50.7% vs base 50.1% on 946 calls (1,136 sessions evaluated, 0.9s, not capped). No better than a coin flip. Each outcome line shows the match count and the all-day base rate. Verdict colour stays off when n is under 10.
+
+## 25 Nov 2026 — Similar-pattern prediction log (record only)
+
+No order, no slot, no signal. `LIVE_TRADING` stays false. The log under `data/similar/predictions/` is not committed.
+
+- A background thread (not the live-feed loop) appends a snapshot at 09:30, 10:15, 11:15, 12:15, 13:15, and 14:15 IST for NIFTY, SENSEX, and BANKNIFTY, whether or not the panel is open. Similar candles are 15m, N=30, horizon 4 bars (1 hour). Similar days run at 09:30 and 10:15, horizon the session close. A line that is already saved is not rewritten.
+- One cash session has 25 bars of 15m, so the N=30 snapshot window reaches into the previous session. The log records that. The panel's same-session rule is unchanged, and the overnight gap is still not a feature.
+- Direction is up or down outside 45–55% of the matches, and none inside that band. The chart can show a green arrow, a red arrow, or a grey dot, labelled like "7/10 up", and the arrows toggle off.
+- "See what happened next" steps through the next 5, then 10, then 20 candles, and only once those candles have closed.
+- After 15:30, and again from the 16:35 session-stop before the backend is signalled, each prediction is marked hit or miss in a separate daily file: hypothetical index points in the called direction, and the 1-hour adverse move. Points have no costs.
+- The review panel shows today's table and week, month, slot, and overall totals with none excluded and included. The plain verdict appears once there are 50 directional calls.
