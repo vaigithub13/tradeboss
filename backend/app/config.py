@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     def candles_daily_dir(self) -> Path:
         return self.data_dir / "candles_daily"
 
+    @property
+    def bhavcopy_dir(self) -> Path:
+        return self.data_dir / "bhavcopy"
+
     def upstox_token_value(self) -> str | None:
         t = self.upstox_analytics_token
         value = t.get_secret_value().strip() if t is not None else ""

@@ -2351,6 +2351,32 @@ Stocks passing all three filters on the last session of the year:
 | 2025 | 2025-12-31 | 95 | 138 | 217 |
 | 2026 | 2026-11-23 | 98 | 145 | 231 |
 
+## 26 Nov 2026 — Swing Phase 1b: bhavcopy universe (research only)
+
+No UI, no slot, no order. A separate worker (`python -m scripts.swing_phase1b`) stored NSE cash bhavcopy under `data/bhavcopy/`. That directory is not committed. `LIVE_TRADING` stays false. The official archive answered; no mirror was used.
+
+- 2,948 daily files, 2,947 sessions from 2015-01-01 through 2026-11-25. EQ and BE only. 170 weekdays in that span have no file. The trading calendar for this research is those session dates.
+- 3,731 lineages. A rename keeps its ISIN (380 lineages changed symbol). An ISIN change is stitched only when the same symbol continues and the new previous close is the old close. A name stays through its last session.
+- 795 split and bonus adjustments were applied. Same-day split plus bonus uses the product of the factors. A bonus debenture or preference issue is not treated as a share split. 31,156 other candidates were recorded and not applied. On the current Nifty 500, 497 names overlap Upstox daily bars on at least 20 days. Adjusted closes: 52 names still differ by a median of more than 1% (or on more than 5% of days). Raw closes: 190 names. Three names have no shared series. The largest remaining gaps (NMDC, SCI) are not a single split ratio.
+- Filters are point-in-time on the raw print: 20-session average turnover at least ₹5 crore, close at least ₹50, at least 250 sessions since the lineage's first bhavcopy, and no economic move above 20% in the last 5 sessions. Size is the trailing turnover rank that day: top 100, 101–250, 251–500, and the rest. That is not index membership. Nothing passes in 2015, because the files start on 2015-01-01.
+
+Names passing on the last session of the year. "Outside today's 500" is the survivorship gap. "Later delisted" means the lineage's last session is more than 10 calendar days before 2026-11-25. The two counts can overlap.
+
+| Year | As of | Large | Mid | Small | Rest | Outside today's 500 | Later delisted |
+|---:|---|---:|---:|---:|---:|---:|---:|
+| 2015 | 2015-12-31 | 0 | 0 | 0 | 0 | 0 | 0 |
+| 2016 | 2016-12-30 | 98 | 132 | 59 | 0 | 102 | 38 |
+| 2017 | 2017-12-29 | 96 | 134 | 217 | 65 | 260 | 60 |
+| 2018 | 2018-12-31 | 97 | 131 | 79 | 0 | 93 | 19 |
+| 2019 | 2019-12-31 | 95 | 138 | 73 | 0 | 82 | 21 |
+| 2020 | 2020-12-31 | 97 | 125 | 214 | 93 | 238 | 24 |
+| 2021 | 2021-12-31 | 92 | 133 | 200 | 155 | 263 | 24 |
+| 2022 | 2022-12-30 | 89 | 140 | 215 | 202 | 285 | 22 |
+| 2023 | 2023-12-29 | 93 | 137 | 221 | 463 | 509 | 20 |
+| 2024 | 2024-12-31 | 93 | 141 | 225 | 501 | 532 | 11 |
+| 2025 | 2025-12-31 | 90 | 140 | 215 | 432 | 429 | 3 |
+| 2026 | 2026-11-25 | 92 | 139 | 214 | 627 | 601 | 0 |
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
