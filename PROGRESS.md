@@ -2388,6 +2388,38 @@ No UI, no slot, no order. A separate worker (`python -m scripts.swing_phase2`) r
 - One strategy, to check the mechanics: buy a close above the prior 20-session high when Nifty 500 is above its 200-day average. Stop is the entry open minus 2×ATR(14). Exit at the close of the fifth session. Signal at the close of day D, fill at the open of D+1. Capital ₹50,000, at most 5 positions, ₹10,000 each, one position per stock, no leverage.
 - 536 trades. Realised P&L ₹−48,498. Equity finished at ₹1,502. Mean exposure 60.9%. By size: large 86 trades ₹−8,384, mid 178 ₹−19,492, small 264 ₹−19,532, rest 8 ₹−1,091. By year: 2016 ₹−25,925 (equity ₹24,075), 2017 ₹−13,970 (₹10,219), 2018 ₹−8,603 (₹1,502). Exits: time 401, stop 116, gap-through-stop 17, event guard 2. This is a mechanics check. It is not evidence of an edge.
 
+## 26 Nov 2026 — Swing Phase 3: five strategies on DEV and OOS (research only)
+
+No UI, no slot, no order. A separate worker (`python -m scripts.swing_phase3`) runs outside the backend. `LIVE_TRADING` stays false. The backend was not started. Outputs under `data/swing_phase3/` and `data/validation/swing_phase3_2026-11-26.md` are not committed. Defaults were not changed after the results.
+
+The gate is one book, chosen before the run: ₹50,000, 5 positions, Upstox delivery brokerage. The other seven books (₹50,000 and ₹2,00,000, 3 and 5 positions, Upstox and ₹0 brokerage) are reported and were not extra attempts. Sizing is mark-to-market equity divided by the slot count. Signal at the close of day D, buy the next open, exit by the close of the fifth session. Nifty 500 must close above its 200-day average. The universe is the Phase 1b point-in-time filter plus the Phase 2 event guard. The same 10 Upstox substitutions were applied. The guard flagged 2,455 sessions on this tape.
+
+Each window is a fresh book. DEV is 2016-01-01 through 2021-12-31. OOS is 2022-01-01 through 2026-06-30. Forward is 2026-10-02 through 2026-11-23, the last day in both the Nifty file and the bhavcopy, and it is not part of the gate. Holdout 2026-07-01 through 2026-10-01 was not opened. No strategy passed, so the holdout marker was not written.
+
+Nifty 500 total return is not in the stored daily bars. The benchmark is the price index, bought at the first open and held to the last close, with no costs. That hurdle is easier than a total-return index. DEV: CAGR 14.3%, max drawdown 38.3%, ₹50,000 ends at ₹111,527. OOS: CAGR 9.9%, max drawdown 18.8%, ends at ₹76,497. The drawdown limit is 28.3%. Forward is 35 sessions and ends at ₹54,080.
+
+Primary book after costs. A finish at or below zero is reported as −100% CAGR. All five fail.
+
+| Strategy | DEV CAGR | DEV DD | OOS CAGR | OOS DD | PF | Trades | Win | Avg trade | Cost | Random | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| S1 Breakout | −100% | 100% | −84.2% | 100% | 0.53 | 538 | 23.8% | −8.0% | 8.0% | 0/20 | FAIL |
+| S2 Momentum rank | −67.0% | 99.9% | −77.9% | 99.9% | 0.37 | 389 | 21.3% | −9.6% | 8.9% | 0/20 | FAIL |
+| S3 Pullback | −82.6% | 100% | −82.3% | 100% | 0.28 | 599 | 24.0% | −7.0% | 7.5% | 0/20 | FAIL |
+| S4 Near 52-week high | −30.5% | 89.4% | −83.1% | 100% | 0.36 | 517 | 21.5% | −8.3% | 8.3% | 0/20 | FAIL |
+| S5 Gap-and-go | −44.1% | 97.0% | −46.3% | 94.0% | 0.47 | 429 | 28.9% | −3.5% | 3.3% | 0/20 | FAIL |
+
+Each failure is the same list: DEV and OOS are not positive after costs, OOS CAGR is below the price index, OOS drawdown is worse than 1.5× the index, the book beats none of the 20 random seeds, the average trade is under +0.5%, and removing the ten largest winners leaves a loss. OOS trade counts are all above 100. The ±20% rule did not label a cliff, because that label only applies when the base book is profitable. Every varied parameter on the primary OOS book still lost money. The smallest of those losses are S3 with the 50-day average moved to 60 (CAGR −30.4%, P&L ₹−40,037) and S5 with the gap moved to 4.8% (CAGR −31.0%, P&L ₹−40,541), against a base S5 of −46.3% and ₹−46,948. Defaults stayed as written.
+
+₹0 brokerage does not change the sign. Every DEV and OOS book in the eight-book grid lost money. The smallest DEV loss is S4, ₹2,00,000, 3 positions, ₹0 brokerage: CAGR −3.6%, P&L ₹−41,807. The smallest OOS loss is S5, ₹2,00,000, 3 positions, ₹0 brokerage: CAGR −16.0%, max drawdown 56.4%, P&L ₹−108,841.
+
+Size is the signal-day tag inside that one book. OOS primary P&L: S1 large ₹−3,022 (44), mid ₹−8,361 (82), small ₹−17,460 (173), rest ₹−21,144 (239). S2 large ₹−866 (40), mid ₹−11,237 (69), small ₹−23,787 (120), rest ₹−14,053 (160). S3 large ₹−4,864 (69), mid ₹−11,650 (93), small ₹−13,828 (186), rest ₹−19,637 (251). S4 large ₹−11,575 (115), mid ₹−11,147 (82), small ₹−16,441 (144), rest ₹−10,820 (176). S5 large ₹−9,159 (37), mid ₹−5,803 (57), small ₹−12,843 (107), rest ₹−19,144 (228). Large and small are both losses on OOS for every strategy. The one positive size cell in the whole primary grid is S4 DEV small: 173 trades, ₹+3,785, with an equal-weighted average trade of −4.9%. Large on that same book is 305 trades and ₹−25,361.
+
+OOS by year, primary book: S1 through S4 are down to a few rupees by the end of 2024 and take no trades in 2025 or the first half of 2026. S5 loses in every OOS year and ends June 2026 at ₹3,052 (2022 ₹−13,088, 2023 ₹−9,984, 2024 ₹−16,350, 2025 ₹−6,634, 2026 ₹−891).
+
+Forward, primary book, not part of the gate: S1 16 trades ₹−6,204, S2 15 ₹−4,100, S3 18 ₹−4,307, S4 15 ₹−2,072, S5 7 ₹−967.
+
+A held name with no bar stays at its last close and is not sold, including on the last day. S4 DEV shows it in 2021: no trades, equity stuck at ₹5,661, exposure 100%. Closed trades on that book already lost ₹44,207. Sanity found no fill on the signal day and no entry inside the holdout. The worker exited 0.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

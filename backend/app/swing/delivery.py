@@ -111,7 +111,14 @@ class DeliveryTable:
             raise NoRatesForDate(f"no delivery rates for {on.isoformat()} (first row {first})")
         return found
 
-    def leg(self, side: str, price: Decimal | float | int, qty: int, on: date) -> DeliveryLeg:
+    def leg(
+        self,
+        side: str,
+        price: Decimal | float | int,
+        qty: int,
+        on: date,
+        flat_override: Decimal | None = None,
+    ) -> DeliveryLeg:
         if side not in ("BUY", "SELL"):
             raise ValueError(f"side must be BUY or SELL, got {side!r}")
         if qty < 0:
@@ -125,7 +132,7 @@ class DeliveryTable:
                 raise UnknownRate(f"rate {key!r} is missing on the row effective {row.effective_from}")
             return rates[key]
 
-        flat = rates.get("brokerage_flat")
+        flat = rates.get("brokerage_flat") if flat_override is None else flat_override
         pct = rates.get("brokerage_pct")
         options = [item for item in (flat, None if pct is None else turnover * pct / 100) if item is not None]
         if not options:
