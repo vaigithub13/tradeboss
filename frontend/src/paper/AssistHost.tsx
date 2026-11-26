@@ -30,6 +30,7 @@ import {
   scorePractice,
   SKIP_REASONS,
   storyDue,
+  storyGroups,
   type AssistEvent,
   type AssistSettings,
   type AssistSlot,
@@ -583,43 +584,50 @@ export function AssistStory({ state, onClose }: { state: AssistState; onClose: (
           <h2 className="font-semibold">Trade story</h2>
           <button type="button" className="ml-auto rounded border border-white/20 px-2 py-0.5" onClick={onClose}>Close</button>
         </div>
-        <table className="mt-2 w-full text-left text-xs tabular-nums">
-          <thead className="text-white/40">
-            <tr>
-              <th>Day</th><th>Contract</th><th>Paper entry</th><th>Real entry</th><th>Slip</th>
-              <th>Paper exit</th><th>Real exit</th><th>Paper ₹</th><th>Real ₹</th><th>Rule</th>
-            </tr>
-          </thead>
-          <tbody>
-            {state.running.map((row) => (
-              <tr key={row.key} className="border-t border-white/10">
-                <td>{row.day}</td>
-                <td>{row.market ? `${row.market} ` : ""}{row.contract}</td>
-                <td>{fmt(row.paper_entry)}</td>
-                <td>{fmt(row.real_entry)}</td>
-                <td>{fmt(row.entry_slip)}</td>
-                <td>{fmt(row.paper_exit)}</td>
-                <td>{fmt(row.real_exit)}</td>
-                <td>{row.paper_net == null ? "—" : formatRupees(row.paper_net)}</td>
-                <td>{row.real_net == null ? "—" : formatRupees(row.real_net)}</td>
-                <td>{row.rule.followed ? "yes" : "no"}</td>
-              </tr>
+        {storyGroups(state.running, state.settings.slots).map((group) => (
+          <section key={group.slot} className="mt-3" data-testid={`assist-story-${group.slot}`}>
+            <h3 className="font-semibold">{group.market} slot {group.slot}</h3>
+            {group.rows.length === 0 && <p className="text-xs text-white/40">No real trades.</p>}
+            {group.rows.length > 0 && (
+              <table className="mt-2 w-full text-left text-xs tabular-nums">
+                <thead className="text-white/40">
+                  <tr>
+                    <th>Day</th><th>Contract</th><th>Paper entry</th><th>Real entry</th><th>Slip</th>
+                    <th>Paper exit</th><th>Real exit</th><th>Paper ₹</th><th>Real ₹</th><th>Rule</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {group.rows.map((row) => (
+                    <tr key={row.key} className="border-t border-white/10">
+                      <td>{row.day}</td>
+                      <td>{row.contract}</td>
+                      <td>{fmt(row.paper_entry)}</td>
+                      <td>{fmt(row.real_entry)}</td>
+                      <td>{fmt(row.entry_slip)}</td>
+                      <td>{fmt(row.paper_exit)}</td>
+                      <td>{fmt(row.real_exit)}</td>
+                      <td>{row.paper_net == null ? "—" : formatRupees(row.paper_net)}</td>
+                      <td>{row.real_net == null ? "—" : formatRupees(row.real_net)}</td>
+                      <td>{row.rule.followed ? "yes" : "no"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            {group.rows.map((row) => (
+              <section key={`${row.key}-story`} className="mt-3 border-t border-white/10 pt-2">
+                <p className="text-white/80">{row.why}</p>
+                {row.price_action?.text && <p className="mt-1 text-xs text-white/60">{row.price_action.text}</p>}
+                {row.after?.text && <p className="mt-1 text-xs text-white/60">{row.after.text}</p>}
+                <p className="text-xs text-white/40">
+                  {exitLabel(row.exit_reason)} · entered {row.rule.entered_on_time ? "within 1 min" : "outside 1 min"}
+                  · SL {row.rule.sl_tp_set ? "set" : "not set"}
+                  · trails {row.rule.trails_on_time ? "on time" : "late"}
+                  · {row.rule.no_early_exit ? "no early exit" : "early exit"}
+                </p>
+                <AssistChart chart={row.chart} />
+              </section>
             ))}
-          </tbody>
-        </table>
-        {state.running.map((row) => (
-          <section key={`${row.key}-story`} className="mt-3 border-t border-white/10 pt-2">
-            <p className="text-xs text-white/50">{row.market ?? "NIFTY"} slot {row.slot ?? ""}</p>
-            <p className="text-white/80">{row.why}</p>
-            {row.price_action?.text && <p className="mt-1 text-xs text-white/60">{row.price_action.text}</p>}
-            {row.after?.text && <p className="mt-1 text-xs text-white/60">{row.after.text}</p>}
-            <p className="text-xs text-white/40">
-              {exitLabel(row.exit_reason)} · entered {row.rule.entered_on_time ? "within 1 min" : "outside 1 min"}
-              · SL {row.rule.sl_tp_set ? "set" : "not set"}
-              · trails {row.rule.trails_on_time ? "on time" : "late"}
-              · {row.rule.no_early_exit ? "no early exit" : "early exit"}
-            </p>
-            <AssistChart chart={row.chart} />
           </section>
         ))}
         <PracticeRead />

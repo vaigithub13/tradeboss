@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from app.exits.rules import PREMIUM_TRAIL_10, trailed_stop
-from app.paper.assist import AssistJournal, build_ticket, default_settings, normalise_settings, rule_followed
+from app.paper.assist import AssistJournal, build_ticket, default_settings, guard_banner, normalise_settings, rule_followed
 from app.paper.assist_book import (
     after_trade,
     format_dd_why,
@@ -157,6 +157,28 @@ def test_why_lists_each_confirmation() -> None:
     for piece in ("Supertrend", "RSI 74.2", "Bollinger", "R1", "Williams %R"):
         assert piece in text
     assert "no target" in text
+
+
+def test_the_guard_adds_slot_5_and_slot_7_together() -> None:
+    settings = default_settings()
+    assert settings["slots"] == ["5", "7"]
+    assert settings["max_trades"] == 3
+    assert settings["day_loss"] == 4000
+    assert settings["account_pause"] == 12000
+    records = [
+        {"kind": "taken", "slot": "5", "day": DAY, "net": -2000, "exit_time": 1, "contract": "NIFTY 25000 CE"},
+        {"kind": "taken", "slot": "7", "day": DAY, "net": -2000, "exit_time": 2, "contract": "SENSEX 80000 CE"},
+        {"kind": "skipped", "slot": "5", "day": DAY},
+    ]
+    guard = guard_banner(records, today=DAY, settings=settings)
+    assert guard["trades_today"] == 2
+    assert guard["pnl_today"] == -4000.0
+    assert guard["stop_for_today"] is True
+    wider = {**settings, "day_loss": 5000, "max_trades": 2, "account_pause": 3000, "start_balance": 100000}
+    moved = guard_banner(records, today=DAY, settings=wider)
+    assert moved["stop_for_today"] is False
+    assert moved["at_trade_cap"] is True
+    assert moved["pause"] is True
 
 
 def test_a_saved_slot_4_setting_watches_5_and_7(tmp_path) -> None:

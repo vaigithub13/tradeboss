@@ -2,7 +2,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AssistBanner, AssistEntryDialog, AssistTrailDialog, PracticeRead } from "./AssistHost";
+import { AssistBanner, AssistEntryDialog, AssistStory, AssistTrailDialog, PracticeRead } from "./AssistHost";
 import {
   assistEvents,
   guardFrom,
@@ -12,11 +12,14 @@ import {
   scorePractice,
   snapTick,
   storyDue,
+  storyGroups,
   userTrailStop,
   type AssistMemory,
   type AssistSettings,
   type AssistSlot,
+  type AssistState,
   type Guard,
+  type RunningRow,
 } from "./assist";
 
 const DAY = "2026-11-27";
@@ -204,5 +207,35 @@ describe("slot 4 assist", () => {
     await waitFor(() => expect(screen.getByTestId("assist-practice-reveal")).toHaveProperty("disabled", false));
     await userEvent.click(screen.getByTestId("assist-practice-reveal"));
     expect(screen.getByTestId("assist-practice-score").textContent).toMatch(/direction hit/);
+  });
+
+  it("splits the story into a Nifty table and a Sensex table", () => {
+    const rule = {
+      entry_delay_s: 10, entered_on_time: true, sl_tp_set: true, trails_on_time: true, no_early_exit: true, followed: true,
+    };
+    const row = (slot: string, market: string, contract: string): RunningRow => ({
+      key: slot, slot, market, day: DAY, contract, why: `${market} reason`,
+      paper_entry: 100, real_entry: 101, entry_slip: 1, paper_exit: 110, real_exit: 109, exit_slip: -1,
+      paper_net: 500, real_net: 400, rule, chart: null,
+    });
+    const rows = [row("7", "SENSEX", "SENSEX 80000 CE"), row("5", "NIFTY", "NIFTY 25000 CE")];
+    expect(storyGroups(rows).map((group) => group.market)).toEqual(["NIFTY", "SENSEX"]);
+    const state: AssistState = {
+      settings: { enabled: true, slots: ["5", "7"], slot: "5", lots: 1, max_trades: 3, day_loss: 4000, account_pause: 12000, start_balance: null },
+      guard: {
+        trades_today: 2, max_trades: 3, at_trade_cap: false, pnl_today: 0, day_loss: 4000, stop_for_today: false,
+        open_trades: 0, start_balance: null, account_pnl: 0, equity: null, account_pause: 12000, pause: false, needs_start_balance: true,
+      },
+      open: [], records: [], running: rows, today: DAY,
+    };
+    render(<AssistStory state={state} onClose={() => undefined} />);
+    const nifty = screen.getByTestId("assist-story-5");
+    const sensex = screen.getByTestId("assist-story-7");
+    expect(nifty.textContent).toMatch(/NIFTY slot 5/);
+    expect(nifty.textContent).toMatch(/NIFTY 25000 CE/);
+    expect(nifty.textContent).not.toMatch(/SENSEX/);
+    expect(sensex.textContent).toMatch(/SENSEX slot 7/);
+    expect(sensex.textContent).toMatch(/SENSEX 80000 CE/);
+    expect(sensex.textContent).not.toMatch(/NIFTY/);
   });
 });

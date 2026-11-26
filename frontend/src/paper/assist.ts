@@ -427,3 +427,22 @@ export function assistEvents(prev: AssistMemory | undefined, status: AssistSlot,
 export function paperKey(slot: string, day: string, entryAtMs: number): string {
   return `${slot}:${day}:${Math.trunc(entryAtMs / 1000)}`;
 }
+
+export interface StoryGroup {
+  slot: string;
+  market: string;
+  rows: RunningRow[];
+}
+
+/** Nifty and Sensex each keep their own rows. Empty slots stay, so the story shows both. */
+export function storyGroups(rows: RunningRow[], slots: string[] = ["5", "7"]): StoryGroup[] {
+  const order = [...slots];
+  for (const row of rows) {
+    if (row.slot && !order.includes(row.slot)) order.push(row.slot);
+  }
+  return order.map((slot) => {
+    const group = rows.filter((row) => row.slot === slot);
+    const named = group.find((row) => row.market)?.market;
+    return { slot, market: named ?? (slot === "7" ? "SENSEX" : "NIFTY"), rows: group };
+  });
+}
