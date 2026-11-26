@@ -160,4 +160,16 @@ export const postAssistSkipped = (body: Record<string, unknown>): Promise<{ reco
 export const postAssistClosed = (body: Record<string, unknown>): Promise<{ record: { net: number } }> =>
   postJson("/api/paper/assist/closed", body);
 
+export const postAssistTrail = (body: Record<string, unknown>): Promise<{ record: { stop: number } }> =>
+  postJson("/api/paper/assist/trail", body);
+
+export const postAssistPractice = (body: { bars: unknown[] }): Promise<{ id: string; shown: unknown[]; signal_close: number }> =>
+  postJson("/api/paper/assist/practice", body);
+
+export const postAssistPracticeRead = (body: Record<string, unknown>): Promise<{ saved: boolean }> =>
+  postJson("/api/paper/assist/practice/read", body);
+
+export const postAssistPracticeReveal = (): Promise<{ score: { direction_hit: boolean | null } }> =>
+  postJson("/api/paper/assist/practice/reveal", {});
+
 export type { AccountStopProgress, OrderHelper, RealTotals };

@@ -1,16 +1,18 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { AssistBanner, AssistEntryDialog } from "./AssistHost";
+import { AssistBanner, AssistEntryDialog, AssistTrailDialog, PracticeRead } from "./AssistHost";
 import {
   assistEvents,
   guardFrom,
   maxLoss,
   premiumBracket,
   reminderDue,
+  scorePractice,
   snapTick,
   storyDue,
+  userTrailStop,
   type AssistMemory,
   type AssistSettings,
   type AssistSlot,
@@ -140,5 +142,67 @@ describe("slot 4 assist", () => {
     await userEvent.click(screen.getByTestId("assist-took"));
     expect(onTook).toHaveBeenCalledTimes(1);
     expect(onTook.mock.calls[0]?.[0]).toBeCloseTo(200.05);
+  });
+
+  it("shows a slot 5 trail and no +40% target", async () => {
+    expect(userTrailStop(110, 116)).toBe(99);
+    expect(userTrailStop(100, 116)).toBe(100);
+    const upcoming = Array.from({ length: 6 }, () => ({ high: 106, low: 99, close: 110 }));
+    expect(scorePractice(100, upcoming, "up", 105)).toEqual({ ready: true, directionHit: true, levelHit: true });
+    expect(scorePractice(100, upcoming.slice(0, 3), "up").ready).toBe(false);
+
+    render(
+      <AssistEntryDialog
+        event={{ kind: "entry", slot: "5", day: DAY, contract: "NIFTY 25000 CE", decidedAtMs: T, side: "BUY" }}
+        ticket={{
+          key: "5:2026-11-27:1", slot: "5", day: DAY, fill_time: 1, decided_at_ms: T, time: "10:05",
+          action: "BUY", option_side: "CE", signal_side: "BUY", contract: "NIFTY 25000 CE",
+          bid: 199.5, ask: 200.03, ltp: 199.8, suggested_limit: 200.05, lots: 1, lot_size: 65, quantity: 65,
+          stop: 180.05, target: null, stop_frac: 0.1, target_frac: null, charges: 40, max_loss: 1340,
+          paper_fill: 200, trailing: true, exit_note: "exit by trailing stop", market: "NIFTY",
+          why: "DD long confirmations: close above Supertrend.",
+          price_action: { text: "Structure HH/HL." },
+          chart: null, index_price: 24510,
+        }}
+        busy={false}
+        error={null}
+        onTook={() => undefined}
+        onSkip={() => undefined}
+      />,
+    );
+    expect(screen.getByText(/NIFTY slot 5/)).toBeTruthy();
+    expect(screen.getByTestId("assist-trail-note").textContent).toMatch(/exit by trailing stop/);
+    expect(screen.queryByText(/TP /)).toBeNull();
+    expect(screen.getByTestId("assist-pa").textContent).toMatch(/HH\/HL/);
+    cleanup();
+
+    const onUpdated = vi.fn();
+    render(
+      <AssistTrailDialog
+        notice={{ key: "5:d:1", slot: "5", market: "NIFTY", contract: "NIFTY 25000 CE", paper_stop: 100, real_stop: 99, moved_at: 1, text: "Move SL to ₹99.00" }}
+        busy={false}
+        error={null}
+        onUpdated={onUpdated}
+      />,
+    );
+    expect(screen.getByTestId("assist-trail-text").textContent).toBe("Move SL to ₹99.00");
+    await userEvent.click(screen.getByTestId("assist-trail-updated"));
+    expect(onUpdated).toHaveBeenCalledTimes(1);
+  });
+
+  it("saves a practice read before it reveals the next six candles", async () => {
+    const bars = Array.from({ length: 18 }, (_, i) => ({
+      time: 1_000 + i * 60, open: 100, high: i >= 12 ? 112 : 101, low: 99, close: i >= 12 ? 110 : 100,
+    }));
+    const onPersist = vi.fn().mockResolvedValue({ saved: true });
+    render(<PracticeRead bars={bars} onPersist={onPersist} />);
+    const reveal = screen.getByTestId("assist-practice-reveal");
+    expect(reveal).toHaveProperty("disabled", true);
+    await userEvent.type(screen.getByLabelText("Reason"), "higher low");
+    await userEvent.click(screen.getByTestId("assist-practice-save"));
+    expect(onPersist).toHaveBeenCalledWith(expect.objectContaining({ direction: "up", tag: "trend pullback", reason: "higher low" }));
+    await waitFor(() => expect(screen.getByTestId("assist-practice-reveal")).toHaveProperty("disabled", false));
+    await userEvent.click(screen.getByTestId("assist-practice-reveal"));
+    expect(screen.getByTestId("assist-practice-score").textContent).toMatch(/direction hit/);
   });
 });

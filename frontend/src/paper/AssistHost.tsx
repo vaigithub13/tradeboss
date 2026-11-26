@@ -4,11 +4,16 @@ import {
   fetchAssist,
   fetchAssistTicket,
   postAssistClosed,
+  postAssistPractice,
+  postAssistPracticeRead,
+  postAssistPracticeReveal,
   postAssistSkipped,
   postAssistTaken,
+  postAssistTrail,
   saveAssistSettings,
   type PaperStatus,
 } from "../api/paper";
+import { useChartStore } from "../store/chartStore";
 import { usePaperStore } from "../store/paperStore";
 import { fromDatetimeLocalValue, toDatetimeLocalValue } from "./real";
 import { formatRupees } from "./present";
@@ -19,8 +24,10 @@ import {
   istDate,
   istMinutes,
   paperKey,
+  PRACTICE_TAGS,
   premiumBracket,
   reminderDue,
+  scorePractice,
   SKIP_REASONS,
   storyDue,
   type AssistEvent,
@@ -28,8 +35,11 @@ import {
   type AssistSlot,
   type AssistState,
   type AssistTicket,
+  type ChartCandle,
   type Guard,
+  type PracticeTag,
   type SkipReason,
+  type TrailNotice,
 } from "./assist";
 import { AssistChart } from "./AssistChart";
 
@@ -46,11 +56,12 @@ function notify(title: string, body: string): void {
   }
 }
 
-export function AssistBanner({ guard, enabled, onToggleSettings, onStory }: {
+export function AssistBanner({ guard, enabled, onToggleSettings, onStory, onPractice }: {
   guard: Guard | null;
   enabled: boolean;
   onToggleSettings: () => void;
   onStory?: () => void;
+  onPractice?: () => void;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-white/10 bg-[#0c1218] px-3 py-1 text-xs" data-testid="assist-banner">
@@ -77,6 +88,11 @@ export function AssistBanner({ guard, enabled, onToggleSettings, onStory }: {
       {onStory && (
         <button type="button" className="rounded border border-white/15 px-2 py-0.5 text-white/70" data-testid="assist-story-open" onClick={onStory}>
           Story
+        </button>
+      )}
+      {onPractice && (
+        <button type="button" className="rounded border border-white/15 px-2 py-0.5 text-white/70" data-testid="assist-practice-open" onClick={onPractice}>
+          Practice
         </button>
       )}
       <button type="button" className="ml-auto rounded border border-white/15 px-2 py-0.5 text-white/70" onClick={onToggleSettings}>
@@ -108,18 +124,22 @@ export function AssistEntryDialog({
   const [tpSet, setTpSet] = useState(true);
   const [reason, setReason] = useState<SkipReason>("late");
   const fill = Number(price);
-  const stopFrac = ticket?.stop_frac ?? 0.2;
-  const targetFrac = ticket?.target_frac ?? 0.4;
-  const bracket = Number.isFinite(fill) && fill > 0 && stopFrac != null && targetFrac != null
+  const trailing = Boolean(ticket?.trailing);
+  const stopFrac = ticket?.stop_frac ?? (trailing ? 0.1 : 0.2);
+  const targetFrac = trailing ? null : ticket?.target_frac ?? 0.4;
+  const bracket = !trailing && Number.isFinite(fill) && fill > 0 && stopFrac != null && targetFrac != null
     ? premiumBracket(fill, stopFrac, targetFrac)
     : null;
+  const liveStop = trailing && Number.isFinite(fill) && fill > 0 ? round2(fill * (1 - stopFrac)) : null;
   const side = ticket?.option_side || (event.side === "SELL" ? "PE" : "CE");
+  const market = ticket?.market ?? (event.slot === "7" ? "SENSEX" : "NIFTY");
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Entry ticket" data-testid="assist-entry">
       <div className="w-full max-w-lg rounded border border-sky-400/40 bg-[#0c1218] p-3 text-sm text-white">
-        <h2 className="text-base font-semibold text-sky-200">Slot {event.slot} · BUY {side}</h2>
+        <h2 className="text-base font-semibold text-sky-200">{market} slot {event.slot} · BUY {side}</h2>
         <p className="mt-1 tabular-nums text-white/70">{ticket?.time ?? ""} · {ticket?.contract || event.contract}</p>
         <p className="mt-2 text-white/90" data-testid="assist-why">{ticket?.why || event.contract || "Channel values were not on the bars available."}</p>
+        {ticket?.price_action?.text && <p className="mt-1 text-xs text-white/60" data-testid="assist-pa">{ticket.price_action.text}</p>}
         <div className="mt-2"><AssistChart chart={ticket?.chart} /></div>
         <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1 tabular-nums text-white/80">
           <dt className="text-white/40">Bid / ask / LTP</dt>
@@ -128,8 +148,8 @@ export function AssistEntryDialog({
           <dd>{fmt(ticket?.suggested_limit)}</dd>
           <dt className="text-white/40">Quantity</dt>
           <dd>{ticket ? `${ticket.lots} lot × ${ticket.lot_size} = ${ticket.quantity}` : "—"}</dd>
-          <dt className="text-white/40">SL / TP from the limit</dt>
-          <dd>{fmt(ticket?.stop)} / {fmt(ticket?.target)}</dd>
+          <dt className="text-white/40">{trailing ? "SL from the limit" : "SL / TP from the limit"}</dt>
+          <dd>{trailing ? `${fmt(ticket?.stop)} · exit by trailing stop` : `${fmt(ticket?.stop)} / ${fmt(ticket?.target)}`}</dd>
           <dt className="text-white/40">Max loss incl. charges</dt>
           <dd>{ticket?.max_loss == null ? "—" : `₹${ticket.max_loss.toFixed(0)}`}</dd>
         </dl>
@@ -142,19 +162,20 @@ export function AssistEntryDialog({
             <input type="datetime-local" step={1} className="rounded border border-white/15 bg-transparent px-1 py-0.5" value={when} aria-label="Fill time" onChange={(e) => setWhen(e.target.value)} />
           </label>
           {bracket && <p className="tabular-nums text-white/70">From this fill: SL {bracket[0].toFixed(2)} · TP {bracket[1].toFixed(2)}</p>}
+          {liveStop != null && <p className="tabular-nums text-white/70" data-testid="assist-trail-note">From this fill: SL {liveStop.toFixed(2)} · exit by trailing stop</p>}
           <label className="flex items-center gap-2 text-white/70"><input type="checkbox" checked={slSet} onChange={(e) => setSlSet(e.target.checked)} /> SL set as told</label>
-          <label className="flex items-center gap-2 text-white/70"><input type="checkbox" checked={tpSet} onChange={(e) => setTpSet(e.target.checked)} /> TP set as told</label>
+          {!trailing && <label className="flex items-center gap-2 text-white/70"><input type="checkbox" checked={tpSet} onChange={(e) => setTpSet(e.target.checked)} /> TP set as told</label>}
           {error && <p className="text-red-300">{error}</p>}
           <div className="flex flex-wrap gap-2">
             <button
               type="button"
               className="rounded bg-sky-500/80 px-3 py-1 font-semibold disabled:opacity-40"
               data-testid="assist-took"
-              disabled={busy || !bracket}
+              disabled={busy || (trailing ? liveStop == null : !bracket)}
               onClick={() => {
                 const entryTime = fromDatetimeLocalValue(when);
-                if (entryTime == null || !bracket) return;
-                onTook(fill, entryTime, slSet, tpSet);
+                if (entryTime == null || (trailing ? liveStop == null : !bracket)) return;
+                onTook(fill, entryTime, slSet, trailing ? false : tpSet);
               }}
             >
               I took it
@@ -189,7 +210,7 @@ export function AssistExitDialog({
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Exit ticket" data-testid="assist-exit">
       <div className="w-full max-w-md rounded border border-amber-400/40 bg-[#0c1218] p-3 text-sm text-white">
-        <h2 className="text-base font-semibold text-amber-200">Slot {event.slot} exited · {event.reason ?? "exit"}</h2>
+        <h2 className="text-base font-semibold text-amber-200">{event.slot === "7" ? "SENSEX" : "NIFTY"} slot {event.slot} exited · {event.reason ?? "exit"}</h2>
         <p className="mt-1">{event.contract}</p>
         <p className="mt-2">Check your real position. Paper sold at {fmt(event.exitPrice)}.</p>
         {error && <p className="mt-2 text-red-300">{error}</p>}
@@ -217,8 +238,39 @@ export function AssistExitDialog({
   );
 }
 
+function round2(n: number): number {
+  return Math.round(n * 100) / 100;
+}
+
 function fmt(value: number | null | undefined): string {
   return value == null ? "—" : value.toFixed(2);
+}
+
+export function AssistTrailDialog({
+  notice,
+  busy,
+  error,
+  onUpdated,
+}: {
+  notice: TrailNotice;
+  busy: boolean;
+  error: string | null;
+  onUpdated: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 p-4" role="dialog" aria-modal="true" aria-label="Move stop" data-testid="assist-trail">
+      <div className="w-full max-w-md rounded border border-sky-400/40 bg-[#0c1218] p-3 text-sm text-white">
+        <h2 className="text-base font-semibold text-sky-200">{notice.market} slot {notice.slot}</h2>
+        <p className="mt-1">{notice.contract}</p>
+        <p className="mt-3 text-lg tabular-nums" data-testid="assist-trail-text">{notice.text}</p>
+        <p className="mt-1 text-xs text-white/40">From your fill. TradeBoss does not send the change.</p>
+        {error && <p className="mt-2 text-red-300">{error}</p>}
+        <button type="button" className="mt-3 rounded bg-sky-500/80 px-3 py-1 font-semibold disabled:opacity-40" data-testid="assist-trail-updated" disabled={busy} onClick={onUpdated}>
+          Updated
+        </button>
+      </div>
+    </div>
+  );
 }
 
 export function AssistHost() {
@@ -227,9 +279,11 @@ export function AssistHost() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [entry, setEntry] = useState<{ event: AssistEvent; ticket: AssistTicket | null } | null>(null);
   const [exitEv, setExitEv] = useState<AssistEvent | null>(null);
+  const [trail, setTrail] = useState<TrailNotice | null>(null);
   const [queuedExit, setQueuedExit] = useState<AssistEvent | null>(null);
   const [reminder, setReminder] = useState(false);
   const [storyOpen, setStoryOpen] = useState(false);
+  const [practiceOpen, setPracticeOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const memory = useRef<Record<string, import("./assist").AssistMemory>>({});
@@ -237,6 +291,8 @@ export function AssistHost() {
   const entryRef = useRef(entry);
   const reminderDay = useRef<string | null>(null);
   const storyDay = useRef<string | null>(null);
+  const trailSeen = useRef<string | null>(null);
+  const entryQueue = useRef<AssistEvent[]>([]);
   stateRef.current = state;
   entryRef.current = entry;
 
@@ -254,22 +310,28 @@ export function AssistHost() {
 
   useEffect(() => {
     if (!status || !state) return;
-    const watch = state.settings.slot;
-    const slot = status.slots.find((item) => item.slot === watch);
-    if (!slot) return;
-    const out = assistEvents(memory.current[watch], asAssist(slot), state.settings.enabled);
-    memory.current[watch] = out.memory;
+    const watch = state.settings.slots?.length ? state.settings.slots : [state.settings.slot];
+    for (const id of watch) {
+    const slot = status.slots.find((item) => item.slot === id);
+    if (!slot) continue;
+    const out = assistEvents(memory.current[id], asAssist(slot), state.settings.enabled);
+    memory.current[id] = out.memory;
     for (const event of out.events) {
       if (event.kind === "entry") {
         playAssistSound("entry");
-        notify(`Slot ${event.slot} entry`, `${event.contract} — check the ticket`);
-        const decided = event.decidedAtMs ?? 0;
-        void fetchAssistTicket(event.slot, decided)
-          .then((body) => setEntry({ event, ticket: body.ticket }))
-          .catch(() => setEntry({ event, ticket: null }));
+        const label = event.slot === "7" ? "SENSEX" : "NIFTY";
+        notify(`${label} slot ${event.slot} entry`, `${event.contract} — check the ticket`);
+        if (entryRef.current || entryQueue.current.length > 0) entryQueue.current.push(event);
+        else {
+          entryRef.current = { event, ticket: null };
+          void fetchAssistTicket(event.slot, event.decidedAtMs ?? 0)
+            .then((body) => setEntry({ event, ticket: body.ticket }))
+            .catch(() => setEntry({ event, ticket: null }));
+        }
       } else {
         playAssistSound("exit");
-        notify(`Slot ${event.slot} exit`, `${event.contract} · ${event.reason ?? "exit"}. Check your real position.`);
+        const label = event.slot === "7" ? "SENSEX" : "NIFTY";
+        notify(`${label} slot ${event.slot} exit`, `${event.contract} · ${event.reason ?? "exit"}. Check your real position.`);
         const key = event.entryAtMs != null ? paperKey(event.slot, event.day ?? state.today, event.entryAtMs) : "";
         const open = stateRef.current?.open.some((row) => row.key === key) ?? false;
         const pending = entryRef.current?.event.decidedAtMs != null
@@ -279,7 +341,19 @@ export function AssistHost() {
         else if (open) setExitEv(event);
       }
     }
+    }
   }, [status, state]);
+
+  useEffect(() => {
+    const next = state?.trails?.[0];
+    if (!next) return;
+    const id = `${next.key}|${next.paper_stop}`;
+    if (trailSeen.current === id) return;
+    trailSeen.current = id;
+    playAssistSound("entry");
+    notify(`${next.market} slot ${next.slot}`, next.text);
+    setTrail(next);
+  }, [state]);
 
   useEffect(() => {
     const id = window.setInterval(() => {
@@ -311,9 +385,12 @@ export function AssistHost() {
         decided_at_ms: ticket.decided_at_ms, contract: ticket.contract, option_side: ticket.option_side,
         signal_side: ticket.signal_side, fill_price: fillPrice, entry_time: entryTime, sl_set: slSet, tp_set: tpSet,
         lot_size: ticket.lot_size, paper_fill: ticket.paper_fill, suggested_limit: ticket.suggested_limit,
-        why: ticket.why, chart: ticket.chart, stop_frac: ticket.stop_frac, target_frac: ticket.target_frac,
+        why: ticket.why, chart: ticket.chart, price_action: ticket.price_action ?? null,
+        market: ticket.market ?? (ticket.slot === "7" ? "SENSEX" : "NIFTY"),
+        trailing: Boolean(ticket.trailing),
+        stop_frac: ticket.stop_frac, target_frac: ticket.trailing ? null : ticket.target_frac,
       });
-      setEntry(null);
+      showNextEntry();
       if (queuedExit) {
         setExitEv(queuedExit);
         setQueuedExit(null);
@@ -341,8 +418,8 @@ export function AssistHost() {
         reason,
         contract: ticket?.contract ?? event!.contract,
       });
-      setEntry(null);
       setQueuedExit(null);
+      showNextEntry();
       await reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "could not log the skip");
@@ -375,6 +452,36 @@ export function AssistHost() {
     }
   }
 
+  function showNextEntry() {
+    const next = entryQueue.current.shift();
+    if (!next) {
+      setEntry(null);
+      return;
+    }
+    entryRef.current = { event: next, ticket: null };
+    void fetchAssistTicket(next.slot, next.decidedAtMs ?? 0)
+      .then((body) => setEntry({ event: next, ticket: body.ticket }))
+      .catch(() => setEntry({ event: next, ticket: null }));
+  }
+
+  async function updatedTrail() {
+    if (!trail) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await postAssistTrail({
+        key: trail.key, paper_stop: trail.paper_stop, real_stop: trail.real_stop,
+        moved_at: trail.moved_at, updated_at: Math.floor(Date.now() / 1000),
+      });
+      setTrail(null);
+      await reload();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "could not log the stop");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <AssistBanner
@@ -382,6 +489,7 @@ export function AssistHost() {
         enabled={state?.settings.enabled ?? false}
         onToggleSettings={() => setSettingsOpen((v) => !v)}
         onStory={state && state.running.length > 0 ? () => setStoryOpen(true) : undefined}
+        onPractice={() => setPracticeOpen((open) => !open)}
       />
       {settingsOpen && state && (
         <AssistSettingsForm
@@ -396,6 +504,9 @@ export function AssistHost() {
       {exitEv && (
         <AssistExitDialog event={exitEv} busy={busy} error={error} onClose={(price, time) => void closed(price, time)} />
       )}
+      {trail && (
+        <AssistTrailDialog notice={trail} busy={busy} error={error} onUpdated={() => void updatedTrail()} />
+      )}
       {reminder && (
         <div className="fixed inset-0 z-40 flex items-start justify-center bg-black/60 p-4" role="dialog" aria-label="Square-off reminder" data-testid="assist-reminder">
           <div className="w-full max-w-md rounded border border-red-400/40 bg-[#0c1218] p-3 text-sm text-white">
@@ -403,6 +514,11 @@ export function AssistHost() {
             <p className="mt-2">Check the position before the close. This does not exit it.</p>
             <button type="button" className="mt-3 rounded border border-white/20 px-3 py-1" onClick={() => setReminder(false)}>Noted</button>
           </div>
+        </div>
+      )}
+      {practiceOpen && (
+        <div className="border-b border-white/10 bg-[#0c1218] px-3 py-2 text-sm text-white">
+          <PracticeRead />
         </div>
       )}
       {storyOpen && state && <AssistStory state={state} onClose={() => setStoryOpen(false)} />}
@@ -433,7 +549,10 @@ function AssistSettingsForm({ settings, onClose, onSaved }: {
         <input type="checkbox" checked={draft.enabled} onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })} />
         On
       </label>
-      <label>Slot <input className="w-12 rounded border border-white/15 bg-transparent px-1" value={draft.slot} onChange={(e) => setDraft({ ...draft, slot: e.target.value })} /></label>
+      <label>Slots <input className="w-16 rounded border border-white/15 bg-transparent px-1" aria-label="Slots" value={(draft.slots ?? [draft.slot]).join(",")} onChange={(e) => {
+        const slots = e.target.value.split(",").map((item) => item.trim()).filter(Boolean);
+        setDraft({ ...draft, slots, slot: slots[0] ?? draft.slot });
+      }} /></label>
       <label>Lots <input type="number" min={1} className="w-14 rounded border border-white/15 bg-transparent px-1" value={draft.lots} onChange={(e) => setDraft({ ...draft, lots: Number(e.target.value) })} /></label>
       <label>Max trades <input type="number" min={1} className="w-14 rounded border border-white/15 bg-transparent px-1" value={draft.max_trades} onChange={(e) => setDraft({ ...draft, max_trades: Number(e.target.value) })} /></label>
       <label>Day loss ₹ <input type="number" min={1} className="w-20 rounded border border-white/15 bg-transparent px-1" value={draft.day_loss} onChange={(e) => setDraft({ ...draft, day_loss: Number(e.target.value) })} /></label>
@@ -475,7 +594,7 @@ export function AssistStory({ state, onClose }: { state: AssistState; onClose: (
             {state.running.map((row) => (
               <tr key={row.key} className="border-t border-white/10">
                 <td>{row.day}</td>
-                <td>{row.contract}</td>
+                <td>{row.market ? `${row.market} ` : ""}{row.contract}</td>
                 <td>{fmt(row.paper_entry)}</td>
                 <td>{fmt(row.real_entry)}</td>
                 <td>{fmt(row.entry_slip)}</td>
@@ -490,16 +609,95 @@ export function AssistStory({ state, onClose }: { state: AssistState; onClose: (
         </table>
         {state.running.map((row) => (
           <section key={`${row.key}-story`} className="mt-3 border-t border-white/10 pt-2">
+            <p className="text-xs text-white/50">{row.market ?? "NIFTY"} slot {row.slot ?? ""}</p>
             <p className="text-white/80">{row.why}</p>
+            {row.price_action?.text && <p className="mt-1 text-xs text-white/60">{row.price_action.text}</p>}
+            {row.after?.text && <p className="mt-1 text-xs text-white/60">{row.after.text}</p>}
             <p className="text-xs text-white/40">
               {exitLabel(row.exit_reason)} · entered {row.rule.entered_on_time ? "within 1 min" : "outside 1 min"}
-              · SL/TP {row.rule.sl_tp_set ? "set" : "not set"}
+              · SL {row.rule.sl_tp_set ? "set" : "not set"}
+              · trails {row.rule.trails_on_time ? "on time" : "late"}
               · {row.rule.no_early_exit ? "no early exit" : "early exit"}
             </p>
             <AssistChart chart={row.chart} />
           </section>
         ))}
+        <PracticeRead />
+        {state.practice && state.practice.some((row) => row.reads > 0) && (
+          <p className="mt-3 text-xs text-white/50">
+            Practice {state.practice.filter((row) => row.reads > 0).map((row) => `${row.tag} ${row.correct}/${row.reads}`).join(" · ")}
+          </p>
+        )}
       </div>
     </div>
+  );
+}
+
+export function PracticeRead({ bars, onPersist }: {
+  bars?: ChartCandle[];
+  onPersist?: (body: { id: string; direction: "up" | "down"; reason: string; tag: PracticeTag; level: number | null }) => Promise<unknown>;
+}) {
+  const chartBars = useChartStore((s) => s.candles);
+  const source = bars ?? chartBars;
+  const [direction, setDirection] = useState<"up" | "down">("up");
+  const [reason, setReason] = useState("");
+  const [level, setLevel] = useState("");
+  const [tag, setTag] = useState<PracticeTag>("trend pullback");
+  const [saved, setSaved] = useState(false);
+  const [shown, setShown] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  if (source.length < 12) {
+    return <p className="mt-3 text-xs text-white/40" data-testid="assist-practice">Not enough closed bars for a practice read.</p>;
+  }
+  const hidden = source.slice(-6);
+  const visible = source.slice(0, -6);
+  const signalClose = visible[visible.length - 1]?.close ?? 0;
+  const id = String(visible[visible.length - 1]?.time ?? "");
+  return (
+    <section className="mt-3 border-t border-white/10 pt-2" data-testid="assist-practice">
+      <p className="font-semibold">Practice read</p>
+      <p className="text-xs text-white/40">Last close {signalClose.toFixed(2)}. The next 6 candles stay hidden until this is saved.</p>
+      <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
+        <select aria-label="Direction" className="rounded border border-white/15 bg-[#0c1218] px-1" value={direction} onChange={(e) => setDirection(e.target.value as "up" | "down")}>
+          <option value="up">up</option>
+          <option value="down">down</option>
+        </select>
+        <input aria-label="Reason" className="w-48 rounded border border-white/15 bg-transparent px-1" value={reason} placeholder="reason" onChange={(e) => setReason(e.target.value)} />
+        <input aria-label="Level" className="w-24 rounded border border-white/15 bg-transparent px-1" value={level} placeholder="level" onChange={(e) => setLevel(e.target.value)} />
+        <select aria-label="Setup" className="rounded border border-white/15 bg-[#0c1218] px-1" value={tag} onChange={(e) => setTag(e.target.value as PracticeTag)}>
+          {PRACTICE_TAGS.map((item) => <option key={item} value={item}>{item}</option>)}
+        </select>
+        <button
+          type="button"
+          className="rounded border border-white/20 px-2 py-0.5 disabled:opacity-40"
+          data-testid="assist-practice-save"
+          disabled={!reason.trim()}
+          onClick={() => {
+            const body = { id, direction, reason: reason.trim(), tag, level: level.trim() === "" ? null : Number(level) };
+            const persist = onPersist ?? ((read) => postAssistPractice({ bars: source }).then(() => postAssistPracticeRead(read)));
+            void persist(body).then(() => { setSaved(true); setError(null); }).catch((err: unknown) => setError(err instanceof Error ? err.message : "could not save the read"));
+          }}
+        >
+          Save read
+        </button>
+        <button
+          type="button"
+          className="rounded bg-white/10 px-2 py-0.5 disabled:opacity-40"
+          data-testid="assist-practice-reveal"
+          disabled={!saved}
+          onClick={() => {
+            const score = scorePractice(signalClose, hidden, direction, level.trim() === "" ? null : Number(level));
+            const line = score.directionHit ? "direction hit" : "direction miss";
+            const levelLine = score.levelHit == null ? "" : score.levelHit ? ", level touched" : ", level missed";
+            setShown(`${line}${levelLine}`);
+            if (!onPersist) void postAssistPracticeReveal().catch(() => undefined);
+          }}
+        >
+          See what happened next
+        </button>
+      </div>
+      {error && <p className="mt-1 text-xs text-red-300">{error}</p>}
+      {shown && <p className="mt-2 text-xs text-white/80" data-testid="assist-practice-score">{shown}</p>}
+    </section>
   );
 }

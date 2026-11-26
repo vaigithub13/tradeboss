@@ -512,11 +512,11 @@ class PaperSession:
         hit = first_hit(p.levels.get("premium_stop"), p.levels.get("premium_target"), price, price, price, long=True)
         if hit is None:
             if self.exit_rule.trailing:
-                self._trail(p, price)
+                self._trail(p, price, now_ms)
             return False
         return self._exit_on_rule(f"premium_{hit[0]}", now_ms)
 
-    def _trail(self, p: Any, price: float) -> None:
+    def _trail(self, p: Any, price: float, now_ms: int) -> None:
         """Trailing premium stop: a new best traded price since the entry may raise the stop (never lowers it).
         The stop lives in the position's levels, so a restart keeps it."""
         assert self.exit_rule is not None and p.levels is not None
@@ -526,6 +526,7 @@ class PaperSession:
         current = p.levels.get("premium_stop")
         if current is None or stop > current:
             p.levels["premium_stop"] = stop
+            p.levels["premium_stop_at_ms"] = int(now_ms)
             log.info("paper: %s trailing stop %s -> %s (best %s)", p.key, current, stop, best)
 
     def _note_tick(self, key: str, price: float, now_ms: int) -> None:

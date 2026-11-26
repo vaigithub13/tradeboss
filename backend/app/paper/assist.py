@@ -14,17 +14,27 @@ from typing import Any
 from app.backtest.costs import get_cost_model
 from app.exits.rules import ExitRule, premium_levels
 from app.options.bs import snap_premium
+from app.paper.assist_book import (
+    after_trade,
+    dd_facts_at,
+    format_dd_why,
+    initial_stop,
+    market_of,
+    price_action,
+    trails_on_time,
+)
 from app.paper.real import paper_trade_key, real_net
 
 IST = timezone(timedelta(hours=5, minutes=30))
 TICK = 0.05
 PREMIUM_STOP = 0.20
 PREMIUM_TARGET = 0.40
-DEFAULT_SLOT = "4"
+DEFAULT_SLOTS = ["5", "7"]
+DEFAULT_SLOT = "5"
 DEFAULT_LOTS = 1
 DEFAULT_MAX_TRADES = 3
-DEFAULT_DAY_LOSS = 3000.0
-DEFAULT_ACCOUNT_PAUSE = 10000.0
+DEFAULT_DAY_LOSS = 4000.0
+DEFAULT_ACCOUNT_PAUSE = 12000.0
 ENTRY_WINDOW_S = 60
 REMINDER_MINUTE = 15 * 60 + 10
 STORY_MINUTE = 15 * 60 + 30
@@ -35,6 +45,7 @@ CHART_BARS = 30
 def default_settings() -> dict[str, Any]:
     return {
         "enabled": True,
+        "slots": list(DEFAULT_SLOTS),
         "slot": DEFAULT_SLOT,
         "lots": DEFAULT_LOTS,
         "max_trades": DEFAULT_MAX_TRADES,
@@ -49,10 +60,15 @@ def normalise_settings(raw: dict[str, Any] | None) -> dict[str, Any]:
     base = default_settings()
     data = raw or {}
     base["enabled"] = bool(data.get("enabled", True))
-    slot = str(data.get("slot") or DEFAULT_SLOT).strip()
-    if not slot or len(slot) > 4:
-        raise ValueError("slot must be a short slot id")
-    base["slot"] = slot
+    raw_slots = data.get("slots")
+    if isinstance(raw_slots, list) and raw_slots:
+        slots = [str(item).strip() for item in raw_slots if str(item).strip() and str(item).strip() != "4"]
+    else:
+        slots = list(DEFAULT_SLOTS)
+    if not slots:
+        slots = list(DEFAULT_SLOTS)
+    base["slots"] = slots
+    base["slot"] = slots[0]
     base["lots"] = _positive_int(data.get("lots", DEFAULT_LOTS), "lots")
     base["max_trades"] = _positive_int(data.get("max_trades", DEFAULT_MAX_TRADES), "max_trades")
     base["day_loss"] = _positive_float(data.get("day_loss", DEFAULT_DAY_LOSS), "day_loss")
@@ -283,8 +299,12 @@ def build_ticket(
     stop_frac: float | None = PREMIUM_STOP,
     target_frac: float | None = PREMIUM_TARGET,
     on: date | None = None,
+    trailing: bool = False,
+    market: str | None = None,
+    why: str | None = None,
+    facts: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """One entry ticket. The suggested limit is the ask. Stop and target are taken from that limit."""
+    """One entry ticket. The suggested limit is the ask. A trail has a stop and no target."""
     decided = int(signal["decided_at_ms"])
     fill_time = decided // 1000
     key = paper_trade_key(slot=slot, day=day, fill_time=fill_time)
@@ -298,19 +318,27 @@ def build_ticket(
     stop = target = None
     loss = charges = None
     units = int(lots) * int(lot_size)
-    if limit is not None and units >= 1 and stop_frac is not None and target_frac is not None:
-        stop, target = premium_bracket(limit, stop_frac, target_frac)
+    if limit is not None and units >= 1 and stop_frac is not None and (trailing or target_frac is not None):
+        if trailing:
+            stop, target = initial_stop(limit, stop_frac), None
+        else:
+            stop, target = premium_bracket(limit, stop_frac, float(target_frac))
         when = on or date.fromisoformat(day)
         charges = option_charges(limit, stop, units, when)
         loss = max_loss(limit, stop, units, charges)
     index_price = float(signal.get("index_price") or 0)
     order_price = signal.get("order_price")
     bar_time = int(signal["time"]) if signal.get("time") is not None else fill_time
-    explained = explain_channel(
-        bars, side=side, index_price=index_price,
-        order_price=float(order_price) if isinstance(order_price, (int, float)) else None,
-        fill_time=bar_time, length=length, tick=tick,
-    )
+    if why is None:
+        explained = explain_channel(
+            bars, side=side, index_price=index_price,
+            order_price=float(order_price) if isinstance(order_price, (int, float)) else None,
+            fill_time=bar_time, length=length, tick=tick,
+        )
+        why = explained["why"]
+        chart = explained["chart"]
+    else:
+        chart = chart_snapshot(bars, signal_time=bar_time, channel_high=None, channel_low=None)
     return {
         "key": key,
         "slot": slot,
@@ -332,13 +360,17 @@ def build_ticket(
         "stop": stop,
         "target": target,
         "stop_frac": stop_frac,
-        "target_frac": target_frac,
+        "target_frac": None if trailing else target_frac,
+        "trailing": trailing,
+        "exit_note": "exit by trailing stop" if trailing else None,
+        "market": market or market_of(slot, signal.get("symbol") if isinstance(signal.get("symbol"), str) else None),
         "charges": charges,
         "max_loss": loss,
         "paper_fill": None if paper_fill is None else float(paper_fill),
-        "why": explained["why"],
-        "chart": explained["chart"],
-        "index_price": explained["index_price"],
+        "why": why,
+        "chart": chart,
+        "price_action": facts,
+        "index_price": round(index_price, 2),
     }
 
 
@@ -374,15 +406,19 @@ def ticket_from_session(
             quote = {"bid": q.bid, "ask": q.ask}
         ltp = session.last_trade(key)
     rule = session.exit_rule
+    trailing = rule is not None and rule.kind == "premium" and rule.trailing
     stop_frac = rule.stop if rule is not None and rule.kind == "premium" else None
-    target_frac = rule.target if rule is not None and rule.kind == "premium" else None
+    target_frac = None if trailing or rule is None or rule.kind != "premium" else rule.target
     length = int(getattr(session.strategy, "length", 20) or 20)
     tick = float(getattr(session.strategy, "tick", TICK) or TICK)
+    bars = list(session.shown)
+    bar_time = int(signal["time"]) if signal.get("time") is not None else int(signal["decided_at_ms"]) // 1000
+    why, facts = _dd_context(session, bars, bar_time)
     return build_ticket(
         slot=slot,
         day=day,
         signal=signal,
-        bars=list(session.shown),
+        bars=bars,
         quote=quote,
         ltp=ltp,
         lot_size=_lot_size(session, signal),
@@ -392,6 +428,41 @@ def ticket_from_session(
         stop_frac=stop_frac,
         target_frac=target_frac,
         on=date.fromisoformat(day),
+        trailing=trailing,
+        market=market_of(slot, getattr(session, "symbol", None)),
+        why=why,
+        facts=facts,
+    )
+
+
+def _dd_context(session: Any, bars: list[dict[str, Any]], bar_time: int) -> tuple[str | None, dict[str, Any] | None]:
+    """The DD sentence and the price-action block when this session is that strategy."""
+    if getattr(session.strategy, "name", "") != "dd_five_confirm":
+        return None, None
+    index = max((i for i, bar in enumerate(bars) if int(bar["time"]) <= bar_time), default=None)
+    facts = price_action(bars, signal_index=index) if bars else None
+    why = "DD confirmations were not on the bars available."
+    if index is not None:
+        prev = _prev_day_hlc(bars, int(bars[index]["time"]))
+        raw = dd_facts_at(bars, index, prev_day=prev, use_wr=bool(getattr(session.strategy, "use_wr", True)))
+        if raw is not None:
+            why = format_dd_why(raw)
+    return why, facts
+
+
+def _prev_day_hlc(bars: list[dict[str, Any]], now: int) -> tuple[float, float, float] | None:
+    today = datetime.fromtimestamp(now, IST).date()
+    days: dict[Any, list[dict[str, Any]]] = {}
+    for bar in bars:
+        days.setdefault(datetime.fromtimestamp(int(bar["time"]), IST).date(), []).append(bar)
+    prior = [day for day in sorted(days) if day < today]
+    if not prior:
+        return None
+    prev = days[prior[-1]]
+    return (
+        max(float(b["high"]) for b in prev),
+        min(float(b["low"]) for b in prev),
+        float(prev[-1]["close"]),
     )
 
 
@@ -423,9 +494,12 @@ def chart_for_close(record: dict[str, Any], bars: list[dict[str, Any]], exit_tim
 
 
 def reprice(fill_price: float, *, stop_frac: float = PREMIUM_STOP, target_frac: float = PREMIUM_TARGET,
-            units: int, on: date) -> dict[str, float]:
+            units: int, on: date, trailing: bool = False) -> dict[str, float | None]:
     """Stop, target, charges, and max loss from the fill the user actually got."""
-    stop, target = premium_bracket(fill_price, stop_frac, target_frac)
+    if trailing:
+        stop, target = initial_stop(fill_price, stop_frac), None
+    else:
+        stop, target = premium_bracket(fill_price, stop_frac, target_frac)
     charges = option_charges(fill_price, stop, units, on)
     return {
         "stop": stop,
@@ -436,12 +510,14 @@ def reprice(fill_price: float, *, stop_frac: float = PREMIUM_STOP, target_frac: 
 
 
 def rule_followed(record: dict[str, Any]) -> dict[str, Any]:
-    """Entered within a minute of the paper fill, SL and TP set as told, and no exit before paper's."""
+    """Entered within a minute, the initial stop set, each trail confirmed within 2 minutes, no early exit."""
     paper_fill = int(record.get("fill_time") or 0)
     entry_time = record.get("entry_time")
     delay = None if entry_time is None else int(entry_time) - paper_fill
     on_time = delay is not None and 0 <= delay <= ENTRY_WINDOW_S
-    levels_set = bool(record.get("sl_set")) and bool(record.get("tp_set"))
+    trailing = bool(record.get("trailing"))
+    levels_set = bool(record.get("sl_set")) and (trailing or bool(record.get("tp_set")))
+    trail_ok = trails_on_time(record)
     paper_exit = record.get("paper_exit_time")
     real_exit = record.get("exit_time")
     if real_exit is None:
@@ -457,8 +533,9 @@ def rule_followed(record: dict[str, Any]) -> dict[str, Any]:
         "entry_delay_s": delay,
         "entered_on_time": on_time,
         "sl_tp_set": levels_set,
+        "trails_on_time": trail_ok,
         "no_early_exit": no_early,
-        "followed": bool(on_time and levels_set and no_early and real_exit is not None),
+        "followed": bool(on_time and levels_set and trail_ok and no_early and real_exit is not None),
     }
 
 
@@ -515,9 +592,13 @@ def running_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
         rows.append({
             "key": rec["key"],
             "day": rec["day"],
+            "slot": rec.get("slot"),
+            "market": rec.get("market") or market_of(str(rec.get("slot") or ""), rec.get("contract") if isinstance(rec.get("contract"), str) else None),
             "contract": rec.get("contract"),
             "option_side": rec.get("option_side"),
             "why": rec.get("why"),
+            "price_action": rec.get("price_action"),
+            "after": rec.get("after"),
             "chart": rec.get("chart"),
             "paper_entry": paper_entry,
             "real_entry": real_entry,
@@ -595,11 +676,17 @@ class AssistJournal:
             raise ValueError("lot_size must be >= 1")
         units = int(settings["lots"]) * lot_size
         when = on or date.fromisoformat(day)
-        stop_frac = float(body.get("stop_frac") or PREMIUM_STOP)
-        target_frac = float(body.get("target_frac") or PREMIUM_TARGET)
-        if not 0 < stop_frac < 1 or target_frac <= 0:
-            raise ValueError("stop and target fractions are not a premium bracket")
-        priced = reprice(fill_price, stop_frac=stop_frac, target_frac=target_frac, units=units, on=when)
+        trailing = bool(body.get("trailing"))
+        stop_frac = float(body.get("stop_frac") or (0.10 if trailing else PREMIUM_STOP))
+        if trailing:
+            if not 0 < stop_frac < 1:
+                raise ValueError("stop fraction is not a premium stop")
+            priced = reprice(fill_price, stop_frac=stop_frac, units=units, on=when, trailing=True)
+        else:
+            target_frac = float(body.get("target_frac") or PREMIUM_TARGET)
+            if not 0 < stop_frac < 1 or target_frac <= 0:
+                raise ValueError("stop and target fractions are not a premium bracket")
+            priced = reprice(fill_price, stop_frac=stop_frac, target_frac=target_frac, units=units, on=when)
         records = self.load()
         previous = self._by_key(records).get(key)
         if previous is not None and previous.get("kind") == "skipped":
@@ -621,7 +708,13 @@ class AssistJournal:
             "fill_price": fill_price,
             "entry_time": entry_time,
             "stop": priced["stop"],
+            "initial_stop": priced["stop"],
             "target": priced["target"],
+            "trailing": trailing,
+            "market": body.get("market") or market_of(slot, body.get("contract") if isinstance(body.get("contract"), str) else None),
+            "price_action": body.get("price_action"),
+            "trail_seen": [] if previous is None else list(previous.get("trail_seen") or []),
+            "trails": [] if previous is None else list(previous.get("trails") or []),
             "max_loss": priced["max_loss"],
             "sl_set": bool(body.get("sl_set")),
             "tp_set": bool(body.get("tp_set")),
@@ -688,6 +781,9 @@ class AssistJournal:
         if exit_time < int(found["entry_time"]):
             raise ValueError("exit_time must be at or after entry_time")
         when = on or date.fromisoformat(str(found["day"]))
+        chart = body.get("chart") or found.get("chart")
+        candles = list((chart or {}).get("candles") or [])
+        review = after_trade(candles, entry_time=int(candles[0]["time"]), exit_time=int(candles[-1]["time"])) if len(candles) >= 2 else None
         charges = option_charges(float(found["fill_price"]), exit_price, int(found["units"]), when)
         net = real_net(entry_price=float(found["fill_price"]), exit_price=exit_price,
                        units=int(found["units"]), charges=charges)
@@ -701,7 +797,8 @@ class AssistJournal:
             "paper_exit_time": body.get("paper_exit_time"),
             "paper_exit_reason": body.get("paper_exit_reason"),
             "paper_net": body.get("paper_net"),
-            "chart": body.get("chart") or found.get("chart"),
+            "chart": chart,
+            "after": review,
             "closed_at": datetime.now(tz=IST).isoformat(timespec="seconds"),
         }
         records = [r for r in records if r.get("key") != key]
@@ -709,7 +806,120 @@ class AssistJournal:
         self._save(records)
         return found
 
+    def note_trail_seen(self, key: str, paper_stop: float, moved_at: int) -> None:
+        records = self.load()
+        found = self._by_key(records).get(key)
+        if found is None:
+            return
+        seen = list(found.get("trail_seen") or [])
+        if any(row.get("paper_stop") == paper_stop for row in seen):
+            return
+        seen.append({"paper_stop": float(paper_stop), "moved_at": int(moved_at)})
+        found["trail_seen"] = seen
+        records = [row for row in records if row.get("key") != key]
+        records.append(found)
+        self._save(records)
+
+    def log_trail(self, body: dict[str, Any]) -> dict[str, Any]:
+        """The user moved the real stop. `updated_at` is when they confirmed it."""
+        key = str(body["key"])
+        records = self.load()
+        found = self._by_key(records).get(key)
+        if found is None or found.get("kind") != "taken" or found.get("exit_time") is not None:
+            raise ValueError("no open real trade")
+        paper_stop = float(body["paper_stop"])
+        row = {
+            "paper_stop": paper_stop,
+            "real_stop": float(body["real_stop"]),
+            "moved_at": int(body["moved_at"]),
+            "updated_at": int(body["updated_at"]),
+        }
+        trails = [item for item in (found.get("trails") or []) if item.get("paper_stop") != paper_stop]
+        trails.append(row)
+        found["trails"] = trails
+        found["stop"] = row["real_stop"]
+        records = [item for item in records if item.get("key") != key]
+        records.append(found)
+        self._save(records)
+        return found
+
+    def _practice_path(self) -> Any:
+        return self.directory / "practice.json"
+
+    def _practice(self) -> dict[str, Any]:
+        path = self._practice_path()
+        if not path.exists():
+            return {"reads": [], "puzzle": None}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def open_practice(self, bars: list[dict[str, Any]]) -> dict[str, Any]:
+        """Hide the last 6 closed bars until the read is saved. The reply does not include them."""
+        from app.paper.assist_book import PRACTICE_BARS
+
+        if len(bars) < PRACTICE_BARS + 6:
+            raise ValueError("need at least 12 closed bars")
+        hidden = bars[-PRACTICE_BARS:]
+        shown = bars[-(PRACTICE_BARS + 50):-PRACTICE_BARS]
+        puzzle = {
+            "id": str(int(shown[-1]["time"])),
+            "shown": shown,
+            "signal_close": float(shown[-1]["close"]),
+            "hidden": hidden,
+            "read": None,
+        }
+        data = self._practice()
+        data["puzzle"] = puzzle
+        _atomic_write(self._practice_path(), data)
+        return {"id": puzzle["id"], "shown": shown, "signal_close": puzzle["signal_close"]}
+
+    def save_practice_read(self, body: dict[str, Any]) -> dict[str, Any]:
+        from app.paper.assist_book import PRACTICE_TAGS
+
+        data = self._practice()
+        puzzle = data.get("puzzle")
+        if puzzle is None or str(puzzle.get("id")) != str(body.get("id")):
+            raise ValueError("no practice window is open")
+        direction = str(body.get("direction") or "")
+        if direction not in ("up", "down"):
+            raise ValueError("direction must be up or down")
+        tag = str(body.get("tag") or "")
+        if tag not in PRACTICE_TAGS:
+            raise ValueError(f"tag must be one of {PRACTICE_TAGS}")
+        reason = str(body.get("reason") or "").strip()
+        if not reason:
+            raise ValueError("reason is required")
+        level = body.get("level")
+        puzzle["read"] = {
+            "direction": direction,
+            "reason": reason,
+            "level": None if level is None or level == "" else float(level),
+            "tag": tag,
+            "saved_at": datetime.now(tz=IST).isoformat(timespec="seconds"),
+        }
+        data["puzzle"] = puzzle
+        _atomic_write(self._practice_path(), data)
+        return {"saved": True, "id": puzzle["id"]}
+
+    def reveal_practice(self) -> dict[str, Any]:
+        from app.paper.assist_book import score_practice, tag_accuracy
+
+        data = self._practice()
+        puzzle = data.get("puzzle")
+        if puzzle is None or not puzzle.get("read"):
+            raise ValueError("save the read before the reveal")
+        read = puzzle["read"]
+        score = score_practice(float(puzzle["signal_close"]), puzzle["hidden"], direction=read["direction"], level=read.get("level"))
+        row = {**read, "id": puzzle["id"], "signal_close": puzzle["signal_close"], **score}
+        reads = list(data.get("reads") or [])
+        reads.append(row)
+        data["reads"] = reads
+        data["puzzle"] = None
+        _atomic_write(self._practice_path(), data)
+        return {"candles": puzzle["hidden"], "score": score, "accuracy": tag_accuracy(reads)}
+
     def state(self, *, today: str) -> dict[str, Any]:
+        from app.paper.assist_book import tag_accuracy
+
         settings = self.load_settings()
         records = self.load()
         return {
@@ -717,6 +927,8 @@ class AssistJournal:
             "guard": guard_banner(records, today=today, settings=settings),
             "open": [r for r in records if r.get("kind") == "taken" and r.get("exit_time") is None],
             "records": records,
-        "running": running_rows(records),
-        "today": today,
-    }
+            "running": running_rows(records),
+            "practice": tag_accuracy(self._practice().get("reads") or []),
+            "today": today,
+            "trails": [],
+        }

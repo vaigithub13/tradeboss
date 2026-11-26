@@ -17,6 +17,7 @@ from app.data.store import CandleStore
 from app.live.model import ist_date
 from app.live.service import LiveService
 from app.paper.assist import AssistJournal, chart_for_close, ticket_from_session
+from app.paper.assist_book import pending_trail
 from app.paper.desk import SLOTS, PaperDesk, UnknownSlot
 from app.paper.live import AlreadyRunning, NotRunning, PaperError, PaperRunner, UnsupportedSettings
 from app.paper.real import (
@@ -310,11 +311,12 @@ async def real_order_helper(request: Request, slot: str = Query("3")) -> dict[st
 
 class AssistSettingsBody(BaseModel):
     enabled: bool = True
-    slot: str = "4"
+    slots: list[str] = ["5", "7"]
+    slot: str = "5"
     lots: int = 1
     max_trades: int = 3
-    day_loss: float = 3000
-    account_pause: float = 10000
+    day_loss: float = 4000
+    account_pause: float = 12000
     start_balance: float | None = None
 
 
@@ -336,6 +338,9 @@ class AssistTakenBody(BaseModel):
     suggested_limit: float | None = None
     why: str = ""
     chart: dict[str, Any] | None = None
+    price_action: dict[str, Any] | None = None
+    market: str | None = None
+    trailing: bool = False
     stop_frac: float | None = None
     target_frac: float | None = None
 
@@ -361,7 +366,47 @@ class AssistCloseBody(BaseModel):
 
 
 def _assist_state(request: Request) -> dict[str, Any]:
-    return _assist_store(request).state(today=_today_iso(request))
+    body = _assist_store(request).state(today=_today_iso(request))
+    body["trails"] = _live_trails(request)
+    return body
+
+
+def _live_trails(request: Request) -> list[dict[str, Any]]:
+    """Stop moves on an open real trade. The rupee level is from the user's fill."""
+    svc = getattr(request.app.state, "live", None)
+    if svc is None or not getattr(svc, "enabled", False):
+        return []
+    journal = _assist_store(request)
+    settings = journal.load_settings()
+    records = journal.load()
+    notices: list[dict[str, Any]] = []
+    for slot in settings.get("slots") or []:
+        try:
+            runner = _runner(svc, str(slot))
+        except HTTPException:
+            continue
+        session = runner.session
+        position = None if session is None else session.book.position
+        if session is None or position is None or not position.levels:
+            continue
+        paper_stop = position.levels.get("premium_stop")
+        moved_ms = position.levels.get("premium_stop_at_ms")
+        if paper_stop is None or moved_ms is None:
+            continue
+        best = session._best.get(position.key, position.entry.price)
+        for rec in records:
+            if rec.get("slot") != str(slot) or rec.get("kind") != "taken" or rec.get("exit_time") is not None:
+                continue
+            if rec.get("contract") and rec.get("contract") != position.symbol:
+                continue
+            notice = pending_trail(
+                rec, paper_stop=float(paper_stop), best=float(best), moved_at=int(moved_ms) // 1000,
+            )
+            if notice is None:
+                continue
+            journal.note_trail_seen(rec["key"], float(paper_stop), int(moved_ms) // 1000)
+            notices.append(notice)
+    return notices
 
 
 def _close_chart(request: Request, key: str, exit_time: int) -> dict[str, Any] | None:
@@ -400,7 +445,7 @@ async def put_assist_settings(body: AssistSettingsBody, request: Request) -> dic
 @router.get("/assist/ticket")
 async def assist_ticket(
     request: Request,
-    slot: str = Query("4"),
+    slot: str = Query("5"),
     decided_at_ms: int = Query(...),
 ) -> dict[str, Any]:
     """The ticket for one filled paper signal: quote, limit, stop, target, and the channel facts."""
@@ -443,9 +488,67 @@ async def assist_skipped(body: AssistSkipBody, request: Request) -> dict[str, An
 async def assist_closed(body: AssistCloseBody, request: Request) -> dict[str, Any]:
     """Complete a logged real trade at the price the user closed. Does not close the paper position."""
     payload = body.model_dump()
-    payload["chart"] = _close_chart(request, payload["key"], payload["exit_time"])
+    payload["chart"] = _close_chart(request, payload["key"], payload["exit_time"]) or payload.get("chart")
     try:
         saved = _assist_store(request).close(payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"record": saved}
+
+
+class AssistTrailBody(BaseModel):
+    key: str
+    paper_stop: float
+    real_stop: float
+    moved_at: int
+    updated_at: int
+
+
+class PracticeBarsBody(BaseModel):
+    bars: list[dict[str, Any]]
+
+
+class PracticeReadBody(BaseModel):
+    id: str
+    direction: str
+    reason: str
+    tag: str
+    level: float | None = None
+
+
+@router.post("/assist/trail")
+async def assist_trail(body: AssistTrailBody, request: Request) -> dict[str, Any]:
+    """Log that the user moved the real stop to the trailed level. No order is sent."""
+    try:
+        saved = _assist_store(request).log_trail(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": saved}
+
+
+@router.post("/assist/practice")
+async def assist_practice_open(body: PracticeBarsBody, request: Request) -> dict[str, Any]:
+    """Open a practice window. The last 6 bars stay on the server until the read is saved."""
+    try:
+        opened = _assist_store(request).open_practice(body.bars)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return opened
+
+
+@router.post("/assist/practice/read")
+async def assist_practice_read(body: PracticeReadBody, request: Request) -> dict[str, Any]:
+    try:
+        saved = _assist_store(request).save_practice_read(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return saved
+
+
+@router.post("/assist/practice/reveal")
+async def assist_practice_reveal(request: Request) -> dict[str, Any]:
+    try:
+        revealed = _assist_store(request).reveal_practice()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return revealed

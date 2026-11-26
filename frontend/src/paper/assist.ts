@@ -4,6 +4,10 @@ export const PREMIUM_STOP = 0.2;
 export const PREMIUM_TARGET = 0.4;
 export const TICK = 0.05;
 export const ENTRY_WINDOW_S = 60;
+export const TRAIL_WINDOW_S = 120;
+export const PRACTICE_BARS = 6;
+export const PRACTICE_TAGS = ["trend pullback", "level break", "range fade", "other"] as const;
+export type PracticeTag = (typeof PRACTICE_TAGS)[number];
 export const REMINDER_MINUTE = 15 * 60 + 10;
 export const STORY_MINUTE = 15 * 60 + 30;
 export const SKIP_REASONS = ["late", "missed", "afraid", "other"] as const;
@@ -51,6 +55,10 @@ export interface AssistTicket {
   charges: number | null;
   max_loss: number | null;
   paper_fill: number | null;
+  trailing?: boolean;
+  exit_note?: string | null;
+  market?: string;
+  price_action?: { text?: string } | null;
   why: string;
   chart: ChartSnap | null;
   index_price: number | null;
@@ -58,6 +66,7 @@ export interface AssistTicket {
 
 export interface AssistSettings {
   enabled: boolean;
+  slots?: string[];
   slot: string;
   lots: number;
   max_trades: number;
@@ -99,6 +108,9 @@ export interface AssistRecord {
   target?: number;
   sl_set?: boolean;
   tp_set?: boolean;
+  trailing?: boolean;
+  trail_seen?: { paper_stop: number; moved_at: number }[];
+  trails?: { paper_stop: number; moved_at: number; updated_at?: number | null }[];
   paper_fill?: number | null;
   paper_exit_time?: number | null;
   paper_exit_price?: number | null;
@@ -111,7 +123,11 @@ export interface AssistRecord {
 
 export interface RunningRow {
   key: string;
+  slot?: string;
+  market?: string;
   day: string;
+  price_action?: { text?: string } | null;
+  after?: { text?: string } | null;
   contract?: string | null;
   option_side?: string | null;
   why?: string;
@@ -132,8 +148,20 @@ export interface RuleCheck {
   entry_delay_s: number | null;
   entered_on_time: boolean;
   sl_tp_set: boolean;
+  trails_on_time: boolean;
   no_early_exit: boolean;
   followed: boolean;
+}
+
+export interface TrailNotice {
+  key: string;
+  slot: string;
+  market: string;
+  contract: string | null;
+  paper_stop: number;
+  real_stop: number;
+  moved_at: number;
+  text: string;
 }
 
 export interface AssistState {
@@ -142,6 +170,8 @@ export interface AssistState {
   open: AssistRecord[];
   records: AssistRecord[];
   running: RunningRow[];
+  trails?: TrailNotice[];
+  practice?: { tag: string; reads: number; correct: number; accuracy: number | null }[];
   today: string;
 }
 
@@ -233,10 +263,44 @@ export function maxLoss(entry: number, stop: number, units: number, charges: num
   return round2(Math.max(0, entry - stop) * units + charges);
 }
 
-export function ruleFollowed(record: Pick<AssistRecord, "fill_time" | "entry_time" | "sl_set" | "tp_set" | "exit_time" | "paper_exit_time">): RuleCheck {
+export function trailsOnTime(record: Pick<AssistRecord, "trailing" | "trail_seen" | "trails">, windowS = TRAIL_WINDOW_S): boolean {
+  if (!record.trailing) return true;
+  for (const seen of record.trail_seen ?? []) {
+    const match = (record.trails ?? []).find((row) => row.paper_stop === seen.paper_stop);
+    if (match?.updated_at == null) return false;
+    const delay = match.updated_at - seen.moved_at;
+    if (delay < 0 || delay > windowS) return false;
+  }
+  return true;
+}
+
+/** The trailing premium stop from the fill the user got, at the best premium since entry. */
+export function userTrailStop(fill: number, best: number, stop = 0.1, every = 0.15, by = 0.1): number {
+  const base = fill * (1 - stop);
+  if (!(best > fill) || !(fill > 0)) return round2(base);
+  const steps = Math.floor((best - fill) / (fill * every) + 1e-9);
+  return round2(base + steps * by * fill);
+}
+
+export function scorePractice(
+  signalClose: number,
+  upcoming: { high: number; low: number; close: number }[],
+  direction: "up" | "down",
+  level?: number | null,
+): { ready: boolean; directionHit: boolean | null; levelHit: boolean | null } {
+  const window = upcoming.slice(0, PRACTICE_BARS);
+  if (window.length < PRACTICE_BARS) return { ready: false, directionHit: null, levelHit: null };
+  const end = window[window.length - 1]!.close;
+  const directionHit = direction === "up" ? end > signalClose : end < signalClose;
+  const levelHit = level == null ? null : window.some((bar) => bar.low <= level && level <= bar.high);
+  return { ready: true, directionHit, levelHit };
+}
+
+export function ruleFollowed(record: Pick<AssistRecord, "fill_time" | "entry_time" | "sl_set" | "tp_set" | "exit_time" | "paper_exit_time" | "trailing" | "trail_seen" | "trails">): RuleCheck {
   const delay = record.entry_time == null ? null : record.entry_time - record.fill_time;
   const onTime = delay != null && delay >= 0 && delay <= ENTRY_WINDOW_S;
-  const levels = Boolean(record.sl_set) && Boolean(record.tp_set);
+  const levels = Boolean(record.sl_set) && (Boolean(record.trailing) || Boolean(record.tp_set));
+  const trailsOk = trailsOnTime(record);
   let noEarly = true;
   if (record.exit_time == null) noEarly = true;
   else if (record.paper_exit_time == null) noEarly = false;
@@ -245,8 +309,9 @@ export function ruleFollowed(record: Pick<AssistRecord, "fill_time" | "entry_tim
     entry_delay_s: delay,
     entered_on_time: onTime,
     sl_tp_set: levels,
+    trails_on_time: trailsOk,
     no_early_exit: noEarly,
-    followed: Boolean(onTime && levels && noEarly && record.exit_time != null),
+    followed: Boolean(onTime && levels && trailsOk && noEarly && record.exit_time != null),
   };
 }
 
