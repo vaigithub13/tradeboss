@@ -1,5 +1,6 @@
 /** One incremental pass. The worker keeps `state` between candle closes. */
 
+import { readLesson, type Lesson } from "./lesson";
 import { readLevels, type LevelLine } from "./levels";
 import {
   emptyBuild,
@@ -15,11 +16,14 @@ export interface LearnJob {
   left: number;
   right: number;
   rangeSwings: number;
+  timeframe?: string;
+  symbol?: string;
 }
 
 export interface LearnRead {
   structure: Structure;
   levels: LevelLine[];
+  lesson: Lesson;
 }
 
 export interface JobState {
@@ -42,9 +46,12 @@ function isAppend(prev: readonly LearnBar[], next: readonly LearnBar[]): boolean
 export function runJob(job: LearnJob, state: JobState | null): { read: LearnRead; state: JobState } {
   const reusable = state != null && state.build.left === job.left && state.build.right === job.right && isAppend(state.prev, job.bars);
   const build = extendStructure(reusable ? state.build : emptyBuild(job.left, job.right), job.bars);
+  const structure: Structure = { swings: build.swings, events: build.events, trend: trendOf(build, job.rangeSwings) };
+  const levels = readLevels(job.bars);
   const read: LearnRead = {
-    structure: { swings: build.swings, events: build.events, trend: trendOf(build, job.rangeSwings) },
-    levels: readLevels(job.bars),
+    structure,
+    levels,
+    lesson: readLesson({ bars: job.bars, structure, levels, timeframe: job.timeframe, symbol: job.symbol }),
   };
   return { read, state: { build, prev: job.bars } };
 }

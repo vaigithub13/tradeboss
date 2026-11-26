@@ -2,13 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import {
   CandlestickSeries,
   createChart,
-  createSeriesMarkers,
+  LineStyle,
   type IChartApi,
   type IPriceLine,
   type ISeriesApi,
-  type ISeriesMarkersPluginApi,
-  type SeriesMarker,
-  type Time,
   type UTCTimestamp,
 } from "lightweight-charts";
 
@@ -18,10 +15,12 @@ import type { LiveView } from "../live/protocol";
 import { subscribeLearnBars } from "../store/liveStore";
 import { explain } from "./explain";
 import { runJob, type JobState, type LearnRead } from "./job";
-import { defaultToggles, LAYER_TOGGLES, visibleLabels, type LayerToggles } from "./labels";
+import { DEFAULT_LABEL_SWINGS, defaultToggles, LAYER_TOGGLES, visibleLabels, type LayerToggles } from "./labels";
 import { LearnOverlay } from "./overlay";
+import { buildScene } from "./scene";
 import { closedBars, shownBars, type LearnBar } from "./structure";
 import { learnChartOptions, learnColors, type LearnTheme } from "./theme";
+import { fromIstInput, toIstInput } from "./time";
 
 const SYMBOLS = [
   { id: "NIFTY50", label: "NIFTY" },
@@ -58,16 +57,17 @@ export function LearnTab({
   const [left, setLeft] = useState(3);
   const [right, setRight] = useState(3);
   const [rangeSwings, setRangeSwings] = useState(4);
+  const [labelSwings, setLabelSwings] = useState(DEFAULT_LABEL_SWINGS);
   const [replay, setReplay] = useState(false);
   const [cursor, setCursor] = useState<number | null>(null);
   const [candles, setCandles] = useState<LearnBar[]>(bars ?? []);
   const [read, setRead] = useState<LearnRead | null>(null);
   const [about, setAbout] = useState(false);
+  const [legend, setLegend] = useState(false);
   const [tip, setTip] = useState<string | null>(null);
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
-  const markersRef = useRef<ISeriesMarkersPluginApi<Time> | null>(null);
   const linesRef = useRef<IPriceLine[]>([]);
   const overlayRef = useRef<LearnOverlay | null>(null);
   const workerRef = useRef<Worker | null>(null);
@@ -77,7 +77,7 @@ export function LearnTab({
   useEffect(() => {
     const el = host.current;
     if (!el) return;
-    const chart = createChart(el, learnChartOptions(theme));
+    const chart = createChart(el, learnChartOptions(theme, timeframe));
     const colors = learnColors(theme);
     const series = chart.addSeries(CandlestickSeries, {
       upColor: colors.up,
@@ -96,20 +96,19 @@ export function LearnTab({
       chartRef.current = null;
       seriesRef.current = null;
       overlayRef.current = null;
-      markersRef.current = null;
       linesRef.current = [];
     };
-    // The chart is created once. Theme updates go through applyOptions.
+    // The chart is created once. Theme and timeframe updates go through applyOptions.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
-    chartRef.current?.applyOptions(learnChartOptions(theme));
+    chartRef.current?.applyOptions(learnChartOptions(theme, timeframe));
     const colors = learnColors(theme);
     seriesRef.current?.applyOptions({
       upColor: colors.up, downColor: colors.down, wickUpColor: colors.up, wickDownColor: colors.down,
     });
-  }, [theme]);
+  }, [theme, timeframe]);
 
   useEffect(() => {
     let worker: Worker | null = null;
@@ -185,7 +184,14 @@ export function LearnTab({
 
   useEffect(() => {
     const shown = shownBars(candles, replay ? cursor : null);
-    const job = { bars: closedBars(shown, replay ? cursor : null), left, right, rangeSwings };
+    const job = {
+      bars: closedBars(shown, replay ? cursor : null),
+      left,
+      right,
+      rangeSwings,
+      timeframe,
+      symbol,
+    };
     const id = ++req.current;
     if (workerRef.current) {
       workerRef.current.postMessage({ id, job });
@@ -194,45 +200,28 @@ export function LearnTab({
     const done = runJob(job, jobState.current);
     jobState.current = done.state;
     setRead(done.read);
-  }, [candles, cursor, left, rangeSwings, replay, right]);
+  }, [candles, cursor, left, rangeSwings, replay, right, symbol, timeframe]);
 
   useEffect(() => {
     const series = seriesRef.current;
     const overlay = overlayRef.current;
     if (!series || !overlay || !read) return;
     const colors = learnColors(theme);
+    const scene = buildScene(read, toggles, colors, labelSwings);
     for (const line of linesRef.current) series.removePriceLine(line);
-    linesRef.current = togglesOn(read, toggles).map((level) => series.createPriceLine({
+    linesRef.current = scene.lines.map((level) => series.createPriceLine({
       price: level.price,
-      title: level.label,
-      color: colors.line,
+      title: level.title,
+      color: level.color,
       lineWidth: 1,
+      lineStyle: level.dotted ? LineStyle.Dotted : LineStyle.Solid,
       axisLabelVisible: true,
     }));
-    const markers: SeriesMarker<Time>[] = [];
-    if (toggles.swings) {
-      for (const swing of read.structure.swings) {
-        markers.push({
-          time: swing.time as UTCTimestamp,
-          position: swing.kind === "high" ? "aboveBar" : "belowBar",
-          color: colors.text,
-          shape: "circle",
-          text: swing.label,
-        });
-      }
-    }
-    if (!markersRef.current) markersRef.current = createSeriesMarkers(series);
-    markersRef.current?.setMarkers(markers);
-    overlay.setSegments(toggles.breaks ? read.structure.events.map((event) => ({
-      from: event.fromTime,
-      to: event.time,
-      price: event.price,
-      text: event.kind === "bos" ? "BOS" : "CHoCH",
-      color: event.direction === "up" ? colors.up : colors.down,
-    })) : []);
-  }, [read, theme, toggles]);
+    overlay.setScene(scene);
+  }, [labelSwings, read, theme, toggles]);
 
-  const labels = visibleLabels(read?.structure ?? null, read?.levels ?? [], toggles);
+  const labels = visibleLabels(read?.structure ?? null, read?.levels ?? [], toggles, read?.lesson ?? null, labelSwings);
+  const amdNote = toggles.amd ? read?.lesson.sessions.at(-1)?.note ?? null : null;
   const light = theme === "light";
   return (
     <div className={`flex h-full min-h-0 flex-col ${light ? "bg-white text-slate-900" : "bg-[#0c1016] text-slate-100"}`} data-testid="learn-pane">
@@ -242,7 +231,7 @@ export function LearnTab({
         ))}
         <span className="mx-1 h-4 w-px bg-black/10" />
         {TIMEFRAMES.map((tf) => (
-          <button key={tf} type="button" className={chip(timeframe === tf)} onClick={() => setTimeframe(tf)}>{tf}</button>
+          <button key={tf} type="button" aria-pressed={timeframe === tf} className={chip(timeframe === tf)} onClick={() => setTimeframe(tf)}>{tf}</button>
         ))}
         <button type="button" className={chip(replay)} data-testid="learn-replay" onClick={() => {
           setReplay((on) => {
@@ -257,10 +246,10 @@ export function LearnTab({
               aria-label="Replay cursor"
               type="datetime-local"
               className="rounded border border-black/15 bg-transparent px-1"
-              value={toLocalInput(cursor)}
+              value={toIstInput(cursor)}
               onChange={(e) => {
-                const next = Math.floor(new Date(e.target.value).getTime() / 1000);
-                if (Number.isFinite(next)) setCursor(next);
+                const next = fromIstInput(e.target.value);
+                if (next != null) setCursor(next);
               }}
             />
             <button type="button" className={chip(false)} onClick={() => setCursor((value) => (value ?? 0) - (TF_SECONDS[timeframe] ?? 60))}>Back</button>
@@ -277,6 +266,10 @@ export function LearnTab({
         <label className="flex items-center gap-1">Range swings
           <input aria-label="Range swings" type="number" min={1} max={20} className="w-12 rounded border border-black/15 bg-transparent px-1" value={rangeSwings} onChange={(e) => setRangeSwings(Number(e.target.value) || 1)} />
         </label>
+        <label className="flex items-center gap-1">Swing labels
+          <input aria-label="Swing labels" type="number" min={1} max={40} className="w-12 rounded border border-black/15 bg-transparent px-1" value={labelSwings} onChange={(e) => setLabelSwings(Number(e.target.value) || 1)} />
+        </label>
+        <button type="button" className={chip(legend)} aria-expanded={legend} data-testid="learn-legend" onClick={() => setLegend((open) => !open)}>Legend</button>
         <button type="button" className={`${chip(about)} ml-auto`} data-testid="learn-about" onClick={() => setAbout((open) => !open)}>About</button>
       </div>
       <div className="flex flex-wrap gap-1 px-3 py-1 text-[11px]">
@@ -297,18 +290,23 @@ export function LearnTab({
             {read.structure.trend}
           </span>
         )}
+        {amdNote && (
+          <span className="rounded bg-black/5 px-2 py-0.5 font-semibold" title={explain(amdNote)} data-testid="learn-amd">{amdNote}</span>
+        )}
       </div>
       <div ref={host} className="min-h-0 flex-1" data-testid="learn-chart" />
-      {tip && <p className="px-3 py-1 text-xs" data-testid="learn-tip">{tip}</p>}
-      <ul className="flex max-h-24 flex-wrap gap-2 overflow-auto px-3 py-1 text-[11px]" data-testid="learn-labels">
-        {labels.map((label) => (
-          <li key={label.id}>
-            <button type="button" className="underline decoration-dotted" title={label.title} onMouseEnter={() => setTip(label.title)} onMouseLeave={() => setTip(null)}>
-              {label.text}
-            </button>
-          </li>
-        ))}
-      </ul>
+      {legend && (
+        <ul className="flex max-h-24 flex-wrap gap-2 overflow-auto px-3 py-1 text-[11px]" data-testid="learn-labels">
+          {labels.map((label) => (
+            <li key={label.id}>
+              <button type="button" className="underline decoration-dotted" title={label.title} onMouseEnter={() => setTip(label.title)} onMouseLeave={() => setTip(null)}>
+                {label.text}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {legend && tip && <p className="px-3 py-1 text-xs" data-testid="learn-tip">{tip}</p>}
       {about && (
         <section className="border-t border-black/10 px-3 py-2 text-xs" data-testid="learn-credits">
           <h2 className="font-semibold">About</h2>
@@ -323,16 +321,6 @@ export function LearnTab({
       )}
     </div>
   );
-}
-
-function togglesOn(read: LearnRead, toggles: LayerToggles) {
-  return read.levels.filter((level) => toggles[level.layer]);
-}
-
-function toLocalInput(epoch: number): string {
-  const date = new Date(epoch * 1000);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function chip(on: boolean): string {

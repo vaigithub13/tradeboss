@@ -24,6 +24,7 @@ vi.mock("lightweight-charts", () => {
     createChart,
     CandlestickSeries: class {},
     ColorType: { Solid: "solid" },
+    LineStyle: { Solid: 0, Dotted: 1, Dashed: 2, LargeDashed: 3, SparseDotted: 4 },
     createSeriesMarkers: () => ({ setMarkers: vi.fn() }),
   };
 });
@@ -50,8 +51,22 @@ describe("Learn tab", () => {
     useChartStore.setState({ symbol: "NIFTY50" });
     render(<LearnTab bars={bars} />);
     expect(createChart).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      layout: expect.objectContaining({ attributionLogo: false, textColor: "#1c2330" }),
+      layout: expect.objectContaining({ attributionLogo: false, textColor: "#1c2330", fontSize: 10 }),
     }));
+    const options = createChart.mock.calls[0]?.[1] as {
+      timeScale: { tickMarkFormatter: (time: number, type: number) => string };
+      localization: { timeFormatter: (time: number) => string };
+    };
+    expect(options.timeScale.tickMarkFormatter(ist(26, 9, 15), 3)).toBe("09:15");
+    expect(options.timeScale.tickMarkFormatter(ist(26, 15, 30), 3)).toBe("15:30");
+    expect(options.localization.timeFormatter(ist(26, 9, 15))).toContain("09:15");
+    expect(options.localization.timeFormatter(ist(26, 15, 30))).toContain("15:30");
+    expect(options.localization.timeFormatter(ist(26, 9, 15))).not.toContain("03:45");
+    expect(screen.getByRole("button", { name: "5m" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByLabelText("Swing labels")).toHaveValue(12);
+    expect(screen.queryByTestId("learn-labels")).toBeNull();
+    expect(screen.queryByTitle("Previous day's high.")).toBeNull();
+    await user.click(screen.getByTestId("learn-legend"));
     const labels = await screen.findByTestId("learn-labels");
     expect(labels.textContent).toMatch(/PDH/);
     expect(screen.getByTitle("Previous day's high.")).toBeTruthy();

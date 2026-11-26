@@ -2523,6 +2523,14 @@ The pane is light by default (white background, light grid, dark text, green up 
 
 Symbols are Nifty, Sensex, and Bank Nifty. Timeframes run from 1m to 1D. Replay shows no bar after the cursor, and structure uses closed bars only: the bar under the cursor, and the live forming bar, are left out. Swings are pivots with left and right defaulting to 3, labelled HH/HL/LH/LL against the previous swing of that type. A BOS is a close beyond the last swing in the trend direction. A CHoCH is the first close beyond the last opposite swing. The badge is Uptrend, Downtrend, or Range (no BOS in the last N swings). Levels are PDH, PDL, previous close, previous week high and low, CPR with the market-view formula, round numbers every 100 points, and the 09:15–09:45 opening range. Each layer toggles. Hovering a label shows a fixed one-line explanation. The annotations are extended in a web worker after the candle series is updated, from the candles already loaded, not from the market-view endpoint.
 
+## 27 Nov 2026 — Learn tab, phase L2
+
+Education only, on the Learn tab. The Chart tab, the Sensex tab, paper slots, the assist, the scanner, and the live path were not changed. No signals and no orders. `LIVE_TRADING` stays false. The backend was not started.
+
+The Learn clock is Asia/Kolkata, same as the main chart, so 09:15 and 15:30 read as 09:15 and 15:30. The label list sits behind a Legend button and is hidden until it is opened. The default timeframe stays 5m. Swing labels are the last 12 (a setting), drawn in a 9px font and stepped apart when they would overlap. BOS and CHoCH are short tags.
+
+Liquidity is equal highs and equal lows within 0.1 × ATR(14), plus PDH, PDL, the previous week, and the opening-range edges, tagged EQH, EQL, BSL, or SSL. A sweep is a trade beyond a level that closes back on the same candle or the next. AMD is the opening balance (09:15 until the range exceeds the recent opening-hour average, or 10:15), then the first sweep that closes back inside, then a close through the other side, shaded until a CHoCH against it or 15:15. A session that reaches 15:15 without both is "No AMD today". The textbook box is a learning sketch after that sweep and an opposite CHoCH: the first three-candle gap, or the midpoint, with a stop at the sweep and a target at the opposite liquidity. Target, stop, or neither is written only after the candle that decides it has closed. The new layers are Liquidity, Sweeps, AMD, and Textbook entry. They are computed in the Learn worker from the closed candles.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

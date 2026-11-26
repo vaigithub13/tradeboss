@@ -1,4 +1,7 @@
-import { ColorType, type DeepPartial, type ChartOptions } from "lightweight-charts";
+import { ColorType, type ChartOptions, type DeepPartial, type TickMarkType, type Time } from "lightweight-charts";
+
+import type { Timeframe } from "../api/client";
+import { learnTickMarkFormatter, learnTimeFormatter } from "./time";
 
 export type LearnTheme = "light" | "dark";
 
@@ -35,17 +38,24 @@ export function learnColors(theme: LearnTheme): LearnColors {
   };
 }
 
-export function learnChartOptions(theme: LearnTheme): DeepPartial<ChartOptions> {
+export function learnChartOptions(theme: LearnTheme, timeframe: Timeframe = "5m"): DeepPartial<ChartOptions> {
   const colors = learnColors(theme);
   return {
     autoSize: true,
     layout: {
       background: { type: ColorType.Solid, color: colors.background },
       textColor: colors.text,
+      fontSize: 10,
       attributionLogo: false,
     },
     grid: { vertLines: { color: colors.grid }, horzLines: { color: colors.grid } },
     rightPriceScale: { borderColor: colors.border },
-    timeScale: { borderColor: colors.border, timeVisible: true, secondsVisible: false },
+    timeScale: {
+      borderColor: colors.border,
+      timeVisible: true,
+      secondsVisible: false,
+      tickMarkFormatter: (time: Time, type: TickMarkType) => learnTickMarkFormatter(time, type),
+    },
+    localization: { timeFormatter: learnTimeFormatter(timeframe) },
   };
 }
