@@ -2447,6 +2447,26 @@ Research only. No UI, no slot, no order. The gate is four books chosen before th
 
 OOS hurdles, Upstox: Nifty 500 CAGR 9.8% after tax 9.8%, max DD 18.8% (the 1.5× limit is 28.2%). Equal-weight CAGR 11.6% after tax 10.4%. M1 does not beat either hurdle (after tax 4.2%) and beats 47/50 random seeds. M1R is negative out of sample. M2 beats both hurdles before tax (22.3%) and after tax (19.7%) and beats 50/50 random seeds, then fails because the drawdown is 41.1% and a 20% shorter 6-month window (CAGR 8.9%) and a 20% longer skip (CAGR 6.6%) fall below half the base. M2R's 10.2% does not beat the equal-weight book, and 8.5% after tax does not beat either hurdle. Removing M2's 10 largest OOS winners leaves ₹−8,343; that check is reported and is not a gate. No book passed, so the holdout stayed sealed.
 
+## 26 Nov 2026 — SpringPad 50/200 SMA crossover, no book passes
+
+Research only. No UI, no slot, no order. The signal is an SMA50 cross of SMA200 on the daily close, filled at the next open. The stop is 2% and the target is 4%, both from the slipped fill. A gap fills at the open, and a day that touches both fills the stop. Variant A has no time limit. Variant B sells at the close of session 5. The gate is the uncapped stock book: every golden cross, ₹10,000, Upstox delivery, on the point-in-time universe (turnover at least ₹5 crore, price at least ₹50, 250 sessions). The ₹50,000 and ₹2,00,000 books, five names at a time, are reported and were not extra attempts. A portfolio slot may keep a holding within 20% under ₹5,000; a wider gap is skipped, and a loss funds fewer names. Index futures are one unit with no extra slippage. The futures table starts 2022-01-01, so index DEV is not costed and that row was not copied backward. Sensex daily bars are not stored. Nifty 500 in the portfolio comparison is the price index. Delivery and futures rates are unverified. Forward runs through 2026-11-23. Holdout 2026-07-01 through 2026-10-01 was not opened.
+
+| Book | DEV avg | OOS trades | OOS win | OOS avg | Cost | PF | Hold | Seeds | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| Stock A | −1.31% | 2881 | 27.8% | −1.48% | 1.37% | 0.35 | 2.9 | 18/50 | FAIL |
+| Stock B | −1.33% | 2881 | 26.8% | −1.47% | 1.37% | 0.33 | 2.1 | 30/50 | FAIL |
+| Nifty long A | not costed | 3 | 66.7% | 1.86% | 0.14% | 4.37 | 40.0 | 39/50 | FAIL |
+| Nifty long B | not costed | 3 | 66.7% | −0.05% | 0.14% | 1.24 | 5.0 | 26/50 | FAIL |
+| Nifty short A | not costed | 4 | 50.0% | 1.08% | 0.14% | 1.97 | 11.0 | 43/50 | FAIL |
+| Nifty short B | not costed | 4 | 100% | 1.58% | 0.14% | inf | 5.0 | 50/50 | FAIL |
+| BankNifty long A | not costed | 2 | 50.0% | 0.98% | 0.12% | 1.31 | 4.5 | 38/50 | FAIL |
+| BankNifty long B | not costed | 2 | 50.0% | −0.39% | 0.12% | 0.47 | 3.5 | 24/50 | FAIL |
+| BankNifty short A | not costed | 3 | 33.3% | −0.13% | 0.13% | 1.20 | 5.7 | 25/50 | FAIL |
+| BankNifty short B | not costed | 3 | 0.0% | −1.74% | 0.13% | 0.00 | 3.0 | 4/50 | FAIL |
+| Sensex, all four | — | 0 | — | — | — | — | — | — | FAIL |
+
+The stock books fail because both windows are negative after costs, the average trade is far under +0.5%, and neither beats 95% of the random dates. Out of sample, about 70% of trades hit the stop and the average hold is about three sessions, so the cross rarely stays open until the opposite cross. The break-even win rate on the 2%/4% bracket, delivery row effective 2024-04-01, is 51.9% for a liquid Upstox round trip (cost 1.11% of a ₹10,000 notional) and 56.9% for the wider slippage. The OOS win rate is 27.8%. Shifting the stop, the target, or the SMA pair to 40/160 and 60/240 leaves the stock average near −1.5%. The ₹50,000 Upstox portfolio loses about 40% a year in both windows, against a Nifty 500 price-index CAGR of 14.3% in DEV and 9.9% in OOS. Sensex has no stored daily file. No book passed, so the holdout stayed sealed.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
