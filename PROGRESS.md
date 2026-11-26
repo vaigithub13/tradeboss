@@ -2515,6 +2515,14 @@ When the paper premium trail moves, a popup says "Move SL to ₹X" from the user
 
 Practice: before "See what happened next" the user writes a direction, a reason, an optional level, and a tag (trend pullback, level break, range fade, or other). The next 6 candles are scored after the read is saved. Running accuracy is kept per tag. The journal stays under `data/paper/assist/` and is not committed.
 
+## 27 Nov 2026 — Learn tab, phase L1
+
+Education only. A new Learn tab with its own chart, its own symbol and timeframe, and its own replay cursor. It does not write the Chart or Sensex stores, and it does not change a paper slot or the assist. No signals and no orders. `LIVE_TRADING` stays false. The backend was not started.
+
+The pane is light by default (white background, light grid, dark text, green up and red down) with a dark toggle. The Lightweight Charts logo is off (`attributionLogo: false`). About credits "Charts: TradingView Lightweight Charts" and links the Apache 2.0 licence. The licence text is `frontend/src/learn/LIGHTWEIGHT_CHARTS_LICENSE`, with `NOTICE` beside it.
+
+Symbols are Nifty, Sensex, and Bank Nifty. Timeframes run from 1m to 1D. Replay shows no bar after the cursor, and structure uses closed bars only: the bar under the cursor, and the live forming bar, are left out. Swings are pivots with left and right defaulting to 3, labelled HH/HL/LH/LL against the previous swing of that type. A BOS is a close beyond the last swing in the trend direction. A CHoCH is the first close beyond the last opposite swing. The badge is Uptrend, Downtrend, or Range (no BOS in the last N swings). Levels are PDH, PDL, previous close, previous week high and low, CPR with the market-view formula, round numbers every 100 points, and the 09:15–09:45 opening range. Each layer toggles. Hovering a label shows a fixed one-line explanation. The annotations are extended in a web worker after the candle series is updated, from the candles already loaded, not from the market-view endpoint.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

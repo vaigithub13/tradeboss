@@ -4,7 +4,7 @@
  */
 import { initialRange, type LogicalRange } from "./view";
 
-export type MainView = "chart" | "options" | "paper" | "sensex" | "scanner";
+export type MainView = "chart" | "options" | "paper" | "sensex" | "scanner" | "learn";
 
 /** Bars shown on first load / Auto reset (matches ChartView). */
 export const INITIAL_VISIBLE_BARS = 150;
@@ -18,7 +18,7 @@ export const DEFAULT_RIGHT_OFFSET = 5;
  * visible range and remounts into initialRange / a stale focus jump.
  */
 export function chartHidden(mainView: MainView): boolean {
-  return mainView === "options" || mainView === "paper" || mainView === "sensex" || mainView === "scanner";
+  return mainView === "options" || mainView === "paper" || mainView === "sensex" || mainView === "scanner" || mainView === "learn";
 }
 
 /** Default time window: last N bars plus right pad, scrolled to the live tip. */

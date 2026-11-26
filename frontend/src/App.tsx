@@ -52,6 +52,8 @@ import { ChartScopeProvider, NIFTY_SCOPE } from "./store/chartScope";
 import { useSensexChartStore } from "./store/chartStore";
 import { useSensexIndicatorStore } from "./store/indicatorStore";
 import { chartHidden, type MainView } from "./chart/controls";
+import { LearnTab } from "./learn/LearnTab";
+import type { LiveView } from "./live/protocol";
 import type { PatternShade } from "./chart/similarShade";
 import { SimilarPanel } from "./panels/SimilarPanel";
 import { fetchPredictions, istDay, type CandleMatch, type SimilarTimeframe } from "./api/similar";
@@ -75,7 +77,7 @@ const STATUS_UI: Record<BackendStatus, { label: string; dot: string; text: strin
 export default function App() {
   const [mainView, setMainView] = useState<MainView>(() => {
     const saved = readJson<string>(PAPER_TAB_KEY, "chart");
-    return saved === "options" || saved === "paper" || saved === "chart" || saved === "sensex" || saved === "scanner" ? saved : "chart";
+    return saved === "options" || saved === "paper" || saved === "chart" || saved === "sensex" || saved === "scanner" || saved === "learn" ? saved : "chart";
   });
   const setView = useCallback((view: MainView) => {
     setMainView(view);
@@ -147,6 +149,7 @@ export default function App() {
   const startLive = useLiveStore((s) => s.start);
   const stopLive = useLiveStore((s) => s.stop);
   const setLiveViews = useLiveStore((s) => s.setViews);
+  const [learnView, setLearnView] = useState<LiveView | null>(null);
   useEffect(() => {
     startLive();
     return () => stopLive();
@@ -176,6 +179,13 @@ export default function App() {
         sensexIndicatorItems,
       ),
     ].filter((v): v is NonNullable<typeof v> => v != null);
+    if (
+      mainView === "learn"
+      && learnView
+      && !views.some((view) => view.symbol === learnView.symbol && view.timeframe === learnView.timeframe)
+    ) {
+      views.push(learnView);
+    }
     setLiveViews(views);
   }, [
     loadedSymbol,
@@ -187,6 +197,8 @@ export default function App() {
     sensexSessions,
     sensexIndicatorItems,
     setLiveViews,
+    mainView,
+    learnView,
   ]);
 
   const info = symbols.find((s) => s.symbol === symbol);
@@ -454,6 +466,16 @@ export default function App() {
           >
             Stock Scanner
           </button>
+          <button
+            type="button"
+            className={`rounded px-2.5 py-1 text-xs ${
+              mainView === "learn" ? "bg-white/10 text-white" : "text-white/55 hover:text-white/80"
+            }`}
+            onClick={() => setView("learn")}
+            data-testid="tab-learn"
+          >
+            Learn
+          </button>
         </div>
         {mainView === "chart" ? (
           <>
@@ -709,6 +731,11 @@ export default function App() {
       {mainView === "options" && (
         <div className="absolute inset-0" data-testid="options-pane">
           <OptionsTab />
+        </div>
+      )}
+      {mainView === "learn" && (
+        <div className="absolute inset-0" data-testid="learn-pane-wrap">
+          <LearnTab onLiveView={setLearnView} />
         </div>
       )}
       {mainView === "scanner" && (

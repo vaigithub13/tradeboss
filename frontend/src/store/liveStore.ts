@@ -30,22 +30,36 @@ let client: LiveClient | null = null;
 export const liveUrl = (loc: Pick<Location, "protocol" | "host">): string =>
   `${loc.protocol === "https:" ? "wss" : "ws"}://${loc.host}/api/live/ws`;
 
+const learnBarListeners = new Set<(msg: BarMessage) => void>();
+
+/** Learn keeps its own candles. The Chart and Sensex stores are still updated first. */
+export function subscribeLearnBars(fn: (msg: BarMessage) => void): () => void {
+  learnBarListeners.add(fn);
+  return () => {
+    learnBarListeners.delete(fn);
+  };
+}
+
 /** Fold one `bar` message into the matching chart and indicator stores (candles first). */
 export function applyBar(msg: BarMessage): void {
   useLiveStore.setState({ lastBarAt: Date.now() });
-  const targets = [
-    { chart: useChartStore, indicators: useIndicatorStore },
-    { chart: useSensexChartStore, indicators: useSensexIndicatorStore },
-  ] as const;
-  for (const { chart, indicators } of targets) {
-    const changed = chart.getState().applyLive(msg.symbol, msg.timeframe, msg.candles);
-    if (!changed) continue;
-    const loaded = chart.getState().loaded;
-    if (!loaded || !msg.times || !msg.indicators?.length) return;
-    const byKey: Record<string, Record<string, (number | null)[]>> = {};
-    for (const ind of msg.indicators) byKey[ind.id] = ind.outputs; // ids are indicator keys (see liveView)
-    indicators.getState().applyLiveTail(scopeKey(loaded.symbol, loaded.timeframe, loaded.sessions), msg.times, byKey);
-    return;
+  try {
+    const targets = [
+      { chart: useChartStore, indicators: useIndicatorStore },
+      { chart: useSensexChartStore, indicators: useSensexIndicatorStore },
+    ] as const;
+    for (const { chart, indicators } of targets) {
+      const changed = chart.getState().applyLive(msg.symbol, msg.timeframe, msg.candles);
+      if (!changed) continue;
+      const loaded = chart.getState().loaded;
+      if (!loaded || !msg.times || !msg.indicators?.length) return;
+      const byKey: Record<string, Record<string, (number | null)[]>> = {};
+      for (const ind of msg.indicators) byKey[ind.id] = ind.outputs; // ids are indicator keys (see liveView)
+      indicators.getState().applyLiveTail(scopeKey(loaded.symbol, loaded.timeframe, loaded.sessions), msg.times, byKey);
+      return;
+    }
+  } finally {
+    for (const fn of learnBarListeners) fn(msg);
   }
 }
 
