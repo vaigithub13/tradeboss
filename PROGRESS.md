@@ -2434,6 +2434,19 @@ The −8% average trade was a fixed delivery charge on positions of a few rupees
 
 All five still fail. S2 also has fewer than 100 OOS trades. Gross, zero-cost, ₹1 crore, 5 positions: S1 DEV −0.53% / OOS −0.32% (universe about 0%, random about −0.1%). S2 DEV −0.03% / OOS −0.54%. S3 DEV +0.34% / OOS +0.28% (random about −0.2%). S4 DEV +0.38% / OOS −0.03%. S5 DEV −1.10% / OOS −0.27%. S2's gross book lags the Nifty 500 price index by more than 30 points in 2021 (−3.9% vs +30%), 2022 (−33.6% vs +2.8%), 2023 (−21.3% vs +25.5%), and 2024 (−23.8% vs +15.0%). Those years are strings of 10–30% stop-gaps, listed in `data/validation/swing_phase3_sanity_2026-11-26.md`. OOS large and small both lose except S2 large, which is one trade, ₹+264.
 
+## 26 Nov 2026 — Swing Phase 4: monthly momentum, four books, none pass
+
+Research only. No UI, no slot, no order. The gate is four books chosen before the run: M1 (return from t−252 to t−21), M1 with the Nifty 500 below its 200-day average held in cash, M2 (average of the 6-month and 12-month return/volatility z-scores, skipping 21 sessions), and M2 with the same regime filter. Each gate book is ₹50,000, 10 names, Upstox delivery. The ₹2,00,000 book and the ₹0 brokerage book are reported and were not extra attempts. Nifty 500 total return is not in the stored bars, so the index hurdle is the price index. The equal-weight hurdle holds every ₹10 crore name, fractional, no ₹5,000 floor, resized every month, on ₹1 crore. The strategy does not resize a name it keeps. Tax rates are unverified and omit surcharge; the schedule and sources are in `backend/app/swing/data/tax_rates_equity.json`. A ₹5,000 slot rarely divides a share price, so a remainder within 20% of the slot is kept and the next ranked name fills a wider gap. After a loss the book holds fewer names rather than stopping. Forward runs through 2026-11-23. Holdout 2026-07-01 through 2026-09-30 was not opened.
+
+| Book | DEV CAGR | DEV DD | OOS CAGR | OOS DD | OOS vol | Sharpe | Turnover | Cost drag | OOS after tax | Verdict |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
+| M1 12-1 | 33.9% | 45.8% | 5.1% | 62.5% | 29.6% | 0.33 | 27.3% | 6.6% | 4.2% | FAIL |
+| M1R 12-1, regime | 29.0% | 36.9% | −4.6% | 59.7% | 24.7% | −0.05 | 25.8% | 6.3% | −4.6% | FAIL |
+| M2 NSE-style | 39.0% | 45.8% | 22.3% | 41.1% | 24.9% | 0.96 | 25.2% | 4.9% | 19.7% | FAIL |
+| M2R NSE-style, regime | 22.7% | 39.5% | 10.2% | 45.0% | 21.4% | 0.59 | 25.3% | 5.2% | 8.5% | FAIL |
+
+OOS hurdles, Upstox: Nifty 500 CAGR 9.8% after tax 9.8%, max DD 18.8% (the 1.5× limit is 28.2%). Equal-weight CAGR 11.6% after tax 10.4%. M1 does not beat either hurdle (after tax 4.2%) and beats 47/50 random seeds. M1R is negative out of sample. M2 beats both hurdles before tax (22.3%) and after tax (19.7%) and beats 50/50 random seeds, then fails because the drawdown is 41.1% and a 20% shorter 6-month window (CAGR 8.9%) and a 20% longer skip (CAGR 6.6%) fall below half the base. M2R's 10.2% does not beat the equal-weight book, and 8.5% after tax does not beat either hurdle. Removing M2's 10 largest OOS winners leaves ₹−8,343; that check is reported and is not a gate. No book passed, so the holdout stayed sealed.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
