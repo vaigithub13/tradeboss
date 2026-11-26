@@ -2467,6 +2467,38 @@ Research only. No UI, no slot, no order. The signal is an SMA50 cross of SMA200 
 
 The stock books fail because both windows are negative after costs, the average trade is far under +0.5%, and neither beats 95% of the random dates. Out of sample, about 70% of trades hit the stop and the average hold is about three sessions, so the cross rarely stays open until the opposite cross. The break-even win rate on the 2%/4% bracket, delivery row effective 2024-04-01, is 51.9% for a liquid Upstox round trip (cost 1.11% of a ₹10,000 notional) and 56.9% for the wider slippage. The OOS win rate is 27.8%. Shifting the stop, the target, or the SMA pair to 40/160 and 60/240 leaves the stock average near −1.5%. The ₹50,000 Upstox portfolio loses about 40% a year in both windows, against a Nifty 500 price-index CAGR of 14.3% in DEV and 9.9% in OOS. Sensex has no stored daily file. No book passed, so the holdout stayed sealed.
 
+## 27 Nov 2026 — Slot 4 deployment check, next to slot 2
+
+Research only. No UI change, no paper-slot edit, no order. `LIVE_TRADING` stays false. The backend was not started. Both books are the price channel, length 20, Nifty 5-minute, one lot, ATM weekly (strike offset 0), live timing, delta-adjusted fills, slippage 0.2 a side, and the dated cost and lot tables. Slot 4 also exits the option at −20% or +40% of the fill. Slot 2 does not. Premiums are the stored option tape from 2024-10-03 and the shipped model before that. The holdout 2026-07-01 through 2026-10-01 was opened through the holdout action, so each slot recorded one peek. That is a deployment look. Slots were left as they run live.
+
+| Book | Trades | Win | Net | PF | Max DD | Longest streak | Deepest streak | Worst month | DD days |
+|---|---:|---:|---:|---:|---:|---:|---:|---|---:|
+| Slot 4, 2022–2024 | 1944 | 31.9% | ₹−125,047 | 0.90 | ₹181,263 | 16 / ₹−8,772 | 12 / ₹−13,971 | 2022-10 ₹−22,277 | 929 |
+| Slot 4, 2025–2026-06 | 937 | 37.5% | ₹−3,033 | 1.00 | ₹50,923 | 12 / ₹−17,512 | 11 / ₹−17,653 | 2026-05 ₹−18,260 | 403 |
+| Slot 4, holdout | 173 | 31.8% | ₹−38,044 | 0.70 | ₹48,367 | 13 / ₹−13,638 | 8 / ₹−14,181 | 2026-09 ₹−22,425 | 70 |
+| Slot 2, 2022–2024 | 1944 | 31.7% | ₹−112,681 | 0.91 | ₹178,985 | 16 / ₹−9,919 | 12 / ₹−13,971 | 2022-10 ₹−22,277 | 929 |
+| Slot 2, 2025–2026-06 | 937 | 36.7% | ₹79,297 | 1.07 | ₹71,756 | 11 / ₹−27,161 | 11 / ₹−27,161 | 2025-12 ₹−27,032 | 354 |
+| Slot 2, holdout | 173 | 30.1% | ₹−36,856 | 0.75 | ₹50,610 | 13 / ₹−18,057 | 13 / ₹−18,057 | 2026-08 ₹−20,016 | 84 |
+
+Real premiums against the model: slot 4, 2022–2024, 148 real trades ₹9,237 and 1,796 modelled trades ₹−134,285. Slot 2, same window, 148 real trades ₹21,604 and the same 1,796 modelled trades ₹−134,285. 2022 and 2023 match trade for trade, so the premium exit did not change the model years. From 2025-01-01, slot 4 has 936 real trades ₹−7,042 and one modelled carry-in ₹4,009. Slot 2 has 936 real trades ₹75,288 and the same carry-in ₹4,009. The holdout is entirely real tape.
+
+| Book | Year | Trades | Win | Net | PF | Max DD | Longest streak | Deepest streak | Worst month | DD days |
+|---|---:|---:|---:|---:|---:|---:|---|---|---|---:|
+| Slot 4 | 2022 | 642 | 34.0% | ₹−47,802 | 0.90 | ₹103,679 | 12 / ₹−13,971 | 12 / ₹−13,971 | 2022-10 ₹−22,277 | 197 |
+| Slot 4 | 2023 | 654 | 32.3% | ₹−67,309 | 0.83 | ₹88,580 | 11 / ₹−7,252 | 7 / ₹−11,703 | 2023-01 ₹−22,199 | 353 |
+| Slot 4 | 2024 | 648 | 29.6% | ₹−9,936 | 0.97 | ₹50,076 | 16 / ₹−8,772 | 11 / ₹−12,755 | 2024-08 ₹−17,494 | 207 |
+| Slot 4 | 2025 | 625 | 37.3% | ₹−3,719 | 0.99 | ₹45,857 | 11 / ₹−17,653 | 11 / ₹−17,653 | 2025-12 ₹−17,522 | 222 |
+| Slot 4 | 2026 H1 | 312 | 37.8% | ₹686 | 1.00 | ₹26,113 | 12 / ₹−17,512 | 12 / ₹−17,512 | 2026-05 ₹−18,260 | 95 |
+| Slot 4 | holdout | 173 | 31.8% | ₹−38,044 | 0.70 | ₹48,367 | 13 / ₹−13,638 | 8 / ₹−14,181 | 2026-09 ₹−22,425 | 70 |
+| Slot 2 | 2022 | 642 | 34.0% | ₹−47,802 | 0.90 | ₹103,679 | 12 / ₹−13,971 | 12 / ₹−13,971 | 2022-10 ₹−22,277 | 197 |
+| Slot 2 | 2023 | 654 | 32.3% | ₹−67,309 | 0.83 | ₹88,580 | 11 / ₹−7,252 | 7 / ₹−11,703 | 2023-01 ₹−22,199 | 353 |
+| Slot 2 | 2024 | 648 | 29.0% | ₹2,430 | 1.01 | ₹47,799 | 16 / ₹−9,919 | 11 / ₹−12,755 | 2024-08 ₹−17,494 | 207 |
+| Slot 2 | 2025 | 625 | 36.3% | ₹25,276 | 1.04 | ₹71,756 | 11 / ₹−27,161 | 11 / ₹−27,161 | 2025-12 ₹−27,032 | 222 |
+| Slot 2 | 2026 H1 | 312 | 37.5% | ₹54,021 | 1.14 | ₹29,975 | 11 / ₹−18,451 | 11 / ₹−18,451 | 2026-06 ₹−9,824 | 29 |
+| Slot 2 | holdout | 173 | 30.1% | ₹−36,856 | 0.75 | ₹50,610 | 13 / ₹−18,057 | 13 / ₹−18,057 | 2026-08 ₹−20,016 | 84 |
+
+A drawdown day-count runs from the exit that set the peak to the exit that makes a new peak, and a year's drawdown starts again at zero. A trade at exactly ₹0 ends a losing streak and is not a win. Slot 4 does not beat slot 2. On real premiums through 2026-06-30, slot 4 is about flat and slot 2 is ahead, with a deeper drawdown. The holdout loses for both, and slot 4 loses a little more. The large 2022–2024 loss is the model. Slots were not changed.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
