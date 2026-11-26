@@ -1,5 +1,6 @@
 import { deleteJson, getJson, postJson, putJson } from "./client";
 import type { PaperMark, PaperSignal } from "../paper/present";
+import type { AssistSettings, AssistState, AssistTicket } from "../paper/assist";
 import type {
   AccountStopProgress,
   OrderHelper,
@@ -141,5 +142,22 @@ export const saveRealSettings = (account_stop: number): Promise<{ account_stop: 
 
 export const fetchOrderHelper = (slot = "3"): Promise<{ slot: string; helper: OrderHelper | null; state: string }> =>
   getJson(`/api/paper/real/order-helper?slot=${encodeURIComponent(slot)}`);
+
+export const fetchAssist = (): Promise<AssistState> => getJson("/api/paper/assist");
+
+export const saveAssistSettings = (body: AssistSettings): Promise<AssistSettings> =>
+  putJson("/api/paper/assist/settings", body);
+
+export const fetchAssistTicket = (slot: string, decidedAtMs: number): Promise<{ ticket: AssistTicket | null; state: string }> =>
+  getJson(`/api/paper/assist/ticket?slot=${encodeURIComponent(slot)}&decided_at_ms=${decidedAtMs}`);
+
+export const postAssistTaken = (body: Record<string, unknown>): Promise<{ record: { stop: number; target: number; max_loss: number } }> =>
+  postJson("/api/paper/assist/taken", body);
+
+export const postAssistSkipped = (body: Record<string, unknown>): Promise<{ record: { kind: string } }> =>
+  postJson("/api/paper/assist/skipped", body);
+
+export const postAssistClosed = (body: Record<string, unknown>): Promise<{ record: { net: number } }> =>
+  postJson("/api/paper/assist/closed", body);
 
 export type { AccountStopProgress, OrderHelper, RealTotals };

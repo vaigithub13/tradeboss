@@ -25,6 +25,7 @@ import { usePaperTradesStore } from "./store/paperTradesStore";
 import { paperMarkers, type PaperSignal } from "./paper/present";
 import { PAPER_TAB_KEY, readJson, writeJson } from "./paper/storage";
 import { usePaperStore } from "./store/paperStore";
+import { AssistHost } from "./paper/AssistHost";
 import { usePaperAlerts } from "./paper/useAlerts";
 import { SessionsMenu } from "./panels/SessionsMenu";
 import { SymbolSelector } from "./panels/SymbolSelector";
@@ -399,6 +400,7 @@ export default function App() {
 
   return (
     <div className="flex h-full flex-col">
+      <AssistHost />
       <header className="flex min-h-11 shrink-0 flex-wrap items-center gap-4 border-b border-white/10 px-3 py-1">
         <span className="text-sm font-semibold tracking-tight">TradeBoss</span>
         <div className="flex items-center gap-1 rounded border border-white/10 p-0.5" data-testid="main-view-tabs">

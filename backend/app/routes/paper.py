@@ -16,6 +16,7 @@ from app.config import settings
 from app.data.store import CandleStore
 from app.live.model import ist_date
 from app.live.service import LiveService
+from app.paper.assist import AssistJournal, chart_for_close, ticket_from_session
 from app.paper.desk import SLOTS, PaperDesk, UnknownSlot
 from app.paper.live import AlreadyRunning, NotRunning, PaperError, PaperRunner, UnsupportedSettings
 from app.paper.real import (
@@ -205,6 +206,10 @@ def _real_store(request: Request) -> RealTradeStore:
     return RealTradeStore(_paper_base(request) / "real")
 
 
+def _assist_store(request: Request) -> AssistJournal:
+    return AssistJournal(_paper_base(request) / "assist")
+
+
 def _today_iso(request: Request) -> str:
     svc = getattr(request.app.state, "live", None)
     if svc is not None and getattr(svc, "enabled", False):
@@ -298,3 +303,149 @@ async def real_order_helper(request: Request, slot: str = Query("3")) -> dict[st
     status = _runner(svc, slot).status(_now_ms(svc))
     helper = order_helper(status.get("position"))
     return {"slot": slot, "helper": helper, "state": status.get("state")}
+
+
+# ------------------------------------------------------- manual assist (tickets and a journal; no orders)
+
+
+class AssistSettingsBody(BaseModel):
+    enabled: bool = True
+    slot: str = "4"
+    lots: int = 1
+    max_trades: int = 3
+    day_loss: float = 3000
+    account_pause: float = 10000
+    start_balance: float | None = None
+
+
+class AssistTakenBody(BaseModel):
+    key: str
+    slot: str
+    day: date
+    fill_time: int
+    decided_at_ms: int | None = None
+    contract: str | None = None
+    option_side: str | None = None
+    signal_side: str | None = None
+    fill_price: float
+    entry_time: int
+    sl_set: bool = False
+    tp_set: bool = False
+    lot_size: int
+    paper_fill: float | None = None
+    suggested_limit: float | None = None
+    why: str = ""
+    chart: dict[str, Any] | None = None
+    stop_frac: float | None = None
+    target_frac: float | None = None
+
+
+class AssistSkipBody(BaseModel):
+    key: str
+    slot: str
+    day: date
+    fill_time: int
+    reason: str
+    contract: str | None = None
+
+
+class AssistCloseBody(BaseModel):
+    key: str
+    exit_price: float
+    exit_time: int
+    paper_exit_price: float | None = None
+    paper_exit_time: int | None = None
+    paper_exit_reason: str | None = None
+    paper_net: float | None = None
+    chart: dict[str, Any] | None = None
+
+
+def _assist_state(request: Request) -> dict[str, Any]:
+    return _assist_store(request).state(today=_today_iso(request))
+
+
+def _close_chart(request: Request, key: str, exit_time: int) -> dict[str, Any] | None:
+    """Bars from the signal through the real exit, when the paper session is still up."""
+    svc = getattr(request.app.state, "live", None)
+    if svc is None or not getattr(svc, "enabled", False):
+        return None
+    record = next((row for row in _assist_store(request).load() if row.get("key") == key), None)
+    if record is None:
+        return None
+    try:
+        runner = _runner(svc, str(record["slot"]))
+    except HTTPException:
+        return None
+    session = runner.session
+    if session is None:
+        return None
+    return chart_for_close(record, list(session.shown), int(exit_time))
+
+
+@router.get("/assist")
+async def assist_state(request: Request) -> dict[str, Any]:
+    """Settings, today's guard, open real trades, and the real-versus-paper table. No orders."""
+    return _assist_state(request)
+
+
+@router.put("/assist/settings")
+async def put_assist_settings(body: AssistSettingsBody, request: Request) -> dict[str, Any]:
+    try:
+        saved = _assist_store(request).save_settings(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return saved
+
+
+@router.get("/assist/ticket")
+async def assist_ticket(
+    request: Request,
+    slot: str = Query("4"),
+    decided_at_ms: int = Query(...),
+) -> dict[str, Any]:
+    """The ticket for one filled paper signal: quote, limit, stop, target, and the channel facts."""
+    svc = getattr(request.app.state, "live", None)
+    if svc is None or not getattr(svc, "enabled", False):
+        return {"ticket": None, "state": "disabled"}
+    runner = _runner(svc, slot)
+    settings = _assist_store(request).load_settings()
+    ticket = ticket_from_session(
+        runner.session,
+        decided_at_ms=decided_at_ms,
+        settings=settings,
+        now_ms=_now_ms(svc),
+        slot=slot,
+        day=_today_iso(request),
+    )
+    return {"ticket": ticket, "state": runner.state}
+
+
+@router.post("/assist/taken")
+async def assist_taken(body: AssistTakenBody, request: Request) -> dict[str, Any]:
+    """Log the fill the user took by hand. Recomputes the stop and target from that fill."""
+    try:
+        saved = _assist_store(request).take(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": saved}
+
+
+@router.post("/assist/skipped")
+async def assist_skipped(body: AssistSkipBody, request: Request) -> dict[str, Any]:
+    try:
+        saved = _assist_store(request).skip(body.model_dump())
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": saved}
+
+
+@router.post("/assist/closed")
+async def assist_closed(body: AssistCloseBody, request: Request) -> dict[str, Any]:
+    """Complete a logged real trade at the price the user closed. Does not close the paper position."""
+    payload = body.model_dump()
+    payload["chart"] = _close_chart(request, payload["key"], payload["exit_time"])
+    try:
+        saved = _assist_store(request).close(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"record": saved}

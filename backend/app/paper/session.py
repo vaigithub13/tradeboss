@@ -173,6 +173,8 @@ class PaperSession:
         self._last_index: float | None = None  # the newest index price (the Nifty level recorded at an exit)
         #: (option key, minute) -> [low, high] of the traded prices paper saw: an I1 minute is read against them
         self._tick_range: dict[tuple[str, int], list[float]] = {}
+        #: last traded price per option key, for the manual-assist ticket. Never used to fill or exit.
+        self._last_trade: dict[str, float] = {}
 
     # ---------------------------------------------------------------- input
     def warm(self, bars: Iterable[dict[str, Any]]) -> None:
@@ -500,6 +502,7 @@ class PaperSession:
     def on_option_tick(self, key: str, price: float, *, now_ms: int) -> bool:
         """A traded price of an option (exchange time). Under a premium rule it is checked against the open
         contract's stop and target; a hit sells at the bid. True when this closed the position."""
+        self._last_trade[key] = float(price)
         p = self.book.position
         if p is not None and p.key == key:
             self._note_tick(key, price, now_ms)
@@ -710,6 +713,11 @@ class PaperSession:
             return {"symbol": p.symbol, "source": None, "gross": None, "net": None}
         m = self.book.mark(bid=q.bid, cost_table=self.cost_table, day=self.day)
         return {"symbol": p.symbol, "source": "quote", **m}
+
+    def last_trade(self, key: str) -> float | None:
+        """Last traded price seen for `key`. The assist ticket reads it. Fills do not."""
+        px = self._last_trade.get(key)
+        return None if px is None else float(px)
 
     def live_bars(self) -> dict[int, dict[str, Any]]:
         return {int(b["time"]): b for b in self.shown}

@@ -115,6 +115,20 @@ export function sellPlan(): Tone[] {
   ];
 }
 
+/** Manual-assist entry: three short high square beeps. Not the paper chime and not the exit bell. */
+export function assistEntryPlan(): Tone[] {
+  return [0, 0.16, 0.32].map((at) => ({ at, freq: 1760, dur: 0.09, gain: 0.8, type: "square" as const }));
+}
+
+/** Manual-assist exit: two mid square beeps, lower than the entry and higher than the paper bell. */
+export function assistExitPlan(): Tone[] {
+  return [0, 0.2].map((at) => ({ at, freq: 440, dur: 0.12, gain: 0.75, type: "square" as const }));
+}
+
+export function playAssistSound(kind: "entry" | "exit", volume = 0.8): void {
+  playPlan(kind === "entry" ? assistEntryPlan() : assistExitPlan(), volume);
+}
+
 /** Pine live alerts: buy / sell / exit. Paper slots keep using playAlertSound(entry|exit). */
 export function playPineAlertSound(kind: "buy" | "sell" | "exit", volume: number): void {
   if (kind === "buy") playPlan(buyPlan(), volume);

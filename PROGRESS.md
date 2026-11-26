@@ -2499,6 +2499,12 @@ Real premiums against the model: slot 4, 2022–2024, 148 real trades ₹9,237 a
 
 A drawdown day-count runs from the exit that set the peak to the exit that makes a new peak, and a year's drawdown starts again at zero. A trade at exactly ₹0 ends a losing streak and is not a win. Slot 4 does not beat slot 2. On real premiums through 2026-06-30, slot 4 is about flat and slot 2 is ahead, with a deeper drawdown. The holdout loses for both, and slot 4 loses a little more. The large 2022–2024 loss is the model. Slots were not changed.
 
+## 27 Nov 2026 — Manual assist for slot 4
+
+A ticket for trading slot 4 by hand. No order path. `LIVE_TRADING` stays false. Paper slots are unchanged. The backend was not started for this change.
+
+When slot 4 fills, a modal, a separate beep, and a browser notification show the time, BUY CE or PE, the contract, bid/ask/LTP, a limit at the ask snapped to the tick, one lot, the −20% / +40% premium stop and target from that limit, and the max loss including charges. The reason is the price-channel rule at the signal bar: the 20-bar high or low, the time that level was set, the other side of the channel, and whether Nifty is above or below session VWAP, plus the last 30 candles with those lines and the signal candle. "I took it" logs the fill and recomputes the stop and target from it, linked to the paper trade. "Skipped" logs late, missed, afraid, or other. An exit popup names the paper reason and records the real close and the P&L after charges. At 15:10 an open real trade gets a reminder. The banner shows today's real trades against a max of 3, today's P&L, STOP at −₹3,000, and a pause at −₹10,000 versus a start balance the user enters. The banner does not stop a paper slot. After 15:30 the trade story shows each real trade against paper, the rule check (inside a minute, SL and TP set, no early exit), and the running table. Assist can be turned off, pointed at another slot, and given a different lot count and loss limits. The journal is under `data/paper/assist/` and is not committed.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

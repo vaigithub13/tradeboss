@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { ENTRY_LENGTH, buyPlan, entryPlan, exitPlan, planLength, sellPlan } from "./sounds";
+import { ENTRY_LENGTH, assistEntryPlan, assistExitPlan, buyPlan, entryPlan, exitPlan, planLength, sellPlan } from "./sounds";
 
 /** Frozen snapshot: paper entry/exit must not change when Pine buy/sell plans are added. */
 const PAPER_ENTRY_FREQS = [523.25, 659.25, 783.99, 1046.5, 523.25, 659.25, 783.99, 1046.5];
@@ -40,5 +40,16 @@ describe("paper alert sounds", () => {
     // Pine tones are different from paper entry
     expect(buyPlan().map((t) => t.freq)).not.toEqual(entryTri.slice(0, 2));
     expect(sellPlan()[0]!.freq).toBeLessThan(buyPlan()[0]!.freq);
+  });
+
+  it("the assist beeps are neither the paper chime nor the paper bell", () => {
+    const paper = new Set([...entryPlan(), ...exitPlan()].map((t) => t.freq));
+    const entry = assistEntryPlan();
+    expect(entry).toHaveLength(3);
+    expect(entry.every((t) => t.type === "square" && !paper.has(t.freq))).toBe(true);
+    const exit = assistExitPlan();
+    expect(exit).toHaveLength(2);
+    expect(exit.every((t) => t.type === "square" && !paper.has(t.freq))).toBe(true);
+    expect(exit[0]!.freq).toBeLessThan(entry[0]!.freq);
   });
 });
