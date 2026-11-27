@@ -29,12 +29,12 @@ export function learnColors(theme: LearnTheme): LearnColors {
   }
   return {
     background: "#ffffff",
-    text: "#1c2330",
-    grid: "#e6e8ee",
-    border: "#d5d8e0",
-    up: "#0b7a43",
-    down: "#c62828",
-    line: "#5c6b82",
+    text: "#374151",
+    grid: "#f3f4f6",
+    border: "#e5e7eb",
+    up: "#16a34a",
+    down: "#dc2626",
+    line: "#64748b",
   };
 }
 
@@ -45,7 +45,7 @@ export function learnChartOptions(theme: LearnTheme, timeframe: Timeframe = "5m"
     layout: {
       background: { type: ColorType.Solid, color: colors.background },
       textColor: colors.text,
-      fontSize: 10,
+      fontSize: 12,
       attributionLogo: false,
     },
     grid: { vertLines: { color: colors.grid }, horzLines: { color: colors.grid } },

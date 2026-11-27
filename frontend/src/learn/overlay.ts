@@ -1,4 +1,7 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
+
+import type { Study, StudyLabel, StudyLayers, StudyNote } from "./study";
+import { recentLabels } from "./study";
 import type {
   IChartApi,
   IPrimitivePaneRenderer,
@@ -61,6 +64,21 @@ export function stackedYs(points: readonly StackPoint[]): number[] {
   return ys;
 }
 
+export interface ChartMark {
+  id: string;
+  kind: string;
+  detail: string;
+  time: number;
+}
+
+interface HitBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  mark: ChartMark;
+}
+
 interface Anchor {
   x: number;
   y: number;
@@ -68,6 +86,7 @@ interface Anchor {
   color: string;
   above: boolean;
   w: number;
+  label?: StudyLabel;
 }
 
 /** Boxes, short BOS / CHoCH tags, and stacked swing labels. Font is 9px. */
@@ -75,6 +94,12 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
   segments: LearnSegment[] = [];
   marks: LearnMark[] = [];
   boxes: LearnBox[] = [];
+  private study: Study | null = null;
+  private layers: StudyLayers | null = null;
+  private labelLimit = 12;
+  private notes: StudyNote[] = [];
+  private selected: string | null = null;
+  hits: HitBox[] = [];
   private chart: IChartApi | null = null;
   private series: ISeriesApi<"Candlestick"> | null = null;
   private requestUpdate: () => void = () => {};
@@ -83,7 +108,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
   constructor() {
     const renderer: IPrimitivePaneRenderer = {
       draw: (target: CanvasRenderingTarget2D) => {
-        target.useMediaCoordinateSpace(({ context }) => this.paint(context));
+        target.useMediaCoordinateSpace(({ context, mediaSize }) => this.paint(context, mediaSize.width, mediaSize.height));
       },
     };
     this.views = [{ renderer: () => renderer, zOrder: () => "top" }];
@@ -113,7 +138,26 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     this.requestUpdate();
   }
 
-  private paint(ctx: CanvasRenderingContext2D): void {
+  setStudy(input: { study: Study; layers: StudyLayers; limit: number; notes: StudyNote[]; selected: string | null }): void {
+    this.study = input.study;
+    this.layers = input.layers;
+    this.labelLimit = input.limit;
+    this.notes = input.notes;
+    this.selected = input.selected;
+    this.requestUpdate();
+  }
+
+  pick(x: number, y: number): ChartMark | null {
+    const hits = this.hits.filter((hit) => x >= hit.x && x <= hit.x + hit.w && y >= hit.y && y <= hit.y + hit.h);
+    hits.sort((a, b) => a.w * a.h - b.w * b.h);
+    return hits[0]?.mark ?? null;
+  }
+
+  private paint(ctx: CanvasRenderingContext2D, width = 0, height = 0): void {
+    if (this.study && this.layers) {
+      this.paintStudy(ctx, width, height);
+      return;
+    }
     const chart = this.chart;
     const series = this.series;
     if (!chart || !series) return;
@@ -171,6 +215,190 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     }
     ctx.restore();
   }
+
+  private paintStudy(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    const chart = this.chart;
+    const series = this.series;
+    const study = this.study;
+    const layers = this.layers;
+    if (!chart || !series || !study || !layers) return;
+    const hits: HitBox[] = [];
+    const xOf = (time: number) => chart.timeScale().timeToCoordinate(time as UTCTimestamp);
+    const yOf = (price: number) => series.priceToCoordinate(price);
+    ctx.save();
+    ctx.lineWidth = 1;
+    if (layers.session) {
+      for (const session of study.sessions) {
+        const x1 = xOf(session.t1);
+        const x2 = xOf(session.t2);
+        if (x1 == null || x2 == null) continue;
+        const left = Math.min(x1, x2);
+        const w = Math.max(Math.abs(x2 - x1), 2);
+        ctx.fillStyle = session.color;
+        ctx.fillRect(left, 0, w, height);
+        ctx.fillStyle = session.text;
+        ctx.font = "600 10px sans-serif";
+        ctx.fillText(session.name, left + 4, 14);
+        hits.push({ x: left, y: 0, w, h: height, mark: { id: `ses-${session.t1}`, kind: "session", detail: session.name, time: session.t1 } });
+      }
+    }
+    const boxes = study.boxes.filter((box) => showBox(box, layers));
+    for (const box of boxes) {
+      const x1 = xOf(box.t1);
+      const x2 = xOf(box.t2);
+      const y1 = yOf(box.p1);
+      const y2 = yOf(box.p2);
+      if (x1 == null || x2 == null || y1 == null || y2 == null) continue;
+      const left = Math.min(x1, x2);
+      const top = Math.min(y1, y2);
+      const w = Math.max(Math.abs(x2 - x1), 6);
+      const h = Math.max(Math.abs(y2 - y1), 4);
+      ctx.fillStyle = box.color;
+      ctx.fillRect(left, top, w, h);
+      ctx.strokeStyle = box.border;
+      ctx.strokeRect(left, top, w, h);
+      hits.push({ x: left, y: top, w, h, mark: { id: box.id, kind: box.kind, detail: box.detail, time: box.confirm } });
+    }
+    const lines = study.lines.filter((line) => (line.kind === "bos" || line.kind === "choch" ? layers.structure : layers.liquidity));
+    for (const line of lines) {
+      const x1 = xOf(line.t1);
+      const x2 = xOf(line.t2);
+      const y = yOf(line.price);
+      if (x1 == null || x2 == null || y == null) continue;
+      const end = Math.max(x1, x2);
+      const start = line.short ? end - 32 : Math.min(x1, x2);
+      ctx.strokeStyle = line.color;
+      ctx.setLineDash(line.dashed ? [4, 3] : []);
+      ctx.beginPath();
+      ctx.moveTo(start, y);
+      ctx.lineTo(Math.max(end, start + 8), y);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.font = "600 10px sans-serif";
+      ctx.fillStyle = line.color;
+      ctx.fillText(line.label, end + 4, y - 3);
+      hits.push({
+        x: start, y: y - 6, w: Math.max(end - start, 8), h: 12,
+        mark: { id: line.id, kind: line.kind, detail: line.detail, time: line.confirm },
+      });
+    }
+    if (layers.round) {
+      ctx.setLineDash([2, 4]);
+      for (const mark of study.rounds) {
+        const y = yOf(mark.price);
+        if (y == null) continue;
+        ctx.strokeStyle = mark.major ? "rgba(100,116,139,0.45)" : "rgba(100,116,139,0.2)";
+        ctx.beginPath();
+        ctx.moveTo(0, y);
+        ctx.lineTo(width, y);
+        ctx.stroke();
+        hits.push({
+          x: 0, y: y - 4, w: width, h: 8,
+          mark: { id: `round-${mark.price}`, kind: "round", detail: `${mark.price}${mark.major ? " (100 points)" : ""}`, time: study.sessions[0]?.t1 ?? 0 },
+        });
+      }
+      ctx.setLineDash([]);
+    }
+    const labels = recentLabels(study.labels.filter((label) => showLabel(label, layers)), this.labelLimit);
+    const anchors: Anchor[] = labels.map((label) => {
+      const x = xOf(label.time);
+      const y = yOf(label.price);
+      return {
+        x: x ?? Number.NaN,
+        y: y ?? Number.NaN,
+        text: label.text,
+        color: label.color,
+        above: label.pos === "above",
+        w: label.text.length * 7 + 8,
+        label,
+      };
+    }).filter((anchor) => Number.isFinite(anchor.x) && Number.isFinite(anchor.y));
+    const ys = stackPills(anchors);
+    ctx.font = "600 11px sans-serif";
+    for (let i = 0; i < anchors.length; i += 1) {
+      const anchor = anchors[i]!;
+      const label = anchor.label!;
+      const y = ys[i] ?? anchor.y;
+      const w = anchor.w;
+      const h = 15;
+      const top = anchor.above ? y - h : y;
+      ctx.fillStyle = label.color;
+      roundRect(ctx, anchor.x, top, w, h, 4);
+      ctx.fill();
+      ctx.fillStyle = label.textColor;
+      ctx.fillText(label.text, anchor.x + 4, top + 11);
+      if (this.selected === label.id) {
+        ctx.strokeStyle = "#b45309";
+        ctx.strokeRect(anchor.x - 1, top - 1, w + 2, h + 2);
+      }
+      hits.push({ x: anchor.x, y: top, w, h, mark: { id: label.id, kind: label.kind, detail: label.detail, time: label.time } });
+    }
+    if (layers.notes) {
+      for (const note of this.notes) {
+        const x = xOf(note.time);
+        const y = yOf(note.price);
+        if (x == null || y == null) continue;
+        ctx.fillStyle = "#b45309";
+        ctx.beginPath();
+        ctx.arc(x, y, 4, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.font = "600 11px sans-serif";
+        ctx.fillText(note.text, x + 8, y - 4);
+        hits.push({ x: x - 4, y: y - 8, w: 80, h: 16, mark: { id: note.id, kind: "note", detail: note.text, time: note.time } });
+      }
+    }
+    this.hits = hits;
+    ctx.restore();
+  }
+}
+
+function showBox(box: { kind: string; state?: string }, layers: StudyLayers): boolean {
+  if (box.kind.startsWith("fvg")) {
+    if (!layers.fvg) return false;
+    const hidden = box.state === "filled" || box.state === "old" || box.state === "filled-small";
+    return !hidden || layers.fvgFilled;
+  }
+  if (box.kind.startsWith("ob")) return layers.ob && box.state !== "broken";
+  if (box.kind.startsWith("amd")) return layers.amd;
+  return true;
+}
+
+function showLabel(label: { kind: string; key?: boolean }, layers: StudyLayers): boolean {
+  if (label.kind === "sweep") return layers.liquidity;
+  if (label.kind === "amd_m") return layers.amd;
+  if (label.kind === "hh" || label.kind === "hl" || label.kind === "lh" || label.kind === "ll" || label.kind === "swing_high" || label.kind === "swing_low") {
+    return layers.swing;
+  }
+  if (label.kind === "engulf_bull" || label.kind === "engulf_bear" || label.kind === "pin_bull" || label.kind === "pin_bear" || label.kind === "doji" || label.kind === "inside") {
+    return layers.pattern && (label.key === true || layers.patternAll);
+  }
+  return false;
+}
+
+function stackPills(points: readonly Anchor[]): number[] {
+  const placed: { x: number; y: number; w: number }[] = [];
+  const ys: number[] = [];
+  for (const point of points) {
+    let y = point.above ? point.y - 16 : point.y + 4;
+    for (let step = 0; step < 8; step += 1) {
+      const hit = placed.some((prev) => Math.abs(prev.x - point.x) < (prev.w + point.w) / 2 && Math.abs(prev.y - y) < 16);
+      if (!hit) break;
+      y += point.above ? -17 : 17;
+    }
+    placed.push({ x: point.x, y, w: point.w });
+    ys.push(y);
+  }
+  return ys;
+}
+
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number): void {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
 }
 
 function drawArrow(ctx: CanvasRenderingContext2D, x: number, y: number, above: boolean, color: string): void {

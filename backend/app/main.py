@@ -21,6 +21,7 @@ from app.routes.drawings import router as drawings_router
 from app.routes.fvg import router as fvg_router
 from app.routes.gex import router as gex_router
 from app.routes.indicators import router as indicators_router
+from app.routes.learn_notes import router as learn_notes_router
 from app.routes.live import router as live_router
 from app.routes.market_view import router as market_view_router
 from app.routes.options import router as options_router
@@ -149,6 +150,7 @@ app.add_middleware(GZipMiddleware, minimum_size=1000)
 app.include_router(backtests_router)
 app.include_router(candles_router)
 app.include_router(indicators_router)
+app.include_router(learn_notes_router)
 app.include_router(drawings_router)
 app.include_router(fvg_router)
 app.include_router(gex_router)

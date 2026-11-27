@@ -287,6 +287,7 @@ describe("labels and overlap", () => {
         sweeps: [],
         sessions: [],
       },
+      study: { sessions: [], boxes: [], lines: [], labels: [], events: [], banner: "", rounds: [] },
     };
     const colors = learnColors("light");
     const on = buildScene(read, defaultToggles(), colors, 12);

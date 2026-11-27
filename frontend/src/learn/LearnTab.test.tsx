@@ -13,11 +13,14 @@ vi.mock("lightweight-charts", () => {
     removePriceLine: vi.fn(),
     attachPrimitive: vi.fn(),
     priceToCoordinate: vi.fn(() => 0),
+    coordinateToPrice: vi.fn(() => 100),
   };
   createChart.mockImplementation(() => ({
     addSeries: () => series,
     applyOptions: vi.fn(),
     remove: vi.fn(),
+    subscribeClick: vi.fn(),
+    subscribeCrosshairMove: vi.fn(),
     timeScale: () => ({ timeToCoordinate: () => 0 }),
   }));
   return {
@@ -29,6 +32,7 @@ vi.mock("lightweight-charts", () => {
   };
 });
 
+import { chartHidden } from "../chart/controls";
 import { LearnTab } from "./LearnTab";
 import { useChartStore } from "../store/chartStore";
 
@@ -51,7 +55,7 @@ describe("Learn tab", () => {
     useChartStore.setState({ symbol: "NIFTY50" });
     render(<LearnTab bars={bars} />);
     expect(createChart).toHaveBeenCalledWith(expect.anything(), expect.objectContaining({
-      layout: expect.objectContaining({ attributionLogo: false, textColor: "#1c2330", fontSize: 10 }),
+      layout: expect.objectContaining({ attributionLogo: false, textColor: "#374151", fontSize: 12 }),
     }));
     const options = createChart.mock.calls[0]?.[1] as {
       timeScale: { tickMarkFormatter: (time: number, type: number) => string };
@@ -63,19 +67,22 @@ describe("Learn tab", () => {
     expect(options.localization.timeFormatter(ist(26, 15, 30))).toContain("15:30");
     expect(options.localization.timeFormatter(ist(26, 9, 15))).not.toContain("03:45");
     expect(screen.getByRole("button", { name: "5m" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByLabelText("Swing labels")).toHaveValue(12);
+    expect(screen.queryByRole("button", { name: "30m" })).toBeNull();
+    expect(screen.getByLabelText("Labels shown")).toHaveValue(12);
     expect(screen.queryByTestId("learn-labels")).toBeNull();
-    expect(screen.queryByTitle("Previous day's high.")).toBeNull();
-    await user.click(screen.getByTestId("learn-legend"));
-    const labels = await screen.findByTestId("learn-labels");
-    expect(labels.textContent).toMatch(/PDH/);
-    expect(screen.getByTitle("Previous day's high.")).toBeTruthy();
-    await user.click(screen.getByTestId("learn-toggle-pdh"));
-    expect(screen.getByTestId("learn-labels").textContent).not.toMatch(/PDH/);
-    await user.click(screen.getByTestId("learn-about"));
+    expect(screen.queryByRole("tab", { name: "Signals" })).toBeNull();
+    expect(screen.getByTestId("learn-banner").textContent).toMatch(/Opening hour — accumulation forming/);
     const credits = screen.getByTestId("learn-credits");
-    expect(credits.textContent).toMatch(/Charts: TradingView Lightweight Charts/);
-    expect(credits.querySelector("a")?.getAttribute("href")).toBe("https://www.apache.org/licenses/LICENSE-2.0");
+    expect(credits.textContent).toMatch(/Read-only study chart — never places trades/);
+    expect(credits.querySelector("a")?.getAttribute("href")).toBe("https://www.tradingview.com/lightweight-charts/");
+    expect(chartHidden("learn")).toBe(true);
+    await user.click(screen.getByRole("tab", { name: "Events" }));
+    await user.click(screen.getAllByTestId("learn-event")[0]!);
+    const card = screen.getByTestId("learn-explain");
+    expect(card.textContent).toMatch(/On this chart/);
+    expect(card.textContent).toMatch(/What it is/);
+    expect(card.textContent).toMatch(/Why it matters/);
+    expect(card.textContent).toMatch(/What to watch next/);
     await user.click(screen.getByRole("button", { name: "SENSEX" }));
     expect(useChartStore.getState().symbol).toBe("NIFTY50");
   });

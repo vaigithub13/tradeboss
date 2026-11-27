@@ -2531,6 +2531,22 @@ The Learn clock is Asia/Kolkata, same as the main chart, so 09:15 and 15:30 read
 
 Liquidity is equal highs and equal lows within 0.1 × ATR(14), plus PDH, PDL, the previous week, and the opening-range edges, tagged EQH, EQL, BSL, or SSL. A sweep is a trade beyond a level that closes back on the same candle or the next. AMD is the opening balance (09:15 until the range exceeds the recent opening-hour average, or 10:15), then the first sweep that closes back inside, then a close through the other side, shaded until a CHoCH against it or 15:15. A session that reaches 15:15 without both is "No AMD today". The textbook box is a learning sketch after that sweep and an opposite CHoCH: the first three-candle gap, or the midpoint, with a stop at the sweep and a target at the opposite liquidity. Target, stop, or neither is written only after the candle that decides it has closed. The new layers are Liquidity, Sweeps, AMD, and Textbook entry. They are computed in the Learn worker from the closed candles.
 
+## 27 Nov 2026 — Learn tab, phase N1
+
+Education only, on the Learn tab. The Chart tab, the Sensex tab, paper slots, the assist, the scanner, and the live path were not changed. No signals and no orders. `LIVE_TRADING` stays false. The backend was not started. AurumBoss was read and not modified.
+
+The Learn tab now uses the study-chart layout: symbol, 1m 3m 5m 15m 1h 1D, Live and Replay, feed status with the last tick in IST, last price and the day's range in points, and a Dark toggle. The footer is the read-only credit line. A banner states the session in one sentence, including "Opening hour — accumulation forming" and "Sweep of PDL failed — no AMD read; stay patient". The Nifty AMD math is unchanged. A failed sweep is only a banner; it does not rewrite the session.
+
+The chart shades Opening hour 09:15–10:15, Midday 10:15–13:30, and Closing 13:30–15:30 IST. The side panel is Layers, Events, Explain, and Notes. Layers group AMD, price action, and context. Fair value gaps, order blocks, and candle patterns follow the AurumBoss definitions, measured in index points. Events are newest first. A click opens the four-part explain card. Notes and "My read of today" are written to `data/learn/notes/notes.json`, which stays untracked, and stay in the browser if that file is unreachable. The forming candle is updated from the tick before the study runs. The study sees closed candles only, and Replay stops at the cursor. Labels are the last N, stacked so they do not sit on each other.
+
+## 27 Nov 2026 — Learn tab, phase N1
+
+Education only, on the Learn tab. The Chart tab, the Sensex tab, paper slots, the assist, the scanner, and the live path were not changed. No signals and no orders. `LIVE_TRADING` stays false. The backend was not started. AurumBoss was read and not modified.
+
+The Learn tab now uses the study-chart layout: symbol, 1m 3m 5m 15m 1h 1D, Live and Replay, feed status with the last tick in IST, last price and the day's range in points, and a Dark toggle. The footer is the read-only credit line. A banner states the session in one sentence, including "Opening hour — accumulation forming" and "Sweep of PDL failed — no AMD read; stay patient". The Nifty AMD math is unchanged. A failed sweep is only a banner; it does not rewrite the session.
+
+The chart shades Opening hour 09:15–10:15, Midday 10:15–13:30, and Closing 13:30–15:30 IST. The side panel is Layers, Events, Explain, and Notes. Layers group AMD, price action, and context. Fair value gaps, order blocks, and candle patterns follow the AurumBoss definitions, measured in index points. Events are newest first. A click opens the four-part explain card. Notes and "My read of today" are written to `data/learn/notes/notes.json`, which stays untracked, and stay in the browser if that file is unreachable. The forming candle is updated from the tick before the study runs. The study sees closed candles only, and Replay stops at the cursor. Labels are the last N, stacked so they do not sit on each other.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

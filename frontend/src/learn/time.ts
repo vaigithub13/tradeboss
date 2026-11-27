@@ -5,6 +5,18 @@ import type { Timeframe } from "../api/client";
 
 const IST_SHIFT = 5.5 * 60 * 60;
 
+export function istClock(epoch: number): { day: string; minutes: number; weekday: number } {
+  const shifted = new Date((epoch + IST_SHIFT) * 1000);
+  const y = shifted.getUTCFullYear();
+  const m = shifted.getUTCMonth() + 1;
+  const d = shifted.getUTCDate();
+  return {
+    day: `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`,
+    minutes: shifted.getUTCHours() * 60 + shifted.getUTCMinutes(),
+    weekday: shifted.getUTCDay(),
+  };
+}
+
 /** Tick-mark type numbers from Lightweight Charts: 0 year, 1 month, 2 day, 3 and 4 time. */
 export function learnTickMarkFormatter(time: unknown, tickMarkType: number): string {
   const kind: TickKind = tickMarkType === 0 ? "year" : tickMarkType === 1 ? "month" : tickMarkType === 2 ? "day" : "time";

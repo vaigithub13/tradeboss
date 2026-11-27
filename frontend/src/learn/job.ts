@@ -1,6 +1,7 @@
 /** One incremental pass. The worker keeps `state` between candle closes. */
 
 import { readLesson, type Lesson } from "./lesson";
+import { buildStudy, type Study } from "./study";
 import { readLevels, type LevelLine } from "./levels";
 import {
   emptyBuild,
@@ -18,12 +19,15 @@ export interface LearnJob {
   rangeSwings: number;
   timeframe?: string;
   symbol?: string;
+  /** Clock for the banner. The forming candle may set this; it is not one of `bars`. */
+  now?: number;
 }
 
 export interface LearnRead {
   structure: Structure;
   levels: LevelLine[];
   lesson: Lesson;
+  study: Study;
 }
 
 export interface JobState {
@@ -48,10 +52,32 @@ export function runJob(job: LearnJob, state: JobState | null): { read: LearnRead
   const build = extendStructure(reusable ? state.build : emptyBuild(job.left, job.right), job.bars);
   const structure: Structure = { swings: build.swings, events: build.events, trend: trendOf(build, job.rangeSwings) };
   const levels = readLevels(job.bars);
+  const lesson = readLesson({ bars: job.bars, structure, levels, timeframe: job.timeframe, symbol: job.symbol });
+  let low = Number.POSITIVE_INFINITY;
+  let high = Number.NEGATIVE_INFINITY;
+  let last = 0;
+  for (const bar of job.bars) {
+    low = Math.min(low, bar.low);
+    high = Math.max(high, bar.high);
+    last = bar.close;
+  }
+  if (!Number.isFinite(low)) {
+    low = 0;
+    high = 0;
+  }
   const read: LearnRead = {
     structure,
     levels,
-    lesson: readLesson({ bars: job.bars, structure, levels, timeframe: job.timeframe, symbol: job.symbol }),
+    lesson,
+    study: buildStudy({
+      bars: job.bars,
+      structure,
+      lesson,
+      now: job.now ?? job.bars[job.bars.length - 1]?.time ?? 0,
+      low,
+      high,
+      last,
+    }),
   };
   return { read, state: { build, prev: job.bars } };
 }
