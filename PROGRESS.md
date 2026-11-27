@@ -2575,6 +2575,10 @@ ICT MODELS draws, on closed candles and in index points: the OB+FVG overlap, bre
 
 An FVG signal inside an OB+FVG zone is FVG★. The others are FVG·. Unicorn and OTE rejections are scored the same way as the other watch-only signals, one per setup per day, and they appear in the what-works split. The header counts down the candle close, the 15:30 close, and the next calendar event. Replay pauses that line.
 
+## 27 Nov 2026 — Learn replay candles
+
+Learn Replay was sending `limit` together with `to`, and the candles API rejected that, so the chart stayed on “Waiting for candles.” Replay now asks for `limit` and `cursor`, the same shape as the main chart, and the pane keeps only candles at or before the cursor. Step and Back move one candle and fetch another page when that candle is not loaded. Opening Replay puts the cursor at 09:15 IST of the last trading day. The Chart tab, paper slots, and the live path were not changed. The backend was not started.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

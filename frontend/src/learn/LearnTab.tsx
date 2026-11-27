@@ -8,7 +8,6 @@ import {
   type UTCTimestamp,
 } from "lightweight-charts";
 
-import { capCandlesQuery } from "../replay/cap";
 import { fetchCandles, type Candle, type Timeframe } from "../api/client";
 import type { LiveView } from "../live/protocol";
 import { subscribeLearnBars, useLiveStore } from "../store/liveStore";
@@ -23,6 +22,7 @@ import { pushLiveBar } from "./liveBars";
 import { loadNotes, saveNotes } from "./notes";
 import { PracticePanel } from "./PracticePanel";
 import { PRACTICE_BARS, type PracticeRow } from "./practice";
+import { backReplay, lastSessionOpen, learnReplayQuery, stepReplay } from "./replay";
 import { LearnOverlay, type ChartMark } from "./overlay";
 import { loadSignalSummary, runSignalReview, type SignalsSummary } from "./signalLog";
 import { SignalsPanel } from "./SignalsPanel";
@@ -104,6 +104,9 @@ export function LearnTab({
   const [labelSwings, setLabelSwings] = useState(DEFAULT_LABEL_SWINGS);
   const [replay, setReplay] = useState(false);
   const [cursor, setCursor] = useState<number | null>(null);
+  const [seek, setSeek] = useState(0);
+  const cursorRef = useRef<number | null>(null);
+  cursorRef.current = cursor;
   const [candles, setCandles] = useState<LearnBar[]>(bars ?? []);
   const [read, setRead] = useState<LearnRead | null>(null);
   const [tab, setTab] = useState<"layers" | "events" | "explain" | "notes" | "ict" | "signals" | "practice">("layers");
@@ -243,12 +246,14 @@ export function LearnTab({
       return;
     }
     const ac = new AbortController();
-    const base = { symbol, timeframe, sessions: ["normal" as const], limit: 400 };
-    const query = replay && cursor != null ? capCandlesQuery({ ...base, to: cursor }, cursor) : base;
+    const at = cursorRef.current;
+    const query = replay && at != null
+      ? learnReplayQuery({ symbol, timeframe, sessions: ["normal"], limit: 400 }, at)
+      : { symbol, timeframe, sessions: ["normal" as const], limit: 400 };
     void fetchCandles(query, ac.signal)
       .then((page) => {
-        if (ac.signal.aborted) return;
-        const next = shownBars(page.candles.map(toBar), replay ? cursor : null);
+        if (ac.signal.aborted || (replay && cursorRef.current !== at)) return;
+        const next = shownBars(page.candles.map(toBar), replay ? at : null);
         seriesRef.current?.setData(next.map((bar) => ({
           time: bar.time as UTCTimestamp,
           open: bar.open ?? bar.close,
@@ -262,7 +267,7 @@ export function LearnTab({
         if (!ac.signal.aborted) setCandles([]);
       });
     return () => ac.abort();
-  }, [bars, symbol, timeframe, replay, cursor]);
+  }, [bars, symbol, timeframe, replay, seek]);
 
   useEffect(() => {
     if (bars || replay) return;
@@ -292,8 +297,9 @@ export function LearnTab({
   useEffect(() => {
     if (timeframe === "5m" || bars) return;
     const ac = new AbortController();
-    const base = { symbol, timeframe: "5m" as const, sessions: ["normal" as const], limit: 800 };
-    const query = replay && cursor != null ? capCandlesQuery({ ...base, to: cursor }, cursor) : base;
+    const query = replay && cursor != null
+      ? learnReplayQuery({ symbol, timeframe: "5m", sessions: ["normal"], limit: 800 }, cursor)
+      : { symbol, timeframe: "5m" as const, sessions: ["normal" as const], limit: 800 };
     void fetchCandles(query, ac.signal)
       .then((page) => {
         if (ac.signal.aborted) return;
@@ -435,7 +441,8 @@ export function LearnTab({
         <button type="button" className="ghost" aria-pressed={!replay} onClick={() => { setReplay(false); setCursor(null); }}>Live</button>
         <button type="button" className="ghost" aria-pressed={replay} data-testid="learn-replay" onClick={() => {
           setReplay(true);
-          setCursor(Math.floor(Date.now() / 1000));
+          setCursor(lastSessionOpen(Math.floor(Date.now() / 1000)));
+          setSeek((n) => n + 1);
         }}>Replay</button>
         <div className="head-right">
           <span className="status">
@@ -486,10 +493,50 @@ export function LearnTab({
         <div className="replaybar">
           <input aria-label="Replay cursor" type="datetime-local" value={toIstInput(cursor)} onChange={(e) => {
             const next = fromIstInput(e.target.value);
-            if (next != null) setCursor(next);
+            if (next == null) return;
+            setCursor(next);
+            setSeek((n) => n + 1);
           }} />
-          <button type="button" className="ghost" onClick={() => setCursor((value) => (value ?? 0) - (TF_SECONDS[timeframe] ?? 60))}>Back</button>
-          <button type="button" className="ghost" onClick={() => setCursor((value) => (value ?? 0) + (TF_SECONDS[timeframe] ?? 60))}>Step</button>
+          <button type="button" className="ghost" onClick={() => {
+            if (cursor == null) return;
+            const move = backReplay(candles, cursor);
+            if (move.kind === "move") {
+              setCursor(move.cursor);
+              return;
+            }
+            if (move.kind !== "older" || bars) return;
+            void fetchCandles(learnReplayQuery({
+              symbol, timeframe, sessions: ["normal"], limit: 400, before: move.before,
+            }, cursor)).then((page) => {
+              const older = page.candles.map(toBar).filter((item) => item.time < move.before);
+              const prev = older[older.length - 1];
+              if (!prev) return;
+              setCandles((curr) => {
+                const seen = new Set(curr.map((item) => item.time));
+                return [...older.filter((item) => !seen.has(item.time)), ...curr].sort((a, b) => a.time - b.time);
+              });
+              setCursor(prev.time);
+            }).catch(() => {});
+          }}>Back</button>
+          <button type="button" className="ghost" onClick={() => {
+            if (cursor == null) return;
+            const move = stepReplay(candles, cursor);
+            if (move.kind === "move") {
+              setCursor(move.cursor);
+              return;
+            }
+            if (move.kind !== "newer" || bars) return;
+            void fetchCandles(learnReplayQuery({
+              symbol, timeframe, sessions: ["normal"], limit: 1, after: move.after,
+            }, move.after + 8 * 24 * 60 * 60)).then((page) => {
+              const bar = page.candles.map(toBar).find((item) => item.time > move.after);
+              if (!bar) return;
+              setCandles((prev) => (
+                prev.some((item) => item.time === bar.time) ? prev : [...prev, bar].sort((a, b) => a.time - b.time)
+              ));
+              setCursor(bar.time);
+            }).catch(() => {});
+          }}>Step</button>
         </div>
       )}
       <div className="body">

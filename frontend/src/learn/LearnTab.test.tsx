@@ -1,12 +1,13 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const createChart = vi.hoisted(() => vi.fn());
+const setData = vi.hoisted(() => vi.fn());
 
 vi.mock("lightweight-charts", () => {
   const series = {
-    setData: vi.fn(),
+    setData,
     update: vi.fn(),
     applyOptions: vi.fn(),
     createPriceLine: vi.fn(() => ({})),
@@ -34,6 +35,8 @@ vi.mock("lightweight-charts", () => {
 
 import { chartHidden } from "../chart/controls";
 import { LearnTab } from "./LearnTab";
+import { lastSessionOpen } from "./replay";
+import { toIstInput } from "./time";
 import { useChartStore } from "../store/chartStore";
 
 function ist(day: number, hour: number, minute: number): number {
@@ -92,5 +95,34 @@ describe("Learn tab", () => {
     expect(card.textContent).toMatch(/What to watch next/);
     await user.click(screen.getByRole("button", { name: "SENSEX" }));
     expect(useChartStore.getState().symbol).toBe("NIFTY50");
+  });
+
+  it("shows candles up to the replay cursor and steps one at a time", async () => {
+    const user = userEvent.setup();
+    const series = [15, 20, 25, 30, 35, 40, 45, 50].map((minute, index) => ({
+      time: ist(26, 9, minute),
+      open: 100,
+      high: 110 + index,
+      low: 90,
+      close: 100 + index,
+    }));
+    series.push({ time: ist(26, 10, 0), open: 120, high: 130, low: 110, close: 125 });
+    setData.mockClear();
+    render(<LearnTab bars={series} />);
+    await user.click(screen.getByTestId("learn-replay"));
+    expect(screen.getByLabelText("Replay cursor")).toHaveValue(
+      toIstInput(lastSessionOpen(Math.floor(Date.now() / 1000))),
+    );
+    fireEvent.change(screen.getByLabelText("Replay cursor"), { target: { value: "2026-11-26T09:45" } });
+    const drawn = () => (setData.mock.calls.at(-1)?.[0] as { time: number }[]).map((bar) => bar.time);
+    const until = (minute: number) => series.filter((bar) => bar.time <= ist(26, 9, minute)).map((bar) => bar.time);
+    expect(drawn()).toEqual(until(45));
+    expect(drawn().some((time) => time > ist(26, 9, 45))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Step" }));
+    expect(drawn()).toEqual(until(50));
+    expect(drawn()).toHaveLength(until(45).length + 1);
+    expect(drawn().some((time) => time > ist(26, 9, 50))).toBe(false);
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(drawn()).toEqual(until(45));
   });
 });
