@@ -91,8 +91,12 @@ export function crtMarks(m5: readonly LearnBar[], now: number, chart: readonly L
         }
       }
     }
+    const latest = shown.at(-1);
     for (const pair of shown) {
       const id = `crt-${tf}-${pair.c2.t}`;
+      // The newest set, and a confirmed CRT whose target is still open, stay current.
+      const open = pair.status === "crt" && pair.hitAt == null && now < pair.c3End;
+      const old = pair !== latest && !open;
       const tip = studyOf(pair, m5);
       const lineEnd = Math.min(pair.c2.end - M5, lastChart);
       for (const [price, word] of [[pair.hi, "high"], [pair.lo, "low"], [pair.mid, "50%"]] as const) {
@@ -100,7 +104,7 @@ export function crtMarks(m5: readonly LearnBar[], now: number, chart: readonly L
           id: `${id}-${word}`, kind: "crt_lvl", t1: snap(pair.c1.t), t2: snap(Math.max(lineEnd, pair.c1.t)), price,
           color: CRT_CYAN, dashed: word === "50%", label: `${name} ${word}`,
           detail: `${name} candle-1 range ${fmt(pair.lo)}–${fmt(pair.hi)}, 50% ${fmt(pair.mid)}. Candle 2 must sweep one side and close back inside.`,
-          confirm: pair.c1.end, short: false,
+          confirm: pair.c1.end, short: false, old,
         });
       }
       if (pair.swept === "high" || pair.swept === "low") {
@@ -109,7 +113,7 @@ export function crtMarks(m5: readonly LearnBar[], now: number, chart: readonly L
           id: `${id}-sweep`, kind: "crt_sweep", time: snap((pair.sweepAt ?? pair.c2.t) - M5), price: pair.ext ?? (high ? pair.hi : pair.lo),
           text: "CRT sweep", color: "#cffafe", textColor: "#155e75", pos: high ? "above" : "below",
           detail: `Candle 2 took the ${name} candle-1 ${pair.swept} ${fmt(high ? pair.hi : pair.lo)} (went to ${fmt(pair.ext ?? 0)}).`,
-          confirm: pair.sweepAt ?? pair.c2.t,
+          confirm: pair.sweepAt ?? pair.c2.t, old,
         });
       }
       if (pair.status === "crt" && pair.target != null) {
@@ -118,14 +122,14 @@ export function crtMarks(m5: readonly LearnBar[], now: number, chart: readonly L
           id: `${id}-ok`, kind: "crt_ok", time: snap(pair.c2.end - M5), price: pair.ext ?? pair.close2,
           text: `CRT ✓ ${up ? "↑" : "↓"}`, color: CRT_CYAN, textColor: "#ffffff", pos: up ? "below" : "above",
           detail: `${name} confirmed: candle 2 swept the ${pair.swept} and closed back inside at ${fmt(pair.close2)}. Target = the other side ${fmt(pair.target)}.${pair.hitAt != null ? " Target reached." : ""}`,
-          confirm: pair.c2.end, tip,
+          confirm: pair.c2.end, tip, old,
         });
         const end = Math.min(pair.hitAt ?? Math.min(pair.c3End, now), lastChart + M5);
         out.lines.push({
           id: `${id}-target`, kind: "crt_target", t1: snap(pair.c2.end), t2: snap(Math.max(end - M5, pair.c2.end)), price: pair.target,
           color: CRT_CYAN, dashed: true, label: pair.hitAt != null ? "CRT target ✓" : "CRT target",
           detail: `Target of the ${name}: ${fmt(pair.target)}${pair.hitAt != null ? " — reached" : ""}.`,
-          confirm: pair.c2.end, short: false, tip,
+          confirm: pair.c2.end, short: false, tip, old,
         });
       }
     }

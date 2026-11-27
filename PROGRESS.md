@@ -2606,3 +2606,13 @@ Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.
 - Candle snapshots are 15m, N=8, horizon 4 bars, library `2026-11-25.n8`. The window stays inside the session. A 30-bar window is no longer used, because it always crossed the overnight gap and the walk-forward study had no matches for it.
 - 09:30 has one closed 15m bar and 10:15 has four, so both candle lines are recorded as "insufficient window" and are not calls. Similar days still run at those two clocks.
 - Each line stores timeframe, N, horizon, and library version. The review totals are split by that settings key, so an older N=30 line is not averaged with these. An insufficient window is counted beside its version and left out of the hit rate.
+
+## 28 Nov 2026 — Learn zones, labels, and hover
+
+Learn tab only. Paper slots, the assist, orders, and AurumBoss were not touched. The backend was not started.
+
+Key zones now merge levels only within 0.25 × ATR(14) of the chart timeframe, and a zone is never wider than max(0.5 × ATR(14), 0.1% of price). A wider cluster is split, and each part keeps its own sources and strength dots. On 27 Nov NIFTY 5m (ATR 22.6, last 25,593.85) the drawn resistance was 25,702–25,795 (93 pts) and the support 25,467–25,550 (83 pts), with a widest zone of 101 pts. Now the widest zone is 7.2 pts against a 25.6-pt cap. The drawn zones are S 25,345, R 25,644, and R 25,721. The plan pills read the same zones. The test uses the 400-bar 27 Nov window saved in `frontend/src/learn/fixtures/`.
+
+Level-line labels (75m and D1 CRT high, 50%, low, target, EQ 50%) now sit at the right edge with their price, in one column with the PDH/PDL axis tags, the zone prices, and the clock. Labels within 14 px are nudged apart. Swing, pattern, and other candle pills stay on their candle and move off a right-edge label, or are dropped if they cannot. BOS and CHoCH keep their short tag at the break. Only the newest CRT set per timeframe is drawn, plus a confirmed CRT whose target is still open. "Show older CRT ranges" in Layers shows the rest, faded.
+
+AurumBoss Learn (Lightweight Charts v4.2.3) uses the built-in crosshair in Normal mode. Its price label is on the right scale, with no left scale and no OHLC legend. The Learn chart here now shows the hovered price in a tag on the left edge and a top-left legend with the IST time and O/H/L/C of the hovered candle. The legend shows the latest candle when the mouse is off the chart. The right price scale is unchanged.

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -138,5 +138,19 @@ describe("Learn tab", () => {
     expect((screen.getByTestId("learn-layer-fvg") as HTMLInputElement).checked).toBe(true);
     expect((screen.getByTestId("learn-tag-eq") as HTMLInputElement).checked).toBe(true);
     expect(localStorage.getItem("tradeboss-learn-view")).toBe("full");
+  });
+
+  it("shows the latest candle in the legend, and the hovered candle and price on the left while hovering", () => {
+    render(<LearnTab bars={bars} />);
+    expect(screen.getByTestId("learn-legend").textContent).toContain("O 112.00  H 115.00  L 100.00  C 108.00");
+    expect(screen.queryByTestId("learn-hover-price")).toBeNull();
+    const chart = createChart.mock.results.at(-1)!.value as { subscribeCrosshairMove: { mock: { calls: [(p: unknown) => void][] } } };
+    const move = chart.subscribeCrosshairMove.mock.calls.at(-1)![0];
+    act(() => move({ point: { x: 10, y: 50 }, time: bars[2]!.time }));
+    expect(screen.getByTestId("learn-legend").textContent).toContain("O 100.00  H 120.00  L 88.00  C 112.00");
+    expect(screen.getByTestId("learn-hover-price").textContent).toBe("100.00");
+    act(() => move({ point: undefined }));
+    expect(screen.queryByTestId("learn-hover-price")).toBeNull();
+    expect(screen.getByTestId("learn-legend").textContent).toContain("C 108.00");
   });
 });

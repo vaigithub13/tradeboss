@@ -16,6 +16,7 @@ import { sessionMarkdown } from "./exportSession";
 import { IctPanel } from "./IctPanel";
 import { explainCard, explainTip } from "./explainCards";
 import { eventsOn, todayLine } from "./events";
+import { hoverPrice, legendBar, legendText, type HoverPoint } from "./hover";
 import { runJob, type JobState, type LearnRead } from "./job";
 import { DEFAULT_LABEL_SWINGS } from "./labels";
 import { pushLiveBar } from "./liveBars";
@@ -69,6 +70,7 @@ const LAYER_GROUPS: { title: string; rows: { key: keyof StudyLayers; label: stri
       { key: "killzones", label: "Killzones + Silver Bullet (adapted for NSE)" },
       { key: "gaps", label: "NDOG and NWOG" },
       { key: "crt", label: "CRT (75m / Daily)" },
+      { key: "crtOlder", label: "Show older CRT ranges" },
     ],
   },
   { title: "Context", rows: [{ key: "zones", label: "Key zones" }, { key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }, { key: "events", label: "Calendar events" }] },
@@ -131,6 +133,7 @@ export function LearnTab({
   const [reviewNote, setReviewNote] = useState<string | null>(null);
   const [picked, setPicked] = useState<ChartMark | null>(null);
   const [tip, setTip] = useState<string | null>(null);
+  const [hover, setHover] = useState<HoverPoint | null>(null);
   const [notes, setNotes] = useState<StudyNote[]>([]);
   const [reads, setReads] = useState<Record<string, string>>({});
   const [draft, setDraft] = useState("");
@@ -196,8 +199,15 @@ export function LearnTab({
     const onMove = (param: MouseEventParams) => {
       if (!param.point) {
         setTip(null);
+        setHover(null);
         return;
       }
+      const price = series.coordinateToPrice(param.point.y);
+      setHover(price == null ? null : {
+        time: typeof param.time === "number" ? param.time : null,
+        price,
+        y: param.point.y,
+      });
       const hit = overlay.pick(param.point.x, param.point.y);
       setTip(hit ? (hit.tip ?? explainTip(hit.kind)) : null);
     };
@@ -396,8 +406,9 @@ export function LearnTab({
       tags: read ? mergeTags(tagInputs(read.study.lines, read.study.rounds, tagToggles, read.study.atr, read.study.last), read.study.atr, read.study.last).shown : [],
       showFaint: preset === "full",
       countdown: axisCountdown(clock, TF_SECONDS[timeframe] ?? 300, replay),
+      background: theme === "dark" ? "rgba(12,16,22,0.85)" : "rgba(255,255,255,0.85)",
     });
-  }, [clock, eventMarks, ictFocus, labelSwings, layers, notes, picked, preset, read, replay, symbol, tagToggles, timeframe]);
+  }, [clock, eventMarks, ictFocus, labelSwings, layers, notes, picked, preset, read, replay, symbol, tagToggles, theme, timeframe]);
 
   const dayKey = istClock((replay && cursor != null ? cursor : chartBars.at(-1)?.time) ?? Math.floor(Date.now() / 1000)).day;
   useEffect(() => { setReadDraft(reads[dayKey] ?? ""); }, [dayKey, reads]);
@@ -567,6 +578,14 @@ export function LearnTab({
       <div className="body">
         <div className="chartwrap">
           <div ref={host} className="chart" data-testid="learn-chart" />
+          <div className="legend" data-testid="learn-legend">
+            {legendText(legendBar(shownBars(chartBars, replay ? cursor : null), hover?.time ?? null))}
+          </div>
+          {hover && (
+            <div className="hoverprice" data-testid="learn-hover-price" style={{ top: Math.max(0, hover.y - 9) }}>
+              {hoverPrice(hover.price)}
+            </div>
+          )}
           {tip && <div className="tip" data-testid="learn-tip">{tip}</div>}
         </div>
         <aside>

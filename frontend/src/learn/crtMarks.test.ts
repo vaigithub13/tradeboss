@@ -65,4 +65,24 @@ describe("CRT chart marks", () => {
     const marks = crtMarks(m5, t(13, 0), m5, 3600);
     expect(marks.lines.some((line) => line.label.startsWith("75m"))).toBe(false);
   });
+
+  it("keeps only the most recent 75m CRT set current; older sets are flagged old", () => {
+    const m5 = bars();
+    const marks = crtMarks(m5, t(13, 0), m5, 300);
+    const first = marks.lines.filter((line) => line.id.startsWith(`crt-75m-${t(10, 30)}`));
+    const live = marks.lines.filter((line) => line.id.startsWith(`crt-75m-${t(13, 0)}`));
+    expect(first.length).toBeGreaterThan(0);
+    expect(first.every((line) => line.old === true)).toBe(true);
+    expect(live.length).toBe(3);
+    expect(live.every((line) => !line.old)).toBe(true);
+    expect(marks.labels.filter((label) => label.id.startsWith(`crt-75m-${t(10, 30)}`)).every((label) => label.old)).toBe(true);
+  });
+
+  it("keeps a confirmed CRT current while its target is still open", () => {
+    const m5 = bars().filter((bar) => bar.time < t(12, 15));
+    const marks = crtMarks(m5, t(12, 15), m5, 300);
+    const ok = marks.lines.filter((line) => line.id.startsWith(`crt-75m-${t(10, 30)}`));
+    expect(ok.some((line) => line.kind === "crt_target")).toBe(true);
+    expect(ok.every((line) => !line.old)).toBe(true);
+  });
 });

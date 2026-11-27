@@ -1,6 +1,7 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 
-import { planEdges, placePatternPill, signalPill, studyTip, zoneStudy } from "./chartLook";
+import { planEdges, placePatternPill, signalPill, studyTip, zoneStudy, type Rect } from "./chartLook";
+import { clearOf, edgeText, stackEdge } from "./edgeLabels";
 import { sourceTags, strengthDots } from "./zones";
 import type { WatchSignal } from "./signals";
 import { nearPrice } from "./sanity";
@@ -88,6 +89,17 @@ interface HitBox {
   mark: ChartMark;
 }
 
+/** A label pinned to the right edge of the pane: line names, axis tags, zone prices, the clock. */
+interface EdgeItem {
+  y: number;
+  text: string;
+  color: string;
+  pill: boolean;
+  ink?: string;
+  alpha?: number;
+  mark?: ChartMark;
+}
+
 interface Anchor {
   x: number;
   y: number;
@@ -114,6 +126,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
   private tags: AxisTag[] = [];
   private showFaint = false;
   private countdown: string | null = null;
+  private background = "rgba(255,255,255,0.85)";
   hits: HitBox[] = [];
   private chart: IChartApi | null = null;
   private series: ISeriesApi<"Candlestick"> | null = null;
@@ -165,6 +178,8 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     tags?: AxisTag[];
     showFaint?: boolean;
     countdown?: string | null;
+    /** Backing for right-edge text, so a label stays readable over a candle. */
+    background?: string;
   }): void {
     this.study = input.study;
     this.layers = input.layers;
@@ -177,6 +192,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     this.tags = input.tags ?? [];
     this.showFaint = input.showFaint ?? false;
     this.countdown = input.countdown ?? null;
+    if (input.background) this.background = input.background;
     this.requestUpdate();
   }
 
@@ -360,7 +376,8 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
       }
       hits.push({ x: left, y: top, w, h: band, mark: { id: box.id, kind: box.kind, detail: box.detail, time: box.confirm } });
     }
-    const lines = study.lines.filter((line) => showLine(line, layers) && !LIQUIDITY_KIND.has(line.kind));
+    const edge: EdgeItem[] = [];
+    const lines = study.lines.filter((line) => showLine(line, layers) && !LIQUIDITY_KIND.has(line.kind) && (!line.old || layers.crtOlder));
     for (const line of lines) {
       const y = yOf(line.price);
       if (y == null) continue;
@@ -370,22 +387,28 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
       if (line.kind !== "eq" && (x1 == null || x2 == null)) continue;
       const end = line.kind === "eq" ? width : Math.max(x1 ?? 0, x2 ?? 0);
       const start = line.kind === "eq" ? 0 : line.short ? end - 32 : Math.min(x1 ?? 0, x2 ?? 0);
+      const alpha = line.old ? 0.4 : 1;
+      ctx.globalAlpha = alpha;
       ctx.strokeStyle = line.color;
-      ctx.lineWidth = structure ? 1 : 1;
+      ctx.lineWidth = 1;
       ctx.setLineDash(line.dashed || line.kind === "eq" ? [4, 3] : []);
       ctx.beginPath();
       ctx.moveTo(start, y);
       ctx.lineTo(Math.max(end, start + 8), y);
       ctx.stroke();
       ctx.setLineDash([]);
-      ctx.font = structure ? "600 9px sans-serif" : "600 10px sans-serif";
-      ctx.fillStyle = line.color;
-      const lineText = line.kind === "eq" ? "EQ 50%" : line.label.slice(0, 12);
-      ctx.fillText(lineText, line.kind === "eq" ? width - 52 : end + 4, y - 3);
-      hits.push({
-        x: start, y: y - 6, w: Math.max(end - start, 8), h: 12,
-        mark: { id: line.id, kind: line.kind, detail: line.detail, time: line.confirm, tip: line.tip },
-      });
+      ctx.globalAlpha = 1;
+      const mark: ChartMark = { id: line.id, kind: line.kind, detail: line.detail, time: line.confirm, tip: line.tip };
+      if (structure) {
+        // BOS / CHoCH keep their short arrow tag at the break.
+        ctx.font = "600 9px sans-serif";
+        ctx.fillStyle = line.color;
+        ctx.fillText(line.label.slice(0, 12), end + 4, y - 3);
+      } else {
+        // Every other level line is named at the right edge only, never over the candles.
+        edge.push({ y, text: line.kind === "eq" ? edgeText("EQ 50%", line.price) : edgeText(line.label, line.price), color: line.color, pill: false, alpha, mark });
+      }
+      hits.push({ x: start, y: y - 6, w: Math.max(end - start, 8), h: 12, mark });
     }
     if (layers.round) {
       ctx.setLineDash([2, 4]);
@@ -403,47 +426,6 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
         });
       }
       ctx.setLineDash([]);
-    }
-    const labels = recentLabels(study.labels.filter((label) => showLabel(label, layers)), this.labelLimit);
-    const anchors: Anchor[] = labels.map((label) => {
-      const x = xOf(label.time);
-      const y = yOf(label.price);
-      return {
-        x: x ?? Number.NaN,
-        y: y ?? Number.NaN,
-        text: label.text,
-        color: label.color,
-        above: label.pos === "above",
-        w: label.text.length * 7 + 8,
-        label,
-      };
-    }).filter((anchor) => Number.isFinite(anchor.x) && Number.isFinite(anchor.y));
-    const ys = stackPills(anchors);
-    for (let i = 0; i < anchors.length; i += 1) {
-      const anchor = anchors[i]!;
-      const label = anchor.label!;
-      const pattern = label.kind.startsWith("engulf") || label.kind.startsWith("pin") || label.kind === "doji" || label.kind === "inside";
-      const swing = label.kind === "hh" || label.kind === "hl" || label.kind === "lh" || label.kind === "ll" || label.kind === "swing_high" || label.kind === "swing_low";
-      const upSwing = label.kind === "hh" || label.kind === "hl" || label.kind === "swing_low";
-      const placed = pattern
-        ? placePatternPill(anchor.x, anchor.above ? anchor.y : anchor.y - 10, anchor.above ? anchor.y + 10 : anchor.y, anchor.above)
-        : null;
-      const y = placed ? placed.y : (ys[i] ?? anchor.y);
-      const x = placed ? placed.x : anchor.x;
-      const w = placed ? placed.w : swing ? anchor.text.length * 5.4 + 8 : anchor.w;
-      const h = swing ? 13 : 15;
-      const top = placed ? y : anchor.above ? y - h : y;
-      ctx.font = swing || pattern ? "600 9px sans-serif" : "600 11px sans-serif";
-      ctx.fillStyle = swing ? (upSwing ? "#dcfce7" : "#fee2e2") : label.color;
-      roundRect(ctx, x, top, w, h, 4);
-      ctx.fill();
-      ctx.fillStyle = swing ? (upSwing ? "#166534" : "#991b1b") : label.textColor;
-      ctx.fillText(label.text, x + 4, top + (swing ? 10 : 11));
-      if (this.selected === label.id) {
-        ctx.strokeStyle = "#b45309";
-        ctx.strokeRect(x - 1, top - 1, w + 2, h + 2);
-      }
-      hits.push({ x, y: top, w, h, mark: { id: label.id, kind: label.kind, detail: label.detail, time: label.time, tip: label.tip } });
     }
     if (layers.events) {
       ctx.font = "600 10px sans-serif";
@@ -517,6 +499,8 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
         hits.push({ x: x - 4, y: y - 8, w: 80, h: 16, mark: { id: note.id, kind: "note", detail: note.text, time: note.time } });
       }
     }
+    let edgeTop = 4;
+    let edgeBottom = height - 40;
     if (layers.zones) {
       const drawn = study.zones
         .filter((item) => item.visible || (item.faint && this.showFaint))
@@ -541,9 +525,11 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
           ? "price inside zone"
           : `${side} · ${sourceTags(zone.sources)} ${strengthDots(zone.strength)}`;
         ctx.fillText(caption, 6, top + Math.min(12, band - 1));
-        const prices = `${Math.round(zone.low).toLocaleString("en-IN")}–${Math.round(zone.high).toLocaleString("en-IN")}`;
-        ctx.fillText(prices, width - prices.length * 6 - 8, top + Math.min(12, band - 1));
+        const prices = Math.round(zone.low) === Math.round(zone.high)
+          ? Math.round(zone.low).toLocaleString("en-IN")
+          : `${Math.round(zone.low).toLocaleString("en-IN")}–${Math.round(zone.high).toLocaleString("en-IN")}`;
         ctx.globalAlpha = 1;
+        edge.push({ y: top + band / 2, text: prices, color: ink, pill: false, alpha: zone.faint ? 0.45 : 1 });
         const reading = zoneStudy(zone, study.last);
         hits.push({
           x: 0, y: top, w: width, h: band,
@@ -568,27 +554,92 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
           },
         });
       }
+      if (topSlot) edgeTop = 6 + topSlot * 18 + 2;
+      if (bottomSlot) edgeBottom = height - 52 - (bottomSlot - 1) * 18 - 10;
     }
     if (this.countdown) {
       const y = yOf(study.last);
-      if (y != null) pill(ctx, width - this.countdown.length * 6.2 - 14, y + 10, this.countdown, "#b45309", "#ffffff");
+      if (y != null) edge.push({ y: y + 17, text: this.countdown, color: "#b45309", ink: "#ffffff", pill: true });
     }
-    let tagY = -999;
-    for (const tag of [...this.tags].sort((a, b) => b.price - a.price)) {
-      const yRaw = yOf(tag.price);
-      if (yRaw == null) continue;
-      const y = Math.abs(yRaw - tagY) < 14 ? tagY + 14 : yRaw;
-      tagY = y;
-      const text = tag.text.slice(0, 16);
-      const w = text.length * 6.2 + 8;
+    for (const tag of this.tags) {
+      const y = yOf(tag.price);
+      if (y == null) continue;
       const red = tag.kinds.includes("pd") && /PDH|PWH|OR high/.test(tag.text);
       const green = tag.kinds.includes("pd") && /PDL|PWL|OR low/.test(tag.text);
-      const color = red ? "#dc2626" : green ? "#16a34a" : "#7c3aed";
-      pill(ctx, width - w - 6, y - 8, text, color, "#ffffff");
-      hits.push({
-        x: width - w - 6, y: y - 8, w, h: 15,
+      edge.push({
+        y, text: tag.text.slice(0, 16), color: red ? "#dc2626" : green ? "#16a34a" : "#7c3aed", ink: "#ffffff", pill: true,
         mark: { id: `tag-${tag.price}`, kind: "axis", detail: tag.detail, time: 0 },
       });
+    }
+    // One right-edge column: labels within 14 px are nudged apart instead of overlapping.
+    const edgeYs = stackEdge(edge.map((item) => item.y), 14, edgeTop + 7, edgeBottom);
+    const edgeRects: Rect[] = edge.map((item, i) => {
+      const w = item.text.length * 6.2 + 8;
+      return { x: width - w - 6, y: edgeYs[i]! - 7, w, h: 14 };
+    });
+    const labels = recentLabels(study.labels.filter((label) => showLabel(label, layers) && (!label.old || layers.crtOlder)), this.labelLimit);
+    const anchors: Anchor[] = labels.map((label) => {
+      const x = xOf(label.time);
+      const y = yOf(label.price);
+      return {
+        x: x ?? Number.NaN,
+        y: y ?? Number.NaN,
+        text: label.text,
+        color: label.color,
+        above: label.pos === "above",
+        w: label.text.length * 7 + 8,
+        label,
+      };
+    }).filter((anchor) => Number.isFinite(anchor.x) && Number.isFinite(anchor.y));
+    const ys = stackPills(anchors);
+    for (let i = 0; i < anchors.length; i += 1) {
+      const anchor = anchors[i]!;
+      const label = anchor.label!;
+      const pattern = label.kind.startsWith("engulf") || label.kind.startsWith("pin") || label.kind === "doji" || label.kind === "inside";
+      const swing = label.kind === "hh" || label.kind === "hl" || label.kind === "lh" || label.kind === "ll" || label.kind === "swing_high" || label.kind === "swing_low";
+      const upSwing = label.kind === "hh" || label.kind === "hl" || label.kind === "swing_low";
+      const placed = pattern
+        ? placePatternPill(anchor.x, anchor.above ? anchor.y : anchor.y - 10, anchor.above ? anchor.y + 10 : anchor.y, anchor.above)
+        : null;
+      const y = placed ? placed.y : (ys[i] ?? anchor.y);
+      const x = placed ? placed.x : anchor.x;
+      const w = placed ? placed.w : swing ? anchor.text.length * 5.4 + 8 : anchor.w;
+      const h = swing ? 13 : 15;
+      const wanted = placed ? y : anchor.above ? y - h : y;
+      // Candle pills stay on their candle but never cover a right-edge line label.
+      const clear = clearOf({ x, y: wanted, w, h }, edgeRects, anchor.above);
+      if (!clear) continue;
+      const top = clear.y;
+      ctx.globalAlpha = label.old ? 0.4 : 1;
+      ctx.font = swing || pattern ? "600 9px sans-serif" : "600 11px sans-serif";
+      ctx.fillStyle = swing ? (upSwing ? "#dcfce7" : "#fee2e2") : label.color;
+      roundRect(ctx, x, top, w, h, 4);
+      ctx.fill();
+      ctx.fillStyle = swing ? (upSwing ? "#166534" : "#991b1b") : label.textColor;
+      ctx.fillText(label.text, x + 4, top + (swing ? 10 : 11));
+      if (this.selected === label.id) {
+        ctx.strokeStyle = "#b45309";
+        ctx.strokeRect(x - 1, top - 1, w + 2, h + 2);
+      }
+      ctx.globalAlpha = 1;
+      hits.push({ x, y: top, w, h, mark: { id: label.id, kind: label.kind, detail: label.detail, time: label.time, tip: label.tip } });
+    }
+    for (let i = 0; i < edge.length; i += 1) {
+      const item = edge[i]!;
+      const rect = edgeRects[i]!;
+      ctx.globalAlpha = item.alpha ?? 1;
+      if (item.pill) {
+        pill(ctx, rect.x, rect.y, item.text, item.color, item.ink ?? "#ffffff");
+      } else {
+        ctx.font = "600 10px sans-serif";
+        ctx.fillStyle = this.background;
+        roundRect(ctx, rect.x, rect.y, rect.w, rect.h, 4);
+        ctx.fill();
+        ctx.fillStyle = item.color;
+        ctx.fillText(item.text, rect.x + 4, rect.y + 11);
+      }
+      ctx.globalAlpha = 1;
+      if (item.mark) hits.push({ ...rect, mark: item.mark });
     }
     this.hits = hits;
     ctx.restore();

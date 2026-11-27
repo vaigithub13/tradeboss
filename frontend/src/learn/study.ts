@@ -51,6 +51,8 @@ export interface StudyLine {
   confirm: number;
   short: boolean;
   tip?: string;
+  /** An older CRT set: hidden unless "Show older CRT ranges" is on. */
+  old?: boolean;
 }
 
 export interface StudyLabel {
@@ -66,6 +68,7 @@ export interface StudyLabel {
   confirm: number;
   key?: boolean;
   tip?: string;
+  old?: boolean;
 }
 
 export interface StudySession {
@@ -604,6 +607,7 @@ export interface StudyLayers {
   killzones: boolean;
   gaps: boolean;
   crt: boolean;
+  crtOlder: boolean;
   pattern: boolean;
   patternAll: boolean;
   round: boolean;
@@ -629,6 +633,7 @@ export const DEFAULT_LAYERS: StudyLayers = {
   killzones: true,
   gaps: true,
   crt: true,
+  crtOlder: false,
   pattern: true,
   patternAll: false,
   round: true,
@@ -698,7 +703,7 @@ export function buildStudy(input: StudyInput): Study {
       .map((mark) => ({ name: mark.major ? "Round 100" : "Round 50", price: mark.price, time: end })),
   ];
   const span = dailyRangeAtr(bars);
-  const clustered = clusterZones(zoneLevels, bars, span > 0 ? span : atr, last);
+  const clustered = clusterZones(zoneLevels, bars, { atr, span: span > 0 ? span : atr }, last);
   const events = [
     ...collectEvents(bars, structure, lesson, gaps, labels, latest, failed),
     ...ict.events.map(ictEvent),

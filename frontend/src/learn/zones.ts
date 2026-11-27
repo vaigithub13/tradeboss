@@ -34,7 +34,46 @@ export interface ZoneFlip {
   detail: string;
 }
 
+/** Levels closer than this many ATR(14) of the chart timeframe share one zone. */
 const CLUSTER = 0.25;
+const CAP_ATR = 0.5;
+const CAP_PRICE = 0.001;
+
+/** Widest a zone may be: max(0.5 × ATR(14), 0.1% of price). */
+export function zoneCap(atr: number, price: number): number {
+  return Math.max(CAP_ATR * atr, CAP_PRICE * Math.abs(price));
+}
+
+export interface ZoneScale {
+  /** ATR(14) of the chart timeframe. Sets the merge step and the width cap. */
+  atr: number;
+  /** Average daily range. Sets the window for the drawn zones. */
+  span: number;
+}
+
+/** Chain levels within the step, then split any chain wider than the cap. */
+function groupLevels(sorted: readonly ZoneLevel[], step: number, cap: number): ZoneLevel[][] {
+  const chains: ZoneLevel[][] = [];
+  for (const level of sorted) {
+    const chain = chains[chains.length - 1];
+    const prev = chain?.[chain.length - 1];
+    if (!chain || !prev || level.price - prev.price >= step) chains.push([level]);
+    else chain.push(level);
+  }
+  const groups: ZoneLevel[][] = [];
+  for (const chain of chains) {
+    let part: ZoneLevel[] = [];
+    for (const level of chain) {
+      if (part.length && level.price - part[0]!.price > cap) {
+        groups.push(part);
+        part = [];
+      }
+      part.push(level);
+    }
+    if (part.length) groups.push(part);
+  }
+  return groups;
+}
 
 function money(price: number): string {
   return Math.round(price).toLocaleString("en-IN");
@@ -117,19 +156,22 @@ function touchesOf(bars: readonly LearnBar[], low: number, high: number, known: 
   return { count, last };
 }
 
-/** Cluster levels within 0.25 × the span. A zone is never wider than that step. */
-export function clusterZones(levels: readonly ZoneLevel[], bars: readonly LearnBar[], atr: number, price: number): { zones: KeyZone[]; flips: ZoneFlip[] } {
+/**
+ * Cluster levels within 0.25 × ATR(14) of the chart timeframe. A cluster wider
+ * than max(0.5 × ATR, 0.1% of price) is split; each part keeps its own sources.
+ * A plain number sets both the ATR and the span (used by older callers and tests).
+ */
+export function clusterZones(
+  levels: readonly ZoneLevel[],
+  bars: readonly LearnBar[],
+  scale: number | ZoneScale,
+  price: number,
+): { zones: KeyZone[]; flips: ZoneFlip[] } {
+  const { atr, span } = typeof scale === "number" ? { atr: scale, span: scale } : scale;
   if (atr <= 0 || levels.length === 0) return { zones: [], flips: [] };
   const step = CLUSTER * atr;
   const sorted = [...levels].filter((level) => Number.isFinite(level.price)).sort((a, b) => a.price - b.price || a.time - b.time);
-  const groups: ZoneLevel[][] = [];
-  for (const level of sorted) {
-    const group = groups[groups.length - 1];
-    const anchor = group?.[0];
-    const width = group ? level.price - Math.min(...group.map((item) => item.price)) : 0;
-    if (!group || !anchor || level.price - anchor.price >= step || width >= step) groups.push([level]);
-    else group.push(level);
-  }
+  const groups = groupLevels(sorted, step, zoneCap(atr, price));
   const flips: ZoneFlip[] = [];
   const zones: KeyZone[] = groups.map((group, index) => {
     const low = Math.min(...group.map((level) => level.price));
@@ -173,18 +215,18 @@ export function clusterZones(levels: readonly ZoneLevel[], bars: readonly LearnB
       faint: false,
     };
   });
-  return { zones: markVisible(zones, price, atr), flips };
+  return { zones: markVisible(zones, price, span > 0 ? span : atr, step), flips };
 }
 
 /**
  * Nearest zone on each side with strength at least 2, plus the strongest zone
  * within 1.5 × the span. Strength-1 zones inside that window are faint.
- * Two zones closer than 0.25 × the span keep the stronger one.
+ * Two drawn zones closer than `step` keep the stronger one.
  */
-export function markVisible(zones: readonly KeyZone[], price: number, atr: number): KeyZone[] {
+export function markVisible(zones: readonly KeyZone[], price: number, atr: number, gap = CLUSTER * atr): KeyZone[] {
   const distance = (zone: KeyZone) => (price > zone.high ? price - zone.high : zone.low > price ? zone.low - price : 0);
   const window = 1.5 * atr;
-  const step = CLUSTER * atr;
+  const step = gap;
   const chosen = new Map<string, "solid" | "faint">();
   for (const side of ["resistance", "support"] as const) {
     const list = zones.filter((zone) => zone.role === side);

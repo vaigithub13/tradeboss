@@ -24,6 +24,7 @@ const OFF: StudyLayers = {
   killzones: false,
   gaps: false,
   crt: false,
+  crtOlder: false,
   pattern: false,
   patternAll: false,
   round: false,
