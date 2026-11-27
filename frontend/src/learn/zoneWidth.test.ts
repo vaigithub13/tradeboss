@@ -26,7 +26,7 @@ describe("key zone width", () => {
     }
   });
 
-  it("merges only within 0.25 × ATR and splits a cluster wider than the cap", () => {
+  it("merges only within 0.35 × ATR and splits a cluster wider than the cap", () => {
     const time = istEpoch(2026, 11, 26, 10, 0);
     const bar: LearnBar = { time, open: 50, high: 51, low: 49, close: 50 };
     const levels = [100, 104, 108, 112, 116].map((price, i) => ({ name: ["PDH", "EQH", "Swing high", "OR high", "Round 100"][i]!, price, time }));
@@ -38,8 +38,10 @@ describe("key zone width", () => {
     expect(zones[1]!.strength).toBe(2);
     expect(zones[0]!.label).toMatch(/●●●$/);
     expect(zones[1]!.label).toMatch(/ ●●$/);
-    const apart = clusterZones([{ name: "PDH", price: 100, time }, { name: "EQH", price: 106, time }], [bar], { atr: 20, span: 200 }, 50);
+    const apart = clusterZones([{ name: "PDH", price: 100, time }, { name: "EQH", price: 107, time }], [bar], { atr: 20, span: 200 }, 50);
     expect(apart.zones).toHaveLength(2);
+    const joined = clusterZones([{ name: "PDH", price: 100, time }, { name: "EQH", price: 106.9, time }], [bar], { atr: 20, span: 200 }, 50);
+    expect(joined.zones).toHaveLength(1);
   });
 
   it("27 Nov NIFTY 5m draws a support between 25,450 and 25,560, and the nearest zone on each side", () => {
@@ -80,5 +82,18 @@ describe("key zone width", () => {
     expect(zones.find((zone) => zone.low === 90)).toMatchObject({ visible: true, strength: 1 });
     expect(zones.find((zone) => zone.low === 90)!.label).toMatch(/ ●$/);
     expect(zones.find((zone) => zone.low === 110)).toMatchObject({ visible: true, strength: 1 });
+  });
+
+  it("27 Nov NIFTY 5m draws one EQH+50 support band covering 25,543–25,550 with 2 dots, inside the cap", () => {
+    const shown = fixture as LearnBar[];
+    const bars = closedBars(shown, null);
+    const now = shown.at(-1)!.time;
+    const { study } = runJob({ bars, left: 3, right: 3, rangeSwings: 4, timeframe: "5m", symbol: "NIFTY50", now, m5: bars, signalNow: now, tfSeconds: 300 }, null).read;
+    const cap = zoneCap(study.atr, study.last);
+    const bands = study.zones.filter((zone) => zone.visible && zone.role === "support" && Math.round(zone.low) <= 25543 && Math.round(zone.high) >= 25550);
+    expect(bands).toHaveLength(1);
+    expect(bands[0]!.label).toMatch(/· EQH\+50 ●●$/);
+    expect(bands[0]!.strength).toBe(2);
+    for (const zone of study.zones) expect(zone.high - zone.low).toBeLessThanOrEqual(cap + 1e-9);
   });
 });

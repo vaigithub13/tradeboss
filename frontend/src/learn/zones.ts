@@ -41,7 +41,7 @@ export interface ZoneFlip {
 }
 
 /** Levels closer than this many ATR(14) of the chart timeframe share one zone. */
-const CLUSTER = 0.25;
+const CLUSTER = 0.35;
 const CAP_ATR = 0.5;
 const CAP_PRICE = 0.001;
 
@@ -163,7 +163,7 @@ function touchesOf(bars: readonly LearnBar[], low: number, high: number, known: 
 }
 
 /**
- * Cluster levels within 0.25 × ATR(14) of the chart timeframe. A cluster wider
+ * Cluster levels within 0.35 × ATR(14) of the chart timeframe. A cluster wider
  * than max(0.5 × ATR, 0.1% of price) is split; each part keeps its own sources.
  * A plain number sets both the ATR and the span (used by older callers and tests).
  */

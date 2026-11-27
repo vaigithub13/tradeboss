@@ -2620,3 +2620,7 @@ AurumBoss Learn (Lightweight Charts v4.2.3) uses the built-in crosshair in Norma
 ## 28 Nov 2026 — Learn nearest zones
 
 Learn tab only. On 27 Nov NIFTY 5m the old support cluster 25,467–25,550 was not split. With the merge step at 0.25 × ATR(14), 5.6 points, EQH 25,467, EQH 25,543, and Round 50 25,550 never chained. Each became its own zone with one source and no touches, so strength 1. The draw filter keeps strength-1 zones faint except on Full, so the nearest drawn support was 25,345. Now the nearest support and the nearest resistance are always drawn, even with one dot. A part split off a wider cluster keeps the parent's strength for the draw filter, and its dots still count its own sources. Drawn zones were S 25,345, R 25,644, R 25,721. They are now S 25,345, S 25,550, R 25,600, R 25,644, R 25,721.
+
+## 28 Nov 2026 — Learn zone merge step 0.35 ATR
+
+Learn tab only. Levels now merge within 0.35 × ATR(14) of the chart timeframe. The width cap stays max(0.5 × ATR, 0.1% of price), and wider clusters are still split. On 27 Nov NIFTY 5m (ATR 22.6, step 7.9 points) EQH 25,543 and Round 50 25,550 join into one band, S 25,543–25,550 · EQH+50 ●●, 6.7 points wide. That band is now the nearest strength-2 support, so S 25,345 is no longer drawn and stays in the Levels list. Drawn zones are S 25,543–25,550, R 25,600, R 25,644, and R 25,721.
