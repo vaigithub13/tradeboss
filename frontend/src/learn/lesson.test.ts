@@ -288,7 +288,7 @@ describe("labels and overlap", () => {
         sweeps: [],
         sessions: [],
       },
-      study: { sessions: [], boxes: [], lines: [], labels: [], events: [], banner: "", rounds: [] },
+      study: { sessions: [], boxes: [], lines: [], labels: [], events: [], banner: "", rounds: [], zones: [], last: 0, atr: 0, day: "" },
       signals: emptyBook(),
     };
     const colors = learnColors("light");

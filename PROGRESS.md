@@ -2579,6 +2579,10 @@ An FVG signal inside an OB+FVG zone is FVG★. The others are FVG·. Unicorn and
 
 Learn Replay was sending `limit` together with `to`, and the candles API rejected that, so the chart stayed on “Waiting for candles.” Replay now asks for `limit` and `cursor`, the same shape as the main chart, and the pane keeps only candles at or before the cursor. Step and Back move one candle and fetch another page when that candle is not loaded. Opening Replay puts the cursor at 09:15 IST of the last trading day. The Chart tab, paper slots, and the live path were not changed. The backend was not started.
 
+## 27 Nov 2026 — Learn chart readability
+
+Learn tab only. A fair value gap, order block, OB+FVG overlap, or unicorn must sit inside one session and be no taller than 1.5 × ATR(14). Overnight gaps stay on NDOG and NWOG. Nearby levels cluster into key zones: two red bands above price and two green bands below, with the full list in Levels and Explain. Right-axis tags merge within 0.15 × ATR and stop at six. Finished marks and old signals stay off unless “show finished” is on. Header views are Levels (the default), AMD, ICT, and Full, and the last choice is remembered. The Chart tab, paper slots, and the live path were not changed.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

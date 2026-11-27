@@ -8,7 +8,9 @@
 import type { AmdSession, Lesson, Liquidity, Sweep } from "./lesson";
 import type { BreakEvent, LearnBar, Structure, Swing } from "./structure";
 import { scanIct, type IctEvent, type IctLabel, type IctLine, type Killzone } from "./ict";
+import { atr14, gapFits } from "./sanity";
 import { istClock, istEpoch } from "./time";
+import { clusterZones, type KeyZone } from "./zones";
 
 export const FVG_MIN_ATR = 0.1;
 export const PATTERN_NEAR_ATR = 0.3;
@@ -96,6 +98,10 @@ export interface Study {
   banner: string;
   rounds: { price: number; major: boolean }[];
   killzones?: Killzone[];
+  zones: KeyZone[];
+  last: number;
+  atr: number;
+  day: string;
 }
 
 const GREEN = "#15803d";
@@ -167,7 +173,7 @@ function lineOf(level: Liquidity, bars: readonly LearnBar[], end: number): Study
     t1: known,
     t2: end,
     price: level.price,
-    color: level.name.startsWith("EQ") ? "#7c3aed" : "#64748b",
+    color: "#7c3aed",
     dashed: true,
     label: level.tag,
     detail: `${level.name} at ${round(level.price)}`,
@@ -202,6 +208,7 @@ export function gapSeeds(bars: readonly LearnBar[]): StudyBox[] {
       top = left.low;
       bottom = right.high;
     } else continue;
+    if (!gapFits(bars, j - 2, j, top, bottom)) continue;
     const size = top - bottom;
     out.push({
       id: `fvg-${right.time}-${bull ? "up" : "down"}`,
@@ -212,7 +219,7 @@ export function gapSeeds(bars: readonly LearnBar[]): StudyBox[] {
       p2: bottom,
       color: bull ? "rgba(22,163,74,0.16)" : "rgba(220,38,38,0.14)",
       border: bull ? "rgba(22,163,74,0.55)" : "rgba(220,38,38,0.5)",
-      label: "",
+      label: "FVG",
       labelColor: bull ? GREEN : RED,
       detail: `${bull ? "Bullish" : "Bearish"} gap ${round(bottom)}–${round(top)} (${round(size)} pts), open`,
       confirm: right.time,
@@ -245,6 +252,7 @@ export function fairValueGaps(bars: readonly LearnBar[]): StudyBox[] {
     } else {
       continue;
     }
+    if (!gapFits(bars, j - 2, j, top, bottom)) continue;
     let state = "open";
     let end = bars[bars.length - 1]?.time ?? right.time;
     for (let k = j + 1; k < bars.length; k += 1) {
@@ -267,7 +275,7 @@ export function fairValueGaps(bars: readonly LearnBar[]): StudyBox[] {
       p2: bottom,
       color: bull ? "rgba(22,163,74,0.16)" : "rgba(220,38,38,0.14)",
       border: bull ? "rgba(22,163,74,0.55)" : "rgba(220,38,38,0.5)",
-      label: "",
+      label: "FVG",
       labelColor: bull ? GREEN : RED,
       detail: `${bull ? "Bullish" : "Bearish"} gap ${round(bottom)}–${round(top)} (${round(size)} pts), ${state}`,
       confirm: right.time,
@@ -291,6 +299,9 @@ export function orderBlocks(bars: readonly LearnBar[], events: readonly BreakEve
       const bodyDown = candle.close < openOf(candle);
       const bodyUp = candle.close > openOf(candle);
       if ((up && !bodyDown) || (!up && !bodyUp)) continue;
+      if (!gapFits(bars, q, q, candle.high, candle.low)) continue;
+      const breakBar = bars[event.index];
+      if (breakBar && istClock(candle.time).day !== istClock(breakBar.time).day) continue;
       let broken = false;
       let end = bars[bars.length - 1]?.time ?? candle.time;
       for (let k = event.index; k < bars.length; k += 1) {
@@ -465,7 +476,7 @@ function sweepLabel(sweep: Sweep): StudyLabel {
   };
 }
 
-function amdBoxes(session: AmdSession, end: number): StudyBox[] {
+function amdBoxes(session: AmdSession, bars: readonly LearnBar[], today: string): StudyBox[] {
   const boxes: StudyBox[] = [];
   if (session.accumulation) {
     boxes.push({
@@ -485,23 +496,24 @@ function amdBoxes(session: AmdSession, end: number): StudyBox[] {
   }
   if (session.distribution) {
     const up = session.distribution.direction === "up";
+    const candle = bars.find((bar) => bar.time === session.distribution!.from);
     boxes.push({
       id: `amd-d-${session.day}`,
       kind: "amd_d",
       t1: session.distribution.from,
-      t2: session.distribution.to,
-      p1: session.accumulation?.high ?? session.distribution.from,
-      p2: session.accumulation?.low ?? session.distribution.from,
-      color: up ? "rgba(22,163,74,0.10)" : "rgba(220,38,38,0.10)",
-      border: "transparent",
+      t2: session.distribution.from,
+      p1: candle?.high ?? session.accumulation?.high ?? 0,
+      p2: candle?.low ?? session.accumulation?.low ?? 0,
+      color: up ? "rgba(22,163,74,0.18)" : "rgba(220,38,38,0.16)",
+      border: up ? GREEN : RED,
       label: up ? "D ↑" : "D ↓",
       labelColor: up ? GREEN : RED,
       detail: `Distribution ${session.distribution.direction}`,
       confirm: session.distribution.from,
     });
   }
-  for (const box of boxes) {
-    if (box.t2 < box.t1) box.t2 = end;
+  if (session.day !== today) {
+    for (const box of boxes) box.state = "old";
   }
   return boxes;
 }
@@ -514,8 +526,8 @@ function manipLabel(session: AmdSession): StudyLabel | null {
     kind: "amd_m",
     time: manip.time,
     price: manip.extreme,
-    text: "M",
-    color: PURPLE,
+    text: manip.side === "high" ? "M ↓" : "M ↑",
+    color: "#ea580c",
     textColor: "#ffffff",
     pos: manip.side === "high" ? "above" : "below",
     detail: `Manipulation: sweep of ${manip.name}`,
@@ -593,6 +605,7 @@ export interface StudyLayers {
   notes: boolean;
   signals: boolean;
   events: boolean;
+  zones: boolean;
 }
 
 export const DEFAULT_LAYERS: StudyLayers = {
@@ -616,6 +629,7 @@ export const DEFAULT_LAYERS: StudyLayers = {
   notes: true,
   signals: true,
   events: true,
+  zones: true,
 };
 
 export function recentLabels(labels: readonly StudyLabel[], limit: number): StudyLabel[] {
@@ -653,14 +667,39 @@ export function buildStudy(input: StudyInput): Study {
     ...ict.lines.map(ictLine),
   ];
   const boxes: StudyBox[] = [...gaps, ...blocks, ...ict.boxes];
+  const today = istClock(end).day;
   for (const session of lesson.sessions) {
-    boxes.push(...amdBoxes(session, end));
+    boxes.push(...amdBoxes(session, bars, today));
     const mark = manipLabel(session);
     if (mark) labels.push(mark);
   }
   const latest = lesson.sessions.at(-1) ?? null;
   const failed = latest ? sweepFailed(latest, bars) : false;
-  const events = [...collectEvents(bars, structure, lesson, gaps, labels, latest, failed), ...ict.events.map(ictEvent)];
+  const last = input.last || bars[bars.length - 1]?.close || 0;
+  const atr = bars.length ? atr14(bars, bars.length - 1) : 0;
+  const openZone = (box: StudyBox) => box.state === "open" || box.state === "open-small";
+  const zoneLevels = [
+    ...lesson.liquidity.map((level) => ({ name: level.name, price: level.price, time: timeAt(bars, level.knownAt) })),
+    ...structure.swings.slice(-8).map((swing) => ({ name: swing.kind === "high" ? "Swing high" : "Swing low", price: swing.price, time: swing.time })),
+    ...gaps.filter(openZone).map((box) => ({ name: "FVG", price: (box.p1 + box.p2) / 2, time: box.confirm })),
+    ...blocks.filter(openZone).map((box) => ({ name: "OB", price: (box.p1 + box.p2) / 2, time: box.confirm })),
+    ...roundMarks(input.low, input.high, last)
+      .filter((mark) => atr <= 0 || Math.abs(mark.price - last) <= 2 * atr)
+      .map((mark) => ({ name: mark.major ? "Round 100" : "Round 50", price: mark.price, time: end })),
+  ];
+  const clustered = clusterZones(zoneLevels, bars, atr, last);
+  const events = [
+    ...collectEvents(bars, structure, lesson, gaps, labels, latest, failed),
+    ...ict.events.map(ictEvent),
+    ...clustered.flips.map((flip) => ({
+      time: flip.time,
+      kind: "zone",
+      text: flip.text,
+      detail: flip.detail,
+      color: flip.text.startsWith("Support") ? RED : GREEN,
+      ref: { time: flip.time, price: last },
+    })),
+  ];
   events.sort((a, b) => b.time - a.time || a.text.localeCompare(b.text));
   return {
     sessions,
@@ -669,8 +708,12 @@ export function buildStudy(input: StudyInput): Study {
     labels,
     events: events.slice(0, 300),
     banner: bannerText(latest, now || end, failed),
-    rounds: roundMarks(input.low, input.high, input.last || bars[bars.length - 1]?.close || 0),
+    rounds: roundMarks(input.low, input.high, last),
     killzones: ict.killzones,
+    zones: clustered.zones,
+    last,
+    atr,
+    day: today,
   };
 }
 

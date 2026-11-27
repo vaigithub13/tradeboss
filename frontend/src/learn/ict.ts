@@ -4,6 +4,7 @@
  * IFVG, BPR and the mitigation block stay concepts: they are not drawn.
  */
 
+import { gapFits, sameSession } from "./sanity";
 import type { BreakEvent, LearnBar, Swing } from "./structure";
 import { istClock, istEpoch } from "./time";
 import killzoneFile from "./killzones.json" with { type: "json" };
@@ -220,6 +221,7 @@ export function scanIct(
       top = left.low;
       bottom = bar.high;
     } else continue;
+    if (!gapFits(bars, j - 2, j, top, bottom)) continue;
     const gap: Gap = { up, top, bottom, born: j, known: closeAt(j), t0: left.time, end: null };
     gaps.push(gap);
     openGaps.push(gap);
@@ -235,6 +237,9 @@ export function scanIct(
       if (!candle) continue;
       const open = candle.open ?? candle.close;
       if (up ? candle.close >= open : candle.close <= open) continue;
+      if (!gapFits(bars, q, q, candle.high, candle.low)) continue;
+      const breakBar = bars[event.index];
+      if (breakBar && !sameSession(candle.time, breakBar.time)) continue;
       let end: number | null = null;
       for (let k = event.index + 1; k < bars.length; k += 1) {
         const later = bars[k]!;
@@ -264,6 +269,8 @@ export function scanIct(
       const lo = Math.max(ob.bottom, gap.bottom);
       const hi = Math.min(ob.top, gap.top);
       if (hi <= lo) continue;
+      const unit = atr[Math.min(gap.born, atr.length - 1)] ?? 0;
+      if (unit > 0 && hi - lo > 1.5 * unit) continue;
       const known = Math.max(ob.known, gap.known);
       const ends = [ob.end, gap.end].filter((value): value is number => value != null);
       const end = ends.length ? Math.min(...ends) : null;
@@ -276,9 +283,9 @@ export function scanIct(
           Math.max(ob.t1, gap.t0),
           end ?? bars[bars.length - 1]?.time ?? known,
           hi, lo, known, end ? "done" : "active",
-          "★ OB+FVG",
-          ob.up ? "rgba(234,179,8,0.28)" : "rgba(234,88,12,0.24)",
-          end ? "#6b7280" : "#a16207",
+          "★ FVG",
+          "rgba(219,39,119,0.16)",
+          end ? "#6b7280" : "#db2777",
           `${ob.up ? "Bullish" : "Bearish"} OB+FVG ${round(lo)}–${round(hi)}. The order block and the gap overlap.`,
         ));
         ictEvents.push({
@@ -328,6 +335,8 @@ export function scanIct(
       const lo = Math.max(bk.bottom, gap.bottom);
       const hi = Math.min(bk.top, gap.top);
       if (hi <= lo) continue;
+      const unit = atr[Math.min(gap.born, atr.length - 1)] ?? 0;
+      if (unit > 0 && hi - lo > 1.5 * unit) continue;
       const known = Math.max(bk.known, gap.known);
       const ends = [bk.end, gap.end].filter((value): value is number => value != null);
       const end = ends.length ? Math.min(...ends) : null;

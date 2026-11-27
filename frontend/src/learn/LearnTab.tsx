@@ -20,6 +20,7 @@ import { runJob, type JobState, type LearnRead } from "./job";
 import { DEFAULT_LABEL_SWINGS } from "./labels";
 import { pushLiveBar } from "./liveBars";
 import { loadNotes, saveNotes } from "./notes";
+import { loadPreset, savePreset, viewFor, type LearnPreset } from "./presets";
 import { PracticePanel } from "./PracticePanel";
 import { PRACTICE_BARS, type PracticeRow } from "./practice";
 import { backReplay, lastSessionOpen, learnReplayQuery, stepReplay } from "./replay";
@@ -28,7 +29,8 @@ import { loadSignalSummary, runSignalReview, type SignalsSummary } from "./signa
 import { SignalsPanel } from "./SignalsPanel";
 import { emptyBook } from "./signals";
 import { closedBars, shownBars, type LearnBar } from "./structure";
-import { DEFAULT_LAYERS, type StudyLayers, type StudyNote } from "./study";
+import type { StudyLayers, StudyNote } from "./study";
+import { mergeTags, tagInputs, type TagToggles } from "./tags";
 import { learnChartOptions, learnColors, type LearnTheme } from "./theme";
 import { fromIstInput, istClock, learnAxisTime, toIstInput } from "./time";
 import "./learn.css";
@@ -68,7 +70,7 @@ const LAYER_GROUPS: { title: string; rows: { key: keyof StudyLayers; label: stri
       { key: "gaps", label: "NDOG and NWOG" },
     ],
   },
-  { title: "Context", rows: [{ key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }, { key: "events", label: "Calendar events" }] },
+  { title: "Context", rows: [{ key: "zones", label: "Key zones" }, { key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }, { key: "events", label: "Calendar events" }] },
   { title: "Signals", rows: [{ key: "signals", label: "Signal boxes" }] },
 ];
 
@@ -97,7 +99,9 @@ export function LearnTab({
   const [symbol, setSymbol] = useState<(typeof SYMBOLS)[number]["id"]>("NIFTY50");
   const [timeframe, setTimeframe] = useState<Timeframe>("5m");
   const [theme, setTheme] = useState<LearnTheme>("light");
-  const [layers, setLayers] = useState<StudyLayers>(DEFAULT_LAYERS);
+  const [preset, setPreset] = useState<LearnPreset>(() => loadPreset());
+  const [layers, setLayers] = useState<StudyLayers>(() => viewFor(loadPreset()).layers);
+  const [tagToggles, setTagToggles] = useState<TagToggles>(() => viewFor(loadPreset()).tags);
   const [left, setLeft] = useState(3);
   const [right, setRight] = useState(3);
   const [rangeSwings, setRangeSwings] = useState(4);
@@ -382,8 +386,9 @@ export function LearnTab({
       signals: read.signals.signals,
       events: eventMarks,
       focus: ictFocus,
+      tags: read ? mergeTags(tagInputs(read.study.lines, read.study.rounds, tagToggles, read.study.atr, read.study.last), read.study.atr, read.study.last).shown : [],
     });
-  }, [eventMarks, ictFocus, labelSwings, layers, notes, picked, read, symbol]);
+  }, [eventMarks, ictFocus, labelSwings, layers, notes, picked, read, symbol, tagToggles]);
 
   const dayKey = istClock((replay && cursor != null ? cursor : chartBars.at(-1)?.time) ?? Math.floor(Date.now() / 1000)).day;
   useEffect(() => { setReadDraft(reads[dayKey] ?? ""); }, [dayKey, reads]);
@@ -436,6 +441,17 @@ export function LearnTab({
         <div className="seg">
           {TIMEFRAMES.map((tf) => (
             <button key={tf} type="button" aria-pressed={timeframe === tf} onClick={() => setTimeframe(tf)}>{tf}</button>
+          ))}
+        </div>
+        <div className="seg" data-testid="learn-presets">
+          {(["levels", "amd", "ict", "full"] as const).map((name) => (
+            <button key={name} type="button" aria-pressed={preset === name} onClick={() => {
+              const view = viewFor(name);
+              setPreset(name);
+              setLayers(view.layers);
+              setTagToggles(view.tags);
+              savePreset(name);
+            }}>{name === "levels" ? "Levels" : name === "amd" ? "AMD" : name === "ict" ? "ICT" : "Full"}</button>
           ))}
         </div>
         <button type="button" className="ghost" aria-pressed={!replay} onClick={() => { setReplay(false); setCursor(null); }}>Live</button>
@@ -575,6 +591,46 @@ export function LearnTab({
                     ))}
                   </section>
                 ))}
+                <section className="group">
+                  <h3>Axis tags</h3>
+                  {([
+                    ["bsl", "BSL / SSL"],
+                    ["eq", "EQH / EQL"],
+                    ["pd", "PDH / PDL"],
+                    ["week", "Week high / low"],
+                    ["or", "Opening range"],
+                    ["round", "Round numbers"],
+                  ] as const).map(([key, label]) => (
+                    <label key={key} className="row">
+                      <input type="checkbox" checked={tagToggles[key]} data-testid={`learn-tag-${key}`} onChange={() => setTagToggles((current) => ({ ...current, [key]: !current[key] }))} />
+                      {label}
+                    </label>
+                  ))}
+                </section>
+                <section className="group" data-testid="learn-levels">
+                  <h3>Levels</h3>
+                  {(read?.study.zones ?? []).map((zone) => (
+                    <button key={zone.id} type="button" className="event" onClick={() => {
+                      setPicked({ id: zone.id, kind: "zone", detail: zone.detail, time: zone.lastTest ?? 0 });
+                      setTab("explain");
+                    }}>
+                      <span>{zone.label}{zone.visible ? "" : " · list"}</span>
+                    </button>
+                  ))}
+                  {read && (() => {
+                    const axis = mergeTags(tagInputs(read.study.lines, read.study.rounds, tagToggles, read.study.atr, read.study.last), read.study.atr, read.study.last);
+                    const onAxis = new Set(axis.shown.map((tag) => `${tag.price}-${tag.text}`));
+                    return [...axis.shown, ...axis.rest].map((tag) => (
+                      <button key={`${tag.price}-${tag.text}`} type="button" className="event" onClick={() => {
+                        setPicked({ id: `tag-${tag.price}`, kind: "axis", detail: tag.detail, time: 0 });
+                        setTab("explain");
+                      }}>
+                        <span>{tag.text}{onAxis.has(`${tag.price}-${tag.text}`) ? "" : " · list"}</span>
+                      </button>
+                    ));
+                  })()}
+                  {(read?.study.zones.length ?? 0) === 0 && <p>No key zone on the closed candles yet.</p>}
+                </section>
                 <section className="group">
                   <h3>Chart</h3>
                   <label className="row">Labels shown

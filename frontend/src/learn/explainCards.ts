@@ -8,6 +8,18 @@ export interface ExplainCard {
 }
 
 export const EXPLAIN_CARDS: Record<string, ExplainCard> = {
+  zone: {
+    title: "Key zone",
+    what: "Nearby levels clustered within a quarter of the average range: prior highs and lows, equal highs and lows, gaps, and round numbers.",
+    why: "One band is easier to read than a stack of prices that all mean the same area.",
+    next: "The label lists the sources, the touches, and whether a close has flipped support and resistance.",
+  },
+  axis: {
+    title: "Price-axis tag",
+    what: "Levels within a small part of the average range share one tag on the right axis.",
+    why: "Separate tags for the same price hide each other. The list keeps every level that is not drawn.",
+    next: "Open Levels in the side panel for the tags that did not fit on the axis.",
+  },
   session: {
     title: "Nifty session",
     what: "Opening hour is 09:15–10:15 IST, midday is 10:15–13:30, and the closing drive is 13:30–15:30.",

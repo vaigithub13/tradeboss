@@ -125,4 +125,18 @@ describe("Learn tab", () => {
     await user.click(screen.getByRole("button", { name: "Back" }));
     expect(drawn()).toEqual(until(45));
   });
+
+  it("opens on Levels and keeps every level reachable after a preset change", async () => {
+    const user = userEvent.setup();
+    localStorage.clear();
+    render(<LearnTab bars={bars} />);
+    expect(screen.getByRole("button", { name: "Levels" })).toHaveAttribute("aria-pressed", "true");
+    expect((screen.getByTestId("learn-layer-zones") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId("learn-layer-fvg") as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByTestId("learn-levels")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "Full" }));
+    expect((screen.getByTestId("learn-layer-fvg") as HTMLInputElement).checked).toBe(true);
+    expect((screen.getByTestId("learn-tag-eq") as HTMLInputElement).checked).toBe(true);
+    expect(localStorage.getItem("tradeboss-learn-view")).toBe("full");
+  });
 });
