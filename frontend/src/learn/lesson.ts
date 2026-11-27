@@ -374,23 +374,28 @@ function textbookFor(
   };
 }
 
-function openingRange(bars: readonly LearnBar[], day: string): number | null {
-  const rows = bars.filter((bar) => {
+function openingRanges(bars: readonly LearnBar[]): { day: string; range: number }[] {
+  const rows: { day: string; high: number; low: number }[] = [];
+  for (const bar of bars) {
     const parts = istParts(bar.time);
-    return parts.day === day && parts.minutes >= OPEN && parts.minutes < HOUR;
-  });
-  if (rows.length === 0) return null;
-  return Math.max(...rows.map((bar) => bar.high)) - Math.min(...rows.map((bar) => bar.low));
+    if (parts.minutes < OPEN || parts.minutes >= HOUR) continue;
+    const last = rows[rows.length - 1];
+    if (!last || last.day !== parts.day) rows.push({ day: parts.day, high: bar.high, low: bar.low });
+    else {
+      last.high = Math.max(last.high, bar.high);
+      last.low = Math.min(last.low, bar.low);
+    }
+  }
+  return rows.map((row) => ({ day: row.day, range: row.high - row.low }));
 }
 
-function thresholdFor(bars: readonly LearnBar[], day: string): number | null {
-  const days = [...new Set(bars.map((bar) => istParts(bar.time).day))].filter((item) => item < day).sort();
-  const ranges: number[] = [];
-  for (const earlier of days) {
-    const range = openingRange(bars, earlier);
-    if (range != null) ranges.push(range);
+function thresholdFor(ranges: readonly { day: string; range: number }[], day: string): number | null {
+  const earlier: number[] = [];
+  for (const row of ranges) {
+    if (row.day >= day) break;
+    earlier.push(row.range);
   }
-  const used = ranges.slice(-20);
+  const used = earlier.slice(-20);
   if (used.length === 0) return null;
   return used.reduce((sum, value) => sum + value, 0) / used.length;
 }
@@ -403,9 +408,10 @@ function readSession(
   levels: readonly LevelLine[],
   liquidity: readonly Liquidity[],
   finished: boolean,
+  ranges: readonly { day: string; range: number }[],
 ): AmdSession {
   const rows = indexed.filter((item) => item.day === day && item.minutes >= OPEN && item.minutes < CLOSE);
-  const threshold = thresholdFor(bars, day);
+  const threshold = thresholdFor(ranges, day);
   let high = -Infinity;
   let low = Infinity;
   let start = -1;
@@ -471,6 +477,7 @@ export function readLesson(input: LessonInput): Lesson {
     return { index, bar, minutes: parts.minutes, day: parts.day };
   });
   const days = [...new Set(indexed.map((item) => item.day))];
+  const ranges = openingRanges(bars);
   const sessions = days.map((day, index) => readSession(
     bars,
     day,
@@ -479,6 +486,7 @@ export function readLesson(input: LessonInput): Lesson {
     input.levels,
     liquidity,
     index < days.length - 1,
+    ranges,
   ));
   return {
     liquidity,

@@ -18,6 +18,9 @@ import { DEFAULT_LABEL_SWINGS } from "./labels";
 import { pushLiveBar } from "./liveBars";
 import { loadNotes, saveNotes } from "./notes";
 import { LearnOverlay, type ChartMark } from "./overlay";
+import { loadSignalSummary, runSignalReview, type SignalsSummary } from "./signalLog";
+import { SignalsPanel } from "./SignalsPanel";
+import { emptyBook } from "./signals";
 import { closedBars, shownBars, type LearnBar } from "./structure";
 import { DEFAULT_LAYERS, type StudyLayers, type StudyNote } from "./study";
 import { learnChartOptions, learnColors, type LearnTheme } from "./theme";
@@ -49,6 +52,7 @@ const LAYER_GROUPS: { title: string; rows: { key: keyof StudyLayers; label: stri
     ],
   },
   { title: "Context", rows: [{ key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }] },
+  { title: "Signals", rows: [{ key: "signals", label: "Signal boxes" }] },
 ];
 
 function toBar(candle: Candle): LearnBar {
@@ -85,7 +89,10 @@ export function LearnTab({
   const [cursor, setCursor] = useState<number | null>(null);
   const [candles, setCandles] = useState<LearnBar[]>(bars ?? []);
   const [read, setRead] = useState<LearnRead | null>(null);
-  const [tab, setTab] = useState<"layers" | "events" | "explain" | "notes">("layers");
+  const [tab, setTab] = useState<"layers" | "events" | "explain" | "notes" | "signals">("layers");
+  const [m5Extra, setM5Extra] = useState<LearnBar[]>([]);
+  const [summary, setSummary] = useState<SignalsSummary | null>(null);
+  const [reviewNote, setReviewNote] = useState<string | null>(null);
   const [picked, setPicked] = useState<ChartMark | null>(null);
   const [tip, setTip] = useState<string | null>(null);
   const [notes, setNotes] = useState<StudyNote[]>([]);
@@ -255,7 +262,32 @@ export function LearnTab({
   }, [onLiveView, replay, symbol, timeframe]);
 
   useEffect(() => {
+    if (timeframe === "5m" || bars) return;
+    const ac = new AbortController();
+    const base = { symbol, timeframe: "5m" as const, sessions: ["normal" as const], limit: 800 };
+    const query = replay && cursor != null ? capCandlesQuery({ ...base, to: cursor }, cursor) : base;
+    void fetchCandles(query, ac.signal)
+      .then((page) => {
+        if (ac.signal.aborted) return;
+        setM5Extra(shownBars(page.candles.map(toBar), replay ? cursor : null));
+      })
+      .catch(() => {
+        if (!ac.signal.aborted) setM5Extra([]);
+      });
+    return () => ac.abort();
+  }, [bars, cursor, replay, symbol, timeframe]);
+
+  useEffect(() => {
+    let gone = false;
+    void loadSignalSummary().then((file) => {
+      if (!gone) setSummary(file);
+    });
+    return () => { gone = true; };
+  }, []);
+
+  useEffect(() => {
     const shown = shownBars(candles, replay ? cursor : null);
+    const signalSource = timeframe === "5m" ? shown : shownBars(m5Extra, replay ? cursor : null);
     const job = {
       bars: closedBars(shown, replay ? cursor : null),
       left,
@@ -264,6 +296,8 @@ export function LearnTab({
       timeframe,
       symbol,
       now: shown.at(-1)?.time ?? 0,
+      m5: closedBars(signalSource, replay ? cursor : null),
+      signalNow: (replay && cursor != null ? cursor : signalSource.at(-1)?.time) ?? 0,
     };
     const id = ++req.current;
     if (workerRef.current) {
@@ -273,7 +307,7 @@ export function LearnTab({
     const done = runJob(job, jobState.current);
     jobState.current = done.state;
     setRead(done.read);
-  }, [candles, cursor, left, rangeSwings, replay, right, symbol, timeframe]);
+  }, [candles, cursor, left, m5Extra, rangeSwings, replay, right, symbol, timeframe]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -284,6 +318,7 @@ export function LearnTab({
       limit: labelSwings,
       notes: notes.filter((note) => note.symbol === symbol),
       selected: picked?.id ?? null,
+      signals: read.signals.signals,
     });
   }, [labelSwings, layers, notes, picked, read, symbol]);
 
@@ -360,7 +395,7 @@ export function LearnTab({
         </div>
         <aside>
           <div className="tabs" role="tablist">
-            {(["layers", "events", "explain", "notes"] as const).map((name) => (
+            {(["layers", "events", "explain", "notes", "signals"] as const).map((name) => (
               <button key={name} type="button" role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>
                 {name[0]!.toUpperCase() + name.slice(1)}
               </button>
@@ -434,6 +469,23 @@ export function LearnTab({
                   <div className="box"><b>What to watch next</b><p>{card.next}</p></div>
                 </article>
               ) : <p>Click a label, a line, a box, or an event.</p>
+            )}
+            {tab === "signals" && (
+              <SignalsPanel
+                symbol={symbol}
+                book={read?.signals ?? emptyBook()}
+                summary={summary}
+                reviewNote={reviewNote}
+                onReview={() => {
+                  setReviewNote("Running the review…");
+                  void runSignalReview()
+                    .then((file) => {
+                      setSummary(file);
+                      setReviewNote("Review saved under data/learn/signals.");
+                    })
+                    .catch(() => setReviewNote("The review could not run. Start the app and try again."));
+                }}
+              />
             )}
             {tab === "notes" && (
               <div>

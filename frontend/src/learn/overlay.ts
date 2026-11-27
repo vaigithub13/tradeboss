@@ -1,5 +1,6 @@
 import type { CanvasRenderingTarget2D } from "fancy-canvas";
 
+import type { WatchSignal } from "./signals";
 import type { Study, StudyLabel, StudyLayers, StudyNote } from "./study";
 import { recentLabels } from "./study";
 import type {
@@ -98,6 +99,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
   private layers: StudyLayers | null = null;
   private labelLimit = 12;
   private notes: StudyNote[] = [];
+  private signals: WatchSignal[] = [];
   private selected: string | null = null;
   hits: HitBox[] = [];
   private chart: IChartApi | null = null;
@@ -138,11 +140,19 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     this.requestUpdate();
   }
 
-  setStudy(input: { study: Study; layers: StudyLayers; limit: number; notes: StudyNote[]; selected: string | null }): void {
+  setStudy(input: {
+    study: Study;
+    layers: StudyLayers;
+    limit: number;
+    notes: StudyNote[];
+    selected: string | null;
+    signals?: WatchSignal[];
+  }): void {
     this.study = input.study;
     this.layers = input.layers;
     this.labelLimit = input.limit;
     this.notes = input.notes;
+    this.signals = input.signals ?? [];
     this.selected = input.selected;
     this.requestUpdate();
   }
@@ -332,6 +342,47 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
         ctx.strokeRect(anchor.x - 1, top - 1, w + 2, h + 2);
       }
       hits.push({ x: anchor.x, y: top, w, h, mark: { id: label.id, kind: label.kind, detail: label.detail, time: label.time } });
+    }
+    if (layers.signals) {
+      ctx.font = "600 11px sans-serif";
+      for (const signal of this.signals) {
+        const x1 = xOf(signal.time);
+        const endAt = signal.exitTime ?? signal.time + 15 * 60;
+        const x2 = xOf(endAt) ?? (x1 == null ? null : x1 + 48);
+        const ySl = yOf(signal.sl);
+        const yTp = yOf(signal.tp);
+        const yEntry = yOf(signal.entry);
+        if (x1 == null || x2 == null || ySl == null || yTp == null || yEntry == null) continue;
+        const left = Math.min(x1, x2);
+        const top = Math.min(ySl, yTp);
+        const w = Math.max(Math.abs(x2 - x1), 36);
+        const h = Math.max(Math.abs(yTp - ySl), 8);
+        const buy = signal.side === "buy";
+        const fill = signal.status === "TP"
+          ? "rgba(22,163,74,0.16)"
+          : signal.status === "SL"
+            ? "rgba(220,38,38,0.16)"
+            : signal.status === "expired"
+              ? "rgba(100,116,139,0.12)"
+              : buy ? "rgba(22,163,74,0.10)" : "rgba(220,38,38,0.10)";
+        ctx.fillStyle = fill;
+        ctx.fillRect(left, top, w, h);
+        ctx.strokeStyle = buy ? "#16a34a" : "#dc2626";
+        ctx.strokeRect(left, top, w, h);
+        ctx.setLineDash([3, 3]);
+        ctx.beginPath();
+        ctx.moveTo(left, yEntry);
+        ctx.lineTo(left + w, yEntry);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        const reason = `${signal.setup} ${signal.side.toUpperCase()} ${signal.status} · ${signal.why}`;
+        ctx.fillStyle = "#374151";
+        ctx.fillText(reason.slice(0, 72), left + 4, top + 12);
+        hits.push({
+          x: left, y: top, w, h,
+          mark: { id: signal.id, kind: "signal", detail: `${reason}. SL ${signal.sl}, TP ${signal.tp} (${signal.tpNote}).`, time: signal.time },
+        });
+      }
     }
     if (layers.notes) {
       for (const note of this.notes) {

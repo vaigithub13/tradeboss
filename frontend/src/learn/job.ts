@@ -2,6 +2,7 @@
 
 import { readLesson, type Lesson } from "./lesson";
 import { buildStudy, type Study } from "./study";
+import { readSignalBook, type SignalBook } from "./signals";
 import { readLevels, type LevelLine } from "./levels";
 import {
   emptyBuild,
@@ -21,6 +22,9 @@ export interface LearnJob {
   symbol?: string;
   /** Clock for the banner. The forming candle may set this; it is not one of `bars`. */
   now?: number;
+  /** Closed 5-minute candles for the watch-only signal book. */
+  m5?: LearnBar[];
+  signalNow?: number;
 }
 
 export interface LearnRead {
@@ -28,6 +32,7 @@ export interface LearnRead {
   levels: LevelLine[];
   lesson: Lesson;
   study: Study;
+  signals: SignalBook;
 }
 
 export interface JobState {
@@ -78,6 +83,12 @@ export function runJob(job: LearnJob, state: JobState | null): { read: LearnRead
       high,
       last,
     }),
+    signals: readSignalBook(
+      job.m5 ?? (job.timeframe === "5m" ? job.bars : []),
+      job.signalNow ?? job.now ?? 0,
+      job.symbol ?? "NIFTY50",
+      { left: job.left, right: job.right },
+    ),
   };
   return { read, state: { build, prev: job.bars } };
 }

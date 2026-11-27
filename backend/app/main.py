@@ -22,6 +22,7 @@ from app.routes.fvg import router as fvg_router
 from app.routes.gex import router as gex_router
 from app.routes.indicators import router as indicators_router
 from app.routes.learn_notes import router as learn_notes_router
+from app.routes.learn_signals import router as learn_signals_router
 from app.routes.live import router as live_router
 from app.routes.market_view import router as market_view_router
 from app.routes.options import router as options_router
@@ -109,6 +110,7 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         lag_task = asyncio.create_task(loop_lag_probe())
         kickoff_rank_if_stale(_app.state.scanner)
     prediction_schedule = None
+    learn_signal_schedule = None
     options_rec = None
     if settings.options_recorder_enabled and settings.upstox_token_value() is not None:
         from app.options.chain_scheduler import build_scheduler as build_options_scheduler
@@ -121,6 +123,11 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         if predictions_wanted():
             prediction_schedule = PredictionSchedule()
             prediction_schedule.start()
+        from app.learn_signals import LearnSignalSchedule, review_wanted
+
+        if review_wanted():
+            learn_signal_schedule = LearnSignalSchedule(settings.data_dir, settings.data_dir / "candles")
+            learn_signal_schedule.start()
         yield
     finally:
         for task in (scanner_task, lag_task):
@@ -141,6 +148,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
             await live.stop()
         if prediction_schedule is not None:
             prediction_schedule.stop()
+        if learn_signal_schedule is not None:
+            learn_signal_schedule.stop()
         clear(own_path)
 
 
@@ -151,6 +160,7 @@ app.include_router(backtests_router)
 app.include_router(candles_router)
 app.include_router(indicators_router)
 app.include_router(learn_notes_router)
+app.include_router(learn_signals_router)
 app.include_router(drawings_router)
 app.include_router(fvg_router)
 app.include_router(gex_router)

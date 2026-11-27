@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { runJob, type LearnRead } from "./job";
+import { emptyBook } from "./signals";
 import { defaultToggles, visibleLabels } from "./labels";
 import {
   entryZone,
@@ -288,6 +289,7 @@ describe("labels and overlap", () => {
         sessions: [],
       },
       study: { sessions: [], boxes: [], lines: [], labels: [], events: [], banner: "", rounds: [] },
+      signals: emptyBook(),
     };
     const colors = learnColors("light");
     const on = buildScene(read, defaultToggles(), colors, 12);

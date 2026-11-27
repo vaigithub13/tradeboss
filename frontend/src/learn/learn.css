@@ -301,3 +301,39 @@
 .learn-dark .card .box { background: #0c1016; border-color: #2a3142; }
 .learn-dark .event { border-bottom-color: #2a3142; color: #d1d4dc; }
 .learn-dark footer a { color: #9ca3af; }
+
+.learn .watch {
+  background: #fffbeb;
+  border: 1px solid #fcd34d;
+  color: #92400e;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.learn .muted { color: #6b7280; font-size: 12px; }
+.learn .plan {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.learn .plan p { margin: 4px 0; }
+.learn .sig-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  font-size: 12px;
+  margin: 6px 0;
+}
+.learn table.mini { width: 100%; border-collapse: collapse; font-size: 11px; margin: 6px 0 10px; }
+.learn table.mini th, .learn table.mini td { text-align: right; padding: 3px 4px; border-bottom: 1px solid #f3f4f6; }
+.learn table.mini th:first-child, .learn table.mini td:first-child { text-align: left; }
+.learn .sig-list { list-style: none; padding: 0; margin: 0; font-size: 12px; }
+.learn .sig-list li { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
+.learn h3 { font-size: 12px; margin: 12px 0 4px; }
+.learn-dark .watch { background: #2a2112; color: #fde68a; border-color: #92400e; }
+.learn-dark .plan { border-color: #2a3142; }
+.learn-dark table.mini th, .learn-dark table.mini td, .learn-dark .sig-list li { border-bottom-color: #2a3142; }

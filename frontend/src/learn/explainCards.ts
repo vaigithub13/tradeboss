@@ -206,6 +206,18 @@ export const EXPLAIN_CARDS: Record<string, ExplainCard> = {
     why: "Orders and stops cluster on obvious numbers.",
     next: "Treat 100-point numbers as stronger than the 50s between them.",
   },
+  signal: {
+    title: "Watch-only signal",
+    what: "A scored box: entry, stop, and target on a closed 5-minute candle. It is not an order and it is not a paper slot.",
+    why: "Later closed candles mark it TP, SL, or expired. If one candle trades both the stop and the target, the stop is counted.",
+    next: "Read the reason. One signal per setup per day. Nothing here is sent anywhere.",
+  },
+  plan: {
+    title: "Plan, still waiting",
+    what: "A setup drawn before price gets there. Waiting means price is outside the zone. In zone means each 5-minute close is being watched.",
+    why: "The plan says what would confirm it and what would cancel it, so the chart is read before the move.",
+    next: "A plan is not a signal until the confirming candle closes. After 15:00 a new one is not taken.",
+  },
   note: {
     title: "My note",
     what: "A note you placed on a candle.",

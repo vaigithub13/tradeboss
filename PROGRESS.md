@@ -2547,6 +2547,14 @@ The Learn tab now uses the study-chart layout: symbol, 1m 3m 5m 15m 1h 1D, Live 
 
 The chart shades Opening hour 09:15–10:15, Midday 10:15–13:30, and Closing 13:30–15:30 IST. The side panel is Layers, Events, Explain, and Notes. Layers group AMD, price action, and context. Fair value gaps, order blocks, and candle patterns follow the AurumBoss definitions, measured in index points. Events are newest first. A click opens the four-part explain card. Notes and "My read of today" are written to `data/learn/notes/notes.json`, which stays untracked, and stay in the browser if that file is unreachable. The forming candle is updated from the tick before the study runs. The study sees closed candles only, and Replay stops at the cursor. Labels are the last N, stacked so they do not sit on each other.
 
+## 27 Nov 2026 — Learn tab, phase N2
+
+Education only, on the Learn tab. The Chart tab, the Sensex tab, paper slots, the assist, the scanner, and the live path were not changed. No order is sent. `LIVE_TRADING` stays false. The backend was not started. AurumBoss was read and not modified.
+
+The Signals tab is watch-only. Its banner says these are not trades and that each one is scored automatically. Plans are read from closed 5-minute candles: a sweep of PDL, PDH, the previous week, the opening range, or equal highs and lows, then a CHoCH the other way within an hour (SWP); a return into a fresh fair-value gap that prints a rejection candle (FVG); and the first CHoCH toward distribution after manipulation (AMD). The stop sits beyond the sweep or the gap. The target is 2R, or for AMD the nearer of 2R and the opposite liquidity, and the card says which. A plan moves from waiting to in the zone. One signal per setup per day. No new entry after 15:00. An open signal expires at 15:15. If one later candle trades both the stop and the target, the stop is counted. A signal is absent until its confirming candle has closed, and a bar-by-bar replay matches one pass over the same candles.
+
+Signal boxes (entry, stop, target, and the reason) are drawn on the Learn chart. Results since the review started are signals, TP, SL, expired, win % of TP against SL, and total R, with a table per setup and a split across NIFTY, SENSEX, and BANKNIFTY. The 2022–2026 scores sit beside them, labelled history (no costs). A review at 16:00 IST, and the "Run the review now" button, write `data/learn/signals/signals.csv`, `daily/<date>.md`, and `summary.json`. Those files stay untracked. The chart and the review use the same engine.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

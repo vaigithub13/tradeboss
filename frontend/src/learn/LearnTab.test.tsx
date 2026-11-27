@@ -70,7 +70,12 @@ describe("Learn tab", () => {
     expect(screen.queryByRole("button", { name: "30m" })).toBeNull();
     expect(screen.getByLabelText("Labels shown")).toHaveValue(12);
     expect(screen.queryByTestId("learn-labels")).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Signals" })).toBeNull();
+    await user.click(screen.getByRole("tab", { name: "Signals" }));
+    expect(screen.getByTestId("learn-signals-banner").textContent).toBe(
+      "👀 Watch only — these are not trades. Each one is scored automatically.",
+    );
+    expect(screen.getByRole("button", { name: "Run the review now" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "history (no costs)" })).toBeTruthy();
     expect(screen.getByTestId("learn-banner").textContent).toMatch(/Opening hour — accumulation forming/);
     const credits = screen.getByTestId("learn-credits");
     expect(credits.textContent).toMatch(/Read-only study chart — never places trades/);

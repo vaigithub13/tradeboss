@@ -178,6 +178,48 @@ function round(price: number): string {
   return Number.isInteger(price) ? String(price) : price.toFixed(2);
 }
 
+/** Gap prices only. The fill is decided later, one bar at a time, so a long history stays causal. */
+export function gapSeeds(bars: readonly LearnBar[]): StudyBox[] {
+  const atr = atrSeries(bars);
+  const out: StudyBox[] = [];
+  for (let j = 2; j < bars.length; j += 1) {
+    const left = bars[j - 2];
+    const right = bars[j];
+    const unit = atr[j] ?? 0;
+    if (!left || !right || unit <= 0) continue;
+    const up = right.low - left.high;
+    const down = left.low - right.high;
+    let top = 0;
+    let bottom = 0;
+    let bull = false;
+    if (up >= FVG_MIN_ATR * unit) {
+      bull = true;
+      top = right.low;
+      bottom = left.high;
+    } else if (down >= FVG_MIN_ATR * unit) {
+      top = left.low;
+      bottom = right.high;
+    } else continue;
+    const size = top - bottom;
+    out.push({
+      id: `fvg-${right.time}-${bull ? "up" : "down"}`,
+      kind: bull ? "fvg_bull" : "fvg_bear",
+      t1: left.time,
+      t2: right.time,
+      p1: top,
+      p2: bottom,
+      color: bull ? "rgba(22,163,74,0.16)" : "rgba(220,38,38,0.14)",
+      border: bull ? "rgba(22,163,74,0.55)" : "rgba(220,38,38,0.5)",
+      label: "",
+      labelColor: bull ? GREEN : RED,
+      detail: `${bull ? "Bullish" : "Bearish"} gap ${round(bottom)}–${round(top)} (${round(size)} pts), open`,
+      confirm: right.time,
+      state: "open",
+    });
+  }
+  return out;
+}
+
 export function fairValueGaps(bars: readonly LearnBar[]): StudyBox[] {
   const atr = atrSeries(bars);
   const out: StudyBox[] = [];
@@ -541,6 +583,7 @@ export interface StudyLayers {
   patternAll: boolean;
   round: boolean;
   notes: boolean;
+  signals: boolean;
 }
 
 export const DEFAULT_LAYERS: StudyLayers = {
@@ -556,6 +599,7 @@ export const DEFAULT_LAYERS: StudyLayers = {
   patternAll: false,
   round: true,
   notes: true,
+  signals: true,
 };
 
 export function recentLabels(labels: readonly StudyLabel[], limit: number): StudyLabel[] {
