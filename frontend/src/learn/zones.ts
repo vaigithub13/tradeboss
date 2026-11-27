@@ -20,6 +20,12 @@ export interface KeyZone {
   touches: number;
   lastTest: number | null;
   strength: number;
+  /**
+   * Strength used by the draw filter. A part split off a wider cluster keeps the
+   * parent's strength here, so a real level near price is not dropped. The dots
+   * still show `strength`.
+   */
+  drawStrength?: number;
   label: string;
   detail: string;
   /** Drawn in the main view. */
@@ -52,7 +58,7 @@ export interface ZoneScale {
 }
 
 /** Chain levels within the step, then split any chain wider than the cap. */
-function groupLevels(sorted: readonly ZoneLevel[], step: number, cap: number): ZoneLevel[][] {
+function groupLevels(sorted: readonly ZoneLevel[], step: number, cap: number): { levels: ZoneLevel[]; parent: ZoneLevel[] }[] {
   const chains: ZoneLevel[][] = [];
   for (const level of sorted) {
     const chain = chains[chains.length - 1];
@@ -60,17 +66,17 @@ function groupLevels(sorted: readonly ZoneLevel[], step: number, cap: number): Z
     if (!chain || !prev || level.price - prev.price >= step) chains.push([level]);
     else chain.push(level);
   }
-  const groups: ZoneLevel[][] = [];
+  const groups: { levels: ZoneLevel[]; parent: ZoneLevel[] }[] = [];
   for (const chain of chains) {
     let part: ZoneLevel[] = [];
     for (const level of chain) {
       if (part.length && level.price - part[0]!.price > cap) {
-        groups.push(part);
+        groups.push({ levels: part, parent: chain });
         part = [];
       }
       part.push(level);
     }
-    if (part.length) groups.push(part);
+    if (part.length) groups.push({ levels: part, parent: chain });
   }
   return groups;
 }
@@ -173,7 +179,7 @@ export function clusterZones(
   const sorted = [...levels].filter((level) => Number.isFinite(level.price)).sort((a, b) => a.price - b.price || a.time - b.time);
   const groups = groupLevels(sorted, step, zoneCap(atr, price));
   const flips: ZoneFlip[] = [];
-  const zones: KeyZone[] = groups.map((group, index) => {
+  const zones: KeyZone[] = groups.map(({ levels: group, parent }, index) => {
     const low = Math.min(...group.map((level) => level.price));
     const high = Math.max(...group.map((level) => level.price));
     const known = Math.max(...group.map((level) => level.time));
@@ -197,6 +203,13 @@ export function clusterZones(
     const touch = touchesOf(bars, low, high, known);
     const sources = group.map((level) => level.name);
     const strength = sources.length + touch.count;
+    let drawStrength = strength;
+    if (parent.length > group.length) {
+      const parentLow = parent[0]!.price;
+      const parentHigh = parent[parent.length - 1]!.price;
+      const parentKnown = Math.max(...parent.map((level) => level.time));
+      drawStrength = Math.max(strength, parent.length + touchesOf(bars, parentLow, parentHigh, parentKnown).count);
+    }
     const when = touch.last == null ? "no test yet" : `last test ${istClock(touch.last).day}`;
     const place = side === "inside" ? "price inside zone" : side === "resistance" ? "Resistance" : "Support";
     return {
@@ -209,6 +222,7 @@ export function clusterZones(
       touches: touch.count,
       lastTest: touch.last,
       strength,
+      drawStrength,
       label: labelFor(side, low, high, sources, strength),
       detail: `${place} ${money(low)}–${money(high)}. Sources: ${sources.join(", ")}. Touches: ${touch.count}. ${when}.${flipped ? " Flipped after a close through the zone." : ""}`,
       visible: false,
@@ -221,33 +235,46 @@ export function clusterZones(
 /**
  * Nearest zone on each side with strength at least 2, plus the strongest zone
  * within 1.5 × the span. Strength-1 zones inside that window are faint.
- * Two drawn zones closer than `step` keep the stronger one.
+ * The nearest zone on each side is always drawn, even with one dot.
+ * Two drawn zones closer than `step` keep the stronger one, but never drop a nearest zone.
  */
 export function markVisible(zones: readonly KeyZone[], price: number, atr: number, gap = CLUSTER * atr): KeyZone[] {
   const distance = (zone: KeyZone) => (price > zone.high ? price - zone.high : zone.low > price ? zone.low - price : 0);
   const window = 1.5 * atr;
   const step = gap;
+  const power = (zone: KeyZone) => zone.drawStrength ?? zone.strength;
   const chosen = new Map<string, "solid" | "faint">();
+  const closest = new Set<string>();
   for (const side of ["resistance", "support"] as const) {
     const list = zones.filter((zone) => zone.role === side);
-    const nearest = [...list].filter((zone) => zone.strength >= 2).sort((a, b) => distance(a) - distance(b) || b.strength - a.strength)[0];
-    const strongest = [...list].filter((zone) => distance(zone) <= window).sort((a, b) => b.strength - a.strength || distance(a) - distance(b))[0];
+    const near = [...list].sort((a, b) => distance(a) - distance(b) || power(b) - power(a))[0];
+    if (near) {
+      closest.add(near.id);
+      chosen.set(near.id, "solid");
+    }
+    const nearest = [...list].filter((zone) => power(zone) >= 2).sort((a, b) => distance(a) - distance(b) || power(b) - power(a))[0];
+    const strongest = [...list].filter((zone) => distance(zone) <= window).sort((a, b) => power(b) - power(a) || distance(a) - distance(b))[0];
     for (const zone of [nearest, strongest]) {
       if (!zone) continue;
-      const mode = zone.strength <= 1 ? "faint" : "solid";
+      const mode = power(zone) <= 1 ? "faint" : "solid";
       if (chosen.get(zone.id) !== "solid") chosen.set(zone.id, mode);
     }
   }
   for (const zone of zones) {
-    if (zone.role === "inside") chosen.set(zone.id, zone.strength <= 1 ? "faint" : "solid");
-    else if (zone.strength <= 1 && distance(zone) <= window && !chosen.has(zone.id)) chosen.set(zone.id, "faint");
+    if (zone.role === "inside") chosen.set(zone.id, power(zone) <= 1 ? "faint" : "solid");
+    else if (power(zone) <= 1 && distance(zone) <= window && !chosen.has(zone.id)) chosen.set(zone.id, "faint");
   }
   const solids = zones.filter((zone) => chosen.get(zone.id) === "solid").sort((a, b) => a.low - b.low);
   for (let i = 1; i < solids.length; i += 1) {
     const prev = solids[i - 1]!;
     const next = solids[i]!;
     if (prev.role !== next.role || next.low - prev.high >= step) continue;
-    chosen.delete((prev.strength >= next.strength ? next : prev).id);
+    if (closest.has(prev.id) || closest.has(next.id)) {
+      const other = closest.has(prev.id) ? next : prev;
+      if (!closest.has(other.id)) chosen.delete(other.id);
+      continue;
+    }
+    chosen.delete((power(prev) >= power(next) ? next : prev).id);
   }
   return zones.map((zone) => ({
     ...zone,

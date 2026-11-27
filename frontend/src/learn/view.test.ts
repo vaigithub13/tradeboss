@@ -68,7 +68,7 @@ describe("Learn view", () => {
     expect(inside?.label.startsWith("In ")).toBe(true);
   });
 
-  it("merges zones closer than 0.25 ATR and keeps a strong zone with a nearer faint one", () => {
+  it("merges zones closer than 0.25 ATR and keeps a strong zone beside the nearest one-dot zone", () => {
     const bar: LearnBar = { time: at(26, 11, 0), open: 80, high: 80.4, low: 79.6, close: 80 };
     const merged = clusterZones([
       { name: "PDH", price: 100, time: bar.time },
@@ -88,9 +88,10 @@ describe("Learn view", () => {
       ...names(180, 6, "PWH"),
     ], [bar], 80, 100);
     const solid = picked.zones.filter((zone) => zone.visible).map((zone) => Math.round(zone.low)).sort((a, b) => a - b);
-    expect(solid).toEqual([130, 180]);
-    expect(picked.zones.find((zone) => Math.round(zone.low) === 102)?.faint).toBe(true);
-    expect(picked.zones.find((zone) => Math.round(zone.low) === 102)?.visible).toBe(false);
+    // The nearest resistance is always drawn, even with one dot.
+    expect(solid).toEqual([102, 130, 180]);
+    expect(picked.zones.find((zone) => Math.round(zone.low) === 102)?.strength).toBe(1);
+    expect(picked.zones.find((zone) => Math.round(zone.low) === 102)?.label).toMatch(/ ●$/);
   });
 
   it("does not flip a zone on a candle that is left out of the closed set", () => {
