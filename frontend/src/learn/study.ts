@@ -584,6 +584,7 @@ export interface StudyLayers {
   round: boolean;
   notes: boolean;
   signals: boolean;
+  events: boolean;
 }
 
 export const DEFAULT_LAYERS: StudyLayers = {
@@ -600,6 +601,7 @@ export const DEFAULT_LAYERS: StudyLayers = {
   round: true,
   notes: true,
   signals: true,
+  events: true,
 };
 
 export function recentLabels(labels: readonly StudyLabel[], limit: number): StudyLabel[] {

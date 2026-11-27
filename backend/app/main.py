@@ -21,6 +21,7 @@ from app.routes.drawings import router as drawings_router
 from app.routes.fvg import router as fvg_router
 from app.routes.gex import router as gex_router
 from app.routes.indicators import router as indicators_router
+from app.routes.learn_export import router as learn_export_router
 from app.routes.learn_notes import router as learn_notes_router
 from app.routes.learn_signals import router as learn_signals_router
 from app.routes.live import router as live_router
@@ -161,6 +162,7 @@ app.include_router(candles_router)
 app.include_router(indicators_router)
 app.include_router(learn_notes_router)
 app.include_router(learn_signals_router)
+app.include_router(learn_export_router)
 app.include_router(drawings_router)
 app.include_router(fvg_router)
 app.include_router(gex_router)

@@ -8,6 +8,7 @@ import { atrAt, readLesson, trueRanges, type Lesson } from "./lesson";
 import { readLevels } from "./levels";
 import { gapSeeds, type StudyBox } from "./study";
 import { readStructure, type BreakEvent, type LearnBar, type Structure } from "./structure";
+import { isExpiryDay } from "./events";
 import { istClock, istEpoch } from "./time";
 
 export const M5 = 300;
@@ -24,6 +25,12 @@ export type SetupName = "SWP" | "FVG" | "AMD";
 export type SignalSide = "buy" | "sell";
 export type SignalStatus = "open" | "TP" | "SL" | "expired";
 export type PlanState = "waiting" | "in_zone";
+export type SessionSlot = "opening" | "midday" | "closing";
+export type TrendAlign = "with" | "against" | "flat";
+export type LevelGroup = "PDH/PDL" | "week" | "OR" | "EQH/EQL" | "other";
+
+export const OPTION_COST_INR = 110;
+const LOT: Record<string, number> = { NIFTY50: 65, SENSEX: 20, BANKNIFTY: 30 };
 
 export interface WatchSignal {
   id: string;
@@ -42,6 +49,11 @@ export interface WatchSignal {
   exit: number | null;
   r: number | null;
   liveR: number | null;
+  slot: SessionSlot;
+  trend15: TrendAlign;
+  level: LevelGroup;
+  expiry: boolean;
+  costR: number;
 }
 
 export interface PlanCard {
@@ -81,6 +93,19 @@ export interface SetupStats {
   avgR: number | null;
 }
 
+export interface BreakdownRow {
+  setup: SetupName;
+  slot: SessionSlot;
+  trend15: TrendAlign;
+  level: LevelGroup;
+  expiry: boolean;
+  n: number;
+  winRate: number | null;
+  avgR: number | null;
+  avgRNet: number | null;
+  verdict: string;
+}
+
 export interface SignalBook {
   plans: PlanCard[];
   done: PlanDone[];
@@ -89,6 +114,7 @@ export interface SignalBook {
   stats: Record<"all" | SetupName, SetupStats>;
   trend: "up" | "down" | null;
   price: number | null;
+  breakdown: BreakdownRow[];
 }
 
 export function emptyStats(): SetupStats {
@@ -104,6 +130,7 @@ export function emptyBook(): SignalBook {
     stats: { all: emptyStats(), SWP: emptyStats(), FVG: emptyStats(), AMD: emptyStats() },
     trend: null,
     price: null,
+    breakdown: [],
   };
 }
 
@@ -213,6 +240,11 @@ function makeSignal(
     exit: null,
     r: null,
     liveR: null,
+    slot: "midday",
+    trend15: "flat",
+    level: "other",
+    expiry: false,
+    costR: 0,
   };
 }
 
@@ -607,9 +639,13 @@ export function bookFromParts(input: BookParts): SignalBook {
   const swp = swpSignals(bars, structure, lesson, input.symbol);
   const fvg = fvgSignals(bars, structure, gaps, input.symbol);
   const amd = amdSignals(bars, structure, lesson, input.symbol);
-  const scored = [...swp.signals, ...fvg.signals, ...amd]
-    .map((signal) => scoreSignal(signal, bars, input.now))
-    .sort((a, b) => a.time - b.time);
+  const scored = attachContext(
+    [...swp.signals, ...fvg.signals, ...amd]
+      .map((signal) => scoreSignal(signal, bars, input.now))
+      .sort((a, b) => a.time - b.time),
+    bars,
+    input.symbol,
+  );
   const price = bars[bars.length - 1]!.close;
   const atr = atrAtBar(bars, bars.length - 1);
   const planned = buildPlans(bars, structure, lesson, gaps, scored, input.now, price, atr);
@@ -621,7 +657,106 @@ export function bookFromParts(input: BookParts): SignalBook {
     stats: tally(scored),
     trend: trendAt(structure.events, bars[bars.length - 1]!.time),
     price,
+    breakdown: whatWorks(scored),
   };
+}
+
+export function costInR(riskPoints: number, lot: number, rupees = OPTION_COST_INR): number {
+  if (!(riskPoints > 0) || !(lot > 0)) return 0;
+  return round2(rupees / (riskPoints * lot));
+}
+
+export function sessionSlot(epoch: number): SessionSlot {
+  const minutes = istClock(epoch).minutes;
+  if (minutes < 10 * 60 + 15) return "opening";
+  if (minutes < 13 * 60 + 30) return "midday";
+  return "closing";
+}
+
+export function levelGroup(why: string): LevelGroup {
+  if (/\bPDH\b|\bPDL\b/.test(why)) return "PDH/PDL";
+  if (/Week high|Week low/.test(why)) return "week";
+  if (/OR high|OR low/.test(why)) return "OR";
+  if (/\bEQH\b|\bEQL\b/.test(why)) return "EQH/EQL";
+  return "other";
+}
+
+export function verdictOf(n: number, winRate: number | null, avgR: number | null): string {
+  const edge = winRate != null && winRate >= 55 && (avgR ?? 0) > 0.1;
+  const slight = winRate != null && winRate >= 50 && (avgR ?? 0) > 0;
+  if (n < 50) {
+    if (edge) return "edge, small sample";
+    if (slight) return "slight edge, small sample";
+    return "no edge, small sample";
+  }
+  if (edge) return "edge";
+  if (slight) return "slight edge";
+  return "no edge";
+}
+
+function bars15(bars: readonly LearnBar[]): LearnBar[] {
+  const groups = new Map<number, LearnBar & { count: number }>();
+  for (const bar of bars) {
+    const clock = istClock(bar.time);
+    if (clock.minutes < 9 * 60 + 15 || clock.minutes >= 15 * 60 + 30) continue;
+    const offset = clock.minutes - (9 * 60 + 15);
+    const start = bar.time - (offset % 15) * 60;
+    const found = groups.get(start);
+    if (!found) {
+      groups.set(start, { time: start, open: bar.open ?? bar.close, high: bar.high, low: bar.low, close: bar.close, count: 1 });
+    } else {
+      found.high = Math.max(found.high, bar.high);
+      found.low = Math.min(found.low, bar.low);
+      found.close = bar.close;
+      found.count += 1;
+    }
+  }
+  return [...groups.values()].filter((bar) => bar.count >= 3).sort((a, b) => a.time - b.time);
+}
+
+function attachContext(signals: WatchSignal[], bars: readonly LearnBar[], symbol: string): WatchSignal[] {
+  const higher = bars15(bars);
+  const events = readStructure(higher, { left: 3, right: 3 }).events.map((event) => ({ ...event, time: event.time + 900 }));
+  const lot = LOT[symbol] ?? 65;
+  return signals.map((signal) => {
+    const bias = trendAt(events, signal.time);
+    const trend15: TrendAlign = bias == null ? "flat" : (bias === "up") === (signal.side === "buy") ? "with" : "against";
+    return {
+      ...signal,
+      slot: sessionSlot(signal.time),
+      trend15,
+      level: levelGroup(signal.why),
+      expiry: isExpiryDay(istClock(signal.time).day, symbol),
+      costR: costInR(signal.risk, lot),
+    };
+  });
+}
+
+export function whatWorks(signals: readonly WatchSignal[]): BreakdownRow[] {
+  const groups = new Map<string, WatchSignal[]>();
+  for (const signal of signals) {
+    const key = `${signal.setup}|${signal.slot}|${signal.trend15}|${signal.level}|${signal.expiry ? "expiry" : "other"}`;
+    const rows = groups.get(key);
+    if (rows) rows.push(signal);
+    else groups.set(key, [signal]);
+  }
+  return [...groups.entries()].map(([, rows]) => {
+    const stats = tally(rows).all;
+    const net = rows.filter((row) => row.r != null);
+    const avgRNet = net.length ? round2(net.reduce((sum, row) => sum + (row.r ?? 0) - row.costR, 0) / net.length) : null;
+    return {
+      setup: rows[0]!.setup,
+      slot: rows[0]!.slot,
+      trend15: rows[0]!.trend15,
+      level: rows[0]!.level,
+      expiry: rows[0]!.expiry,
+      n: stats.signals,
+      winRate: stats.winRate,
+      avgR: stats.avgR,
+      avgRNet,
+      verdict: verdictOf(stats.signals, stats.winRate, stats.avgR),
+    };
+  }).sort((a, b) => b.n - a.n || a.setup.localeCompare(b.setup));
 }
 
 function freshGapState(bars: readonly LearnBar[], seeds: StudyBox[]): StudyBox[] {

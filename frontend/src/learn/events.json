@@ -1,0 +1,37 @@
+{
+  "note": "Edit this file. Add a date, a kind, a title, the symbols it applies to (empty means all), a source, and verified true only after you have checked that source. Generated expiry days are added in code and can be overridden by an event here with the same date, kind, and title. US releases marked next_session are shown on the following Indian session, because they print after 15:30 IST.",
+  "holidays": [
+    "2022-01-26", "2022-03-01", "2022-03-18", "2022-04-14", "2022-04-15", "2022-05-03", "2022-08-09", "2022-08-15", "2022-08-31", "2022-10-05", "2022-10-24", "2022-10-26", "2022-11-08",
+    "2023-01-26", "2023-03-07", "2023-03-30", "2023-04-04", "2023-04-07", "2023-04-14", "2023-05-01", "2023-06-29", "2023-08-15", "2023-09-19", "2023-10-02", "2023-10-24", "2023-11-14", "2023-11-27", "2023-12-25",
+    "2024-01-22", "2024-01-26", "2024-03-08", "2024-03-25", "2024-03-29", "2024-04-11", "2024-04-17", "2024-05-01", "2024-05-20", "2024-06-17", "2024-07-17", "2024-08-15", "2024-10-02", "2024-11-01", "2024-11-15", "2024-11-20", "2024-12-25",
+    "2025-02-26", "2025-03-14", "2025-03-31", "2025-04-10", "2025-04-14", "2025-04-18", "2025-05-01", "2025-08-15", "2025-08-27", "2025-10-02", "2025-10-21", "2025-10-22", "2025-11-05", "2025-12-25",
+    "2026-01-15", "2026-01-26", "2026-03-03", "2026-03-26", "2026-03-31", "2026-04-03", "2026-04-14", "2026-05-01", "2026-05-28", "2026-06-26", "2026-09-14", "2026-10-02", "2026-10-20", "2026-11-10", "2026-11-24", "2026-12-25"
+  ],
+  "holidaySource": "Same weekday list as backend/app/backtest/data/nse_holidays.json. 2022 through 2026-10-01 are weekdays with no regular Nifty session in the stored 1-minute file. The 2026 weekday holidays match NSE circular NSE/CMTR/71775 (12 Dec 2025), including 26 Jan Republic Day, 3 Mar Holi, 26 Mar Ram Navami, 31 Mar Mahavir Jayanti, 3 Apr Good Friday, 14 Apr Ambedkar Jayanti, 1 May Maharashtra Day, 28 May Bakri Id, 26 Jun Muharram, 14 Sep Ganesh Chaturthi, 2 Oct Gandhi Jayanti, 20 Oct Dussehra, 10 Nov Diwali Balipratipada, 24 Nov Guru Nanak Jayanti, 25 Dec Christmas. 15 Jan 2026 was added later for municipal elections. Muhurat trading on Sun 8 Nov 2026 is not a regular session.",
+  "events": [
+    {"date": "2026-01-26", "kind": "holiday", "title": "Republic Day", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-03-03", "kind": "holiday", "title": "Holi", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-03-26", "kind": "holiday", "title": "Shri Ram Navami", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-03-31", "kind": "holiday", "title": "Shri Mahavir Jayanti", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-04-03", "kind": "holiday", "title": "Good Friday", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-04-14", "kind": "holiday", "title": "Dr. Ambedkar Jayanti", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-05-01", "kind": "holiday", "title": "Maharashtra Day", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-05-28", "kind": "holiday", "title": "Bakri Id", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-06-26", "kind": "holiday", "title": "Muharram", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-09-14", "kind": "holiday", "title": "Ganesh Chaturthi", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-10-02", "kind": "holiday", "title": "Mahatma Gandhi Jayanti", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-10-20", "kind": "holiday", "title": "Dussehra", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-11-10", "kind": "holiday", "title": "Diwali Balipratipada", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-11-24", "kind": "holiday", "title": "Guru Nanak Jayanti", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-12-25", "kind": "holiday", "title": "Christmas", "symbols": [], "source": "NSE/CMTR/71775, 12 Dec 2025", "verified": true, "markOn": "same"},
+    {"date": "2026-01-28", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, announced 9 Aug 2024: https://www.federalreserve.gov/newsevents/pressreleases/monetary20240809a.htm", "verified": true, "markOn": "next_session"},
+    {"date": "2026-03-18", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, 9 Aug 2024", "verified": true, "markOn": "next_session"},
+    {"date": "2026-04-29", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, 9 Aug 2024", "verified": true, "markOn": "next_session"},
+    {"date": "2026-06-17", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, 9 Aug 2024", "verified": true, "markOn": "next_session"},
+    {"date": "2026-07-29", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, 9 Aug 2024", "verified": true, "markOn": "next_session"},
+    {"date": "2026-09-16", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, 9 Aug 2024", "verified": true, "markOn": "next_session"},
+    {"date": "2026-10-28", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, 9 Aug 2024", "verified": true, "markOn": "next_session"},
+    {"date": "2026-12-09", "kind": "fomc", "title": "FOMC decision", "symbols": [], "source": "Federal Reserve FOMC calendar, 9 Aug 2024", "verified": true, "markOn": "next_session"},
+    {"date": "2026-02-01", "kind": "budget", "title": "Union Budget", "symbols": [], "source": "The Union Budget is customarily presented on 1 February. 1 Feb 2026 is a Sunday, so confirm the sitting day before treating this as a session event.", "verified": false, "markOn": "same"}
+  ]
+}

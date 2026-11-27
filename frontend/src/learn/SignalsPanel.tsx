@@ -1,4 +1,6 @@
-import type { SignalBook, SetupName, WatchSignal } from "./signals";
+import { useState } from "react";
+
+import type { BreakdownRow, SignalBook, SetupName, WatchSignal } from "./signals";
 import { emptySymbolBook, type SavedStats, type SignalsSummary, type SymbolBook } from "./signalLog";
 import { learnAxisTime } from "./time";
 
@@ -103,6 +105,7 @@ export function SignalsPanel({
           <SetupTable book={history} />
         </>
       ) : <p className="muted">Historical scores appear here after the backfill is written.</p>}
+      <WhatWorks rows={history?.breakdown ?? []} windowRows={book.breakdown} />
       <h3>By symbol</h3>
       <table className="mini">
         <thead>
@@ -132,6 +135,44 @@ export function SignalsPanel({
       </p>
       {reviewNote && <p className="muted">{reviewNote}</p>}
     </div>
+  );
+}
+
+function WhatWorks({ rows, windowRows }: { rows: BreakdownRow[]; windowRows: BreakdownRow[] }) {
+  const [net, setNet] = useState(false);
+  const shown = rows.length ? rows : windowRows;
+  return (
+    <>
+      <h3>What works</h3>
+      <p className="muted">
+        {rows.length ? "History, no costs." : "This loaded window. History fills in after the backfill."}
+        {" "}₹110 per trade is divided by the stop in points times the current lot (Nifty 65, Sensex 20, Bank Nifty 30). Older lot sizes are not applied. A cell with fewer than 50 signals is grey.
+      </p>
+      <p>
+        <button type="button" className="ghost" aria-pressed={net} onClick={() => setNet((on) => !on)}>
+          {net ? "Showing R after ₹110" : "Show R after ₹110"}
+        </button>
+      </p>
+      {shown.length === 0 && <p>No closed signal to split yet.</p>}
+      {shown.length > 0 && (
+        <table className="mini">
+          <thead>
+            <tr><th>Split</th><th>n</th><th>Win</th><th>{net ? "Avg R net" : "Avg R"}</th><th></th></tr>
+          </thead>
+          <tbody>
+            {shown.slice(0, 24).map((row) => (
+              <tr key={`${row.setup}-${row.slot}-${row.trend15}-${row.level}-${row.expiry}`} className={row.n < 50 ? "dim" : ""}>
+                <td>{row.setup} · {row.slot} · {row.trend15 === "flat" ? "no 15m trend" : `${row.trend15} 15m`} · {row.level} · {row.expiry ? "expiry" : "not expiry"}</td>
+                <td>{row.n}</td>
+                <td>{pct(row.winRate)}</td>
+                <td>{num(net ? row.avgRNet : row.avgR)}</td>
+                <td>{row.verdict}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </>
   );
 }
 

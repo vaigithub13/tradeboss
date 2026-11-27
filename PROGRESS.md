@@ -2555,6 +2555,16 @@ The Signals tab is watch-only. Its banner says these are not trades and that eac
 
 Signal boxes (entry, stop, target, and the reason) are drawn on the Learn chart. Results since the review started are signals, TP, SL, expired, win % of TP against SL, and total R, with a table per setup and a split across NIFTY, SENSEX, and BANKNIFTY. The 2022–2026 scores sit beside them, labelled history (no costs). A review at 16:00 IST, and the "Run the review now" button, write `data/learn/signals/signals.csv`, `daily/<date>.md`, and `summary.json`. Those files stay untracked. The chart and the review use the same engine.
 
+## 27 Nov 2026 — Learn tab, phase N3
+
+Education only, on the Learn tab. The Chart tab, the Sensex tab, paper slots, the assist, the scanner, and the live path were not changed. No order is sent. `LIVE_TRADING` stays false. The backend was not started.
+
+A calendar in `frontend/src/learn/events.json` marks holidays, expiry days, and a few dated releases on the chart, and the Now banner names today's events. Nifty weekly expiry follows Thursday through 28 Aug 2025 and Tuesday from 2 Sep 2025, shifted to the previous trading day when that weekday is a holiday. Sensex weekly expiry is generated from 4 Sep 2025. Bank Nifty weekly expiry stops after 13 Nov 2024 and is marked unverified. 2026 NSE holidays and the 2026 FOMC decision days are cited in the file. India CPI, GDP, IIP, and RBI dates are left for the user to add, because those dates move. An unverified row stays visible and says so.
+
+The Signals history splits by setup, time slot, the 15-minute trend, the level, and whether the day is an expiry. Each row shows n, win %, and average R, then the same R after ₹110 per trade. The rupee cost is turned into R with the current lot (Nifty 65, Sensex 20, Bank Nifty 30) and the panel says older lot changes are not applied. A row with fewer than 50 signals is grey, and the verdict is plain: no edge, a slight edge, or an edge, with "small sample" when n is under 50.
+
+Export for review writes `data/learn/exports/<date>/session.md` and a PNG of the chart. The note carries the Now banner, the AMD read, the day's events, the signals, the notes, "My read of today", and the practice scores. The folder stays untracked. Practice asks for a written read before the next six candles are shown, then scores the direction and an optional level, and keeps a per-tag tally. Those scores stay in `data/learn/practice/scores.json`, also untracked.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

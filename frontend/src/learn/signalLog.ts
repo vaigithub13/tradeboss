@@ -1,5 +1,7 @@
 /** Saved Learn-signal results. The files live under data/learn/signals and stay untracked. */
 
+import type { BreakdownRow } from "./signals";
+
 export interface SavedStats {
   signals: number;
   tp: number;
@@ -15,6 +17,7 @@ export interface SymbolBook {
   SWP: SavedStats;
   FVG: SavedStats;
   AMD: SavedStats;
+  breakdown?: BreakdownRow[];
 }
 
 export interface SignalsSummary {

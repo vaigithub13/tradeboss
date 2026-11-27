@@ -4,11 +4,14 @@ import type { Lesson } from "./lesson";
 import {
   amdTarget,
   bookFromParts,
+  costInR,
   entryAllowed,
   isRejection,
   readSignalBook,
   replayMatches,
   scoreSignal,
+  verdictOf,
+  whatWorks,
   zoneState,
   type WatchSignal,
 } from "./signals";
@@ -40,6 +43,11 @@ function signal(patch: Partial<WatchSignal> = {}): WatchSignal {
     exit: null,
     r: null,
     liveR: null,
+    slot: "midday",
+    trend15: "flat",
+    level: "other",
+    expiry: false,
+    costR: 0,
     ...patch,
   };
 }
@@ -98,6 +106,8 @@ describe("Learn signals", () => {
     });
     expect(book.signals.filter((item) => item.setup === "SWP")).toHaveLength(1);
     expect(book.signals[0]?.why).toMatch(/PDL/);
+    expect(book.signals[0]?.level).toBe("PDH/PDL");
+    expect(book.signals[0]?.slot).toBe("midday");
     expect(book.done.some((item) => item.result === "not_counted")).toBe(true);
 
     const broken = at(10, 5, 101, 97, 99);
@@ -178,6 +188,25 @@ describe("Learn signals", () => {
     expect(amdTarget("buy", 100, 10, [{ name: "PDH", price: 110 }]).note).toMatch(/PDH \(nearer than 2R\)/);
     expect(amdTarget("buy", 100, 10, [{ name: "PDH", price: 150 }]).note).toMatch(/2R \(nearer than PDH\)/);
     expect(amdTarget("sell", 100, 10, []).note).toMatch(/no opposite liquidity/);
+  });
+
+  it("greys a small sample and subtracts ₹110 as R", () => {
+    expect(verdictOf(12, 60, 0.2)).toBe("edge, small sample");
+    expect(verdictOf(80, 40, -0.1)).toBe("no edge");
+    expect(verdictOf(60, 51, 0.05)).toBe("slight edge");
+    expect(costInR(10, 65)).toBe(0.17);
+    const rows = Array.from({ length: 12 }, (_, index) => signal({
+      id: `s-${index}`,
+      status: "TP",
+      r: 1,
+      costR: 0.17,
+      setup: "FVG",
+      level: "other",
+    }));
+    const cell = whatWorks(rows)[0];
+    expect(cell?.n).toBe(12);
+    expect(cell?.verdict).toMatch(/small sample/);
+    expect(cell?.avgRNet).toBe(0.83);
   });
 
   it("rejects a bullish candle with a long lower wick and ignores a plain up close", () => {

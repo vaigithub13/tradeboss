@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CandlestickSeries,
   createChart,
@@ -12,11 +12,15 @@ import { capCandlesQuery } from "../replay/cap";
 import { fetchCandles, type Candle, type Timeframe } from "../api/client";
 import type { LiveView } from "../live/protocol";
 import { subscribeLearnBars, useLiveStore } from "../store/liveStore";
+import { sessionMarkdown } from "./exportSession";
 import { explainCard, explainTip } from "./explainCards";
+import { eventsOn, todayLine } from "./events";
 import { runJob, type JobState, type LearnRead } from "./job";
 import { DEFAULT_LABEL_SWINGS } from "./labels";
 import { pushLiveBar } from "./liveBars";
 import { loadNotes, saveNotes } from "./notes";
+import { PracticePanel } from "./PracticePanel";
+import { PRACTICE_BARS, type PracticeRow } from "./practice";
 import { LearnOverlay, type ChartMark } from "./overlay";
 import { loadSignalSummary, runSignalReview, type SignalsSummary } from "./signalLog";
 import { SignalsPanel } from "./SignalsPanel";
@@ -51,7 +55,7 @@ const LAYER_GROUPS: { title: string; rows: { key: keyof StudyLayers; label: stri
       { key: "patternAll", label: "Show all patterns" },
     ],
   },
-  { title: "Context", rows: [{ key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }] },
+  { title: "Context", rows: [{ key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }, { key: "events", label: "Calendar events" }] },
   { title: "Signals", rows: [{ key: "signals", label: "Signal boxes" }] },
 ];
 
@@ -89,7 +93,12 @@ export function LearnTab({
   const [cursor, setCursor] = useState<number | null>(null);
   const [candles, setCandles] = useState<LearnBar[]>(bars ?? []);
   const [read, setRead] = useState<LearnRead | null>(null);
-  const [tab, setTab] = useState<"layers" | "events" | "explain" | "notes" | "signals">("layers");
+  const [tab, setTab] = useState<"layers" | "events" | "explain" | "notes" | "signals" | "practice">("layers");
+  const [practiceHold, setPracticeHold] = useState(false);
+  const [practiceRows, setPracticeRows] = useState<PracticeRow[]>([]);
+  const [bannerLog, setBannerLog] = useState<string[]>([]);
+  const [exportNote, setExportNote] = useState<string | null>(null);
+  const practiceCut = useRef<number | null>(null);
   const [m5Extra, setM5Extra] = useState<LearnBar[]>([]);
   const [summary, setSummary] = useState<SignalsSummary | null>(null);
   const [reviewNote, setReviewNote] = useState<string | null>(null);
@@ -285,8 +294,35 @@ export function LearnTab({
     return () => { gone = true; };
   }, []);
 
+  const chartBars = useMemo(() => {
+    if (!practiceHold) {
+      practiceCut.current = null;
+      return candles;
+    }
+    if (candles.length < PRACTICE_BARS + 1) return candles;
+    if (practiceCut.current == null) practiceCut.current = candles.length - PRACTICE_BARS;
+    return candles.slice(0, practiceCut.current);
+  }, [candles, practiceHold]);
+  const eventMarks = useMemo(() => {
+    const seen = new Set<string>();
+    const marks: { time: number; title: string; verified: boolean }[] = [];
+    for (const bar of chartBars) {
+      const day = istClock(bar.time).day;
+      if (seen.has(day)) continue;
+      seen.add(day);
+      const items = eventsOn(day, symbol);
+      if (items.length === 0) continue;
+      marks.push({
+        time: bar.time,
+        title: items.map((item) => item.title).join(", "),
+        verified: items.every((item) => item.verified),
+      });
+    }
+    return marks;
+  }, [chartBars, symbol]);
+
   useEffect(() => {
-    const shown = shownBars(candles, replay ? cursor : null);
+    const shown = shownBars(chartBars, replay ? cursor : null);
     const signalSource = timeframe === "5m" ? shown : shownBars(m5Extra, replay ? cursor : null);
     const job = {
       bars: closedBars(shown, replay ? cursor : null),
@@ -307,7 +343,7 @@ export function LearnTab({
     const done = runJob(job, jobState.current);
     jobState.current = done.state;
     setRead(done.read);
-  }, [candles, cursor, left, m5Extra, rangeSwings, replay, right, symbol, timeframe]);
+  }, [candles, chartBars, cursor, left, m5Extra, rangeSwings, replay, right, symbol, timeframe]);
 
   useEffect(() => {
     const overlay = overlayRef.current;
@@ -319,10 +355,11 @@ export function LearnTab({
       notes: notes.filter((note) => note.symbol === symbol),
       selected: picked?.id ?? null,
       signals: read.signals.signals,
+      events: eventMarks,
     });
-  }, [labelSwings, layers, notes, picked, read, symbol]);
+  }, [eventMarks, labelSwings, layers, notes, picked, read, symbol]);
 
-  const dayKey = istClock((replay && cursor != null ? cursor : candles.at(-1)?.time) ?? Math.floor(Date.now() / 1000)).day;
+  const dayKey = istClock((replay && cursor != null ? cursor : chartBars.at(-1)?.time) ?? Math.floor(Date.now() / 1000)).day;
   useEffect(() => { setReadDraft(reads[dayKey] ?? ""); }, [dayKey, reads]);
 
   const persist = (nextNotes: StudyNote[], nextReads: Record<string, string>) => {
@@ -337,8 +374,9 @@ export function LearnTab({
     persist(next, reads);
   };
 
-  const quote = quoteOf(shownBars(candles, replay ? cursor : null));
-  const banner = candles.length === 0 ? "Waiting for candles." : (read?.study.banner ?? "Waiting for candles.");
+  const quote = quoteOf(shownBars(chartBars, replay ? cursor : null));
+  const sessionLine = chartBars.length === 0 ? "Waiting for candles." : (read?.study.banner ?? "Waiting for candles.");
+  const banner = `${sessionLine} · ${todayLine(dayKey, symbol)}`;
   const warn = /failed|patient|No AMD|Weekend|Before the open|not enough/.test(banner);
   const tick = lastBarAt != null
     ? learnAxisTime(Math.floor(lastBarAt / 1000))
@@ -346,6 +384,19 @@ export function LearnTab({
   const feed = replay ? "replay" : link === "open" ? "live" : "feed down";
   const card = picked ? explainCard(picked.kind) : null;
   const visibleNotes = notes.filter((note) => note.symbol === symbol);
+  useEffect(() => {
+    setBannerLog((prev) => (prev.at(-1) === banner ? prev : [...prev, banner].slice(-40)));
+  }, [banner]);
+  useEffect(() => {
+    const shown = shownBars(chartBars, replay ? cursor : null);
+    seriesRef.current?.setData(shown.map((bar) => ({
+      time: bar.time as UTCTimestamp,
+      open: bar.open ?? bar.close,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close,
+    })));
+  }, [chartBars, cursor, replay]);
 
   return (
     <div className={`learn${theme === "dark" ? " learn-dark" : ""}`} data-testid="learn-pane">
@@ -372,9 +423,39 @@ export function LearnTab({
             {feed}{tick ? ` · ${tick} IST` : ""}
           </span>
           {quote && <span className="quote">{quote.price}<small>range {quote.range}</small></span>}
+          <button type="button" className="ghost" data-testid="learn-export" onClick={() => {
+            const markdown = sessionMarkdown({
+              day: dayKey,
+              symbol,
+              banners: bannerLog.length ? bannerLog : [banner],
+              amd: read?.lesson.sessions ?? [],
+              events: eventsOn(dayKey, symbol).map((item) => ({ title: item.title, verified: item.verified, source: item.source })),
+              signals: read?.signals.signals ?? [],
+              notes: visibleNotes.filter((note) => istClock(note.time).day === dayKey),
+              read: reads[dayKey] ?? readDraft,
+              practice: practiceRows,
+            });
+            const chart = chartRef.current as (IChartApi & { takeScreenshot?: () => HTMLCanvasElement }) | null;
+            let png = "";
+            try {
+              const canvas = chart?.takeScreenshot?.();
+              png = canvas ? (canvas.toDataURL("image/png").split(",")[1] ?? "") : "";
+            } catch {
+              png = "";
+            }
+            void fetch("/api/learn/export", {
+              method: "POST",
+              headers: { "content-type": "application/json" },
+              body: JSON.stringify({ day: dayKey, markdown, png }),
+            }).then((res) => {
+              if (!res.ok) throw new Error("export");
+              setExportNote(`Saved data/learn/exports/${dayKey}/`);
+            }).catch(() => setExportNote("The export could not be saved. Start the app and try again."));
+          }}>Export for review</button>
           <button type="button" className="ghost" data-testid="learn-theme" onClick={() => setTheme((mode) => mode === "light" ? "dark" : "light")}>
             {theme === "light" ? "Dark" : "Light"}
           </button>
+          {exportNote && <span className="status">{exportNote}</span>}
         </div>
       </header>
       <div className={`banner${warn ? " warn" : ""}`} data-testid="learn-banner">{banner}</div>
@@ -395,8 +476,12 @@ export function LearnTab({
         </div>
         <aside>
           <div className="tabs" role="tablist">
-            {(["layers", "events", "explain", "notes", "signals"] as const).map((name) => (
-              <button key={name} type="button" role="tab" aria-selected={tab === name} onClick={() => setTab(name)}>
+            {(["layers", "events", "explain", "notes", "signals", "practice"] as const).map((name) => (
+              <button key={name} type="button" role="tab" aria-selected={tab === name} onClick={() => {
+                if (name === "practice") setPracticeHold(true);
+                else setPracticeHold(false);
+                setTab(name);
+              }}>
                 {name[0]!.toUpperCase() + name.slice(1)}
               </button>
             ))}
@@ -485,6 +570,16 @@ export function LearnTab({
                     })
                     .catch(() => setReviewNote("The review could not run. Start the app and try again."));
                 }}
+              />
+            )}
+            {tab === "practice" && (
+              <PracticePanel
+                bars={candles}
+                hiddenFrom={practiceHold ? practiceCut.current : null}
+                symbol={symbol}
+                day={dayKey}
+                onHold={setPracticeHold}
+                onRows={setPracticeRows}
               />
             )}
             {tab === "notes" && (

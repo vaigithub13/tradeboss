@@ -100,6 +100,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
   private labelLimit = 12;
   private notes: StudyNote[] = [];
   private signals: WatchSignal[] = [];
+  private events: { time: number; title: string; verified: boolean }[] = [];
   private selected: string | null = null;
   hits: HitBox[] = [];
   private chart: IChartApi | null = null;
@@ -147,12 +148,14 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     notes: StudyNote[];
     selected: string | null;
     signals?: WatchSignal[];
+    events?: { time: number; title: string; verified: boolean }[];
   }): void {
     this.study = input.study;
     this.layers = input.layers;
     this.labelLimit = input.limit;
     this.notes = input.notes;
     this.signals = input.signals ?? [];
+    this.events = input.events ?? [];
     this.selected = input.selected;
     this.requestUpdate();
   }
@@ -342,6 +345,20 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
         ctx.strokeRect(anchor.x - 1, top - 1, w + 2, h + 2);
       }
       hits.push({ x: anchor.x, y: top, w, h, mark: { id: label.id, kind: label.kind, detail: label.detail, time: label.time } });
+    }
+    if (layers.events) {
+      ctx.font = "600 10px sans-serif";
+      for (const mark of this.events) {
+        const x = xOf(mark.time);
+        if (x == null) continue;
+        ctx.fillStyle = mark.verified ? "#1d4ed8" : "#b45309";
+        ctx.fillRect(x, 18, 2, 12);
+        ctx.fillText(mark.title.slice(0, 32), x + 4, 28);
+        hits.push({
+          x, y: 16, w: 120, h: 16,
+          mark: { id: `event-${mark.time}-${mark.title}`, kind: "event", detail: `${mark.title}${mark.verified ? "" : " (unverified)"}`, time: mark.time },
+        });
+      }
     }
     if (layers.signals) {
       ctx.font = "600 11px sans-serif";

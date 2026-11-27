@@ -75,6 +75,8 @@ describe("Learn tab", () => {
       "👀 Watch only — these are not trades. Each one is scored automatically.",
     );
     expect(screen.getByRole("button", { name: "Run the review now" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Export for review" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "What works" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "history (no costs)" })).toBeTruthy();
     expect(screen.getByTestId("learn-banner").textContent).toMatch(/Opening hour — accumulation forming/);
     const credits = screen.getByTestId("learn-credits");

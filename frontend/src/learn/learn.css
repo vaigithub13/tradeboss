@@ -334,6 +334,7 @@
 .learn .sig-list { list-style: none; padding: 0; margin: 0; font-size: 12px; }
 .learn .sig-list li { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
 .learn h3 { font-size: 12px; margin: 12px 0 4px; }
+.learn tr.dim { color: #9ca3af; }
 .learn-dark .watch { background: #2a2112; color: #fde68a; border-color: #92400e; }
 .learn-dark .plan { border-color: #2a3142; }
 .learn-dark table.mini th, .learn-dark table.mini td, .learn-dark .sig-list li { border-bottom-color: #2a3142; }

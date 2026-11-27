@@ -206,6 +206,12 @@ export const EXPLAIN_CARDS: Record<string, ExplainCard> = {
     why: "Orders and stops cluster on obvious numbers.",
     next: "Treat 100-point numbers as stronger than the 50s between them.",
   },
+  event: {
+    title: "Calendar event",
+    what: "A dated item from the Learn calendar: a holiday, an expiry, or a release such as FOMC.",
+    why: "The session often behaves differently on an expiry day or around a scheduled release. An unverified date still needs you to check the source.",
+    next: "Read the source in the calendar file before you treat the date as settled. Edit events.json to correct it.",
+  },
   signal: {
     title: "Watch-only signal",
     what: "A scored box: entry, stop, and target on a closed 5-minute candle. It is not an order and it is not a paper slot.",

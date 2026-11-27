@@ -294,6 +294,7 @@ def write_history(data_dir: Path, candles_dir: Path, start: date, end: date) -> 
         by_symbol[symbol] = {
             "all": _from_engine(stats.get("all")),
             **{name: _from_engine(stats.get(name)) for name in SETUPS},
+            "breakdown": book.get("breakdown") or [],
         }
     summary["history"] = {
         "label": "history (no costs)",
