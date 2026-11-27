@@ -2583,6 +2583,10 @@ Learn Replay was sending `limit` together with `to`, and the candles API rejecte
 
 Learn tab only. A fair value gap, order block, OB+FVG overlap, or unicorn must sit inside one session and be no taller than 1.5 × ATR(14). Overnight gaps stay on NDOG and NWOG. Nearby levels cluster into key zones: two red bands above price and two green bands below, with the full list in Levels and Explain. Right-axis tags merge within 0.15 × ATR and stop at six. Finished marks and old signals stay off unless “show finished” is on. Header views are Levels (the default), AMD, ICT, and Full, and the last choice is remembered. The Chart tab, paper slots, and the live path were not changed.
 
+## 27 Nov 2026 — Learn chart look
+
+Learn tab only. The chart follows the AurumBoss drawing style, in index points and IST. A zone above the last close is red, a zone below is green, and a zone that contains the close is grey and says price is inside. The drawn zones are the nearest strength-2 zone on each side and the strongest zone within 1.5 × the daily range. Levels closer than 0.25 × that range share one band. Strength-1 zones stay faint and appear on Full. Plan pills sit on the chart edge with the distance, even when the band is off screen. Pattern and swing pills stay small and off the candle body. BOS and CHoCH are a thin line and a short arrow label. Session and killzone marks sit on the bottom edge. The countdown names the 5-minute close, 15:30, and the next event, and a small clock sits on the last price. A hover reads entry, stop, target, and R, and says it is a study, not a trade. The Chart tab, paper slots, and the live path were not changed. AurumBoss was read and not modified.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

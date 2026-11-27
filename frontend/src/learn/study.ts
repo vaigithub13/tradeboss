@@ -10,7 +10,7 @@ import type { BreakEvent, LearnBar, Structure, Swing } from "./structure";
 import { scanIct, type IctEvent, type IctLabel, type IctLine, type Killzone } from "./ict";
 import { atr14, gapFits } from "./sanity";
 import { istClock, istEpoch } from "./time";
-import { clusterZones, type KeyZone } from "./zones";
+import { clusterZones, dailyRangeAtr, type KeyZone } from "./zones";
 
 export const FVG_MIN_ATR = 0.1;
 export const PATTERN_NEAR_ATR = 0.3;
@@ -34,6 +34,8 @@ export interface StudyBox {
   confirm: number;
   state?: string;
   key?: boolean;
+  /** 70.5% of an OTE leg, drawn as a dashed line inside the band. */
+  guide?: number;
 }
 
 export interface StudyLine {
@@ -388,18 +390,18 @@ export function candlePatterns(
     let bull = false;
     if (prev.close < prevOpen && bar.close > open && open <= prev.close && bar.close >= prevOpen && body > prevBody) {
       kind = "engulf_bull";
-      text = "Engulf";
+      text = "Engulf ▲";
       bull = true;
     } else if (prev.close > prevOpen && bar.close < open && open >= prev.close && bar.close <= prevOpen && body > prevBody) {
       kind = "engulf_bear";
-      text = "Engulf";
+      text = "Engulf ▼";
     } else if (lower >= 2 * body && lower >= 0.6 * range && upper <= 0.25 * range) {
       kind = "pin_bull";
-      text = "Pin";
+      text = "Pin ▲";
       bull = true;
     } else if (upper >= 2 * body && upper >= 0.6 * range && lower <= 0.25 * range) {
       kind = "pin_bear";
-      text = "Pin";
+      text = "Pin ▼";
     } else if (body <= 0.1 * range) {
       kind = "doji";
       text = "Doji";
@@ -416,7 +418,7 @@ export function candlePatterns(
       time: bar.time,
       price: bull || kind === "doji" || kind === "inside" ? bar.low : bar.high,
       text,
-      color: bull ? GREEN : kind.endsWith("bear") ? RED : SLATE,
+      color: bull ? GREEN : kind.endsWith("bear") ? RED : "#1d4ed8",
       textColor: "#ffffff",
       pos: bull || kind === "doji" || kind === "inside" ? "below" : "above",
       detail: key ? `${text} at ${key}` : text,
@@ -449,15 +451,15 @@ function breakLine(event: BreakEvent): StudyLine {
   return {
     id: `brk-${event.time}-${event.kind}`,
     kind: event.kind,
-    t1: event.time,
+    t1: event.fromTime,
     t2: event.time,
     price: event.price,
     color: event.kind === "bos" ? "#2563eb" : PURPLE,
     dashed: false,
-    label: event.kind === "bos" ? "BOS" : "CHoCH",
+    label: `${event.kind === "bos" ? "BOS" : "CHoCH"} ${event.direction === "down" ? "↓" : "↑"}`,
     detail: `${event.kind === "bos" ? "Break of structure" : "Change of character"} ${event.direction} at ${round(event.price)}`,
     confirm: event.time,
-    short: true,
+    short: false,
   };
 }
 
@@ -687,7 +689,8 @@ export function buildStudy(input: StudyInput): Study {
       .filter((mark) => atr <= 0 || Math.abs(mark.price - last) <= 2 * atr)
       .map((mark) => ({ name: mark.major ? "Round 100" : "Round 50", price: mark.price, time: end })),
   ];
-  const clustered = clusterZones(zoneLevels, bars, atr, last);
+  const span = dailyRangeAtr(bars);
+  const clustered = clusterZones(zoneLevels, bars, span > 0 ? span : atr, last);
   const events = [
     ...collectEvents(bars, structure, lesson, gaps, labels, latest, failed),
     ...ict.events.map(ictEvent),

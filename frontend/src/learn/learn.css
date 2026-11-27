@@ -150,6 +150,8 @@
   color: #fff;
   border-radius: 6px;
   font-size: 12px;
+  line-height: 1.35;
+  white-space: pre-line;
   pointer-events: none;
 }
 

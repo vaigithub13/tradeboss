@@ -11,7 +11,7 @@ import {
 import { fetchCandles, type Candle, type Timeframe } from "../api/client";
 import type { LiveView } from "../live/protocol";
 import { subscribeLearnBars, useLiveStore } from "../store/liveStore";
-import { countdownLine } from "./countdown";
+import { axisCountdown, countdownLine } from "./countdown";
 import { sessionMarkdown } from "./exportSession";
 import { IctPanel } from "./IctPanel";
 import { explainCard, explainTip } from "./explainCards";
@@ -186,6 +186,11 @@ export function LearnTab({
       if (!hit) return;
       setPicked(hit);
       setTab("explain");
+      if (hit.low != null && hit.high != null && (hit.kind === "plan" || hit.kind === "zone")) {
+        const pad = Math.max(hit.high - hit.low, 20);
+        series.priceScale().setAutoScale(false);
+        series.priceScale().setVisibleRange({ from: hit.low - pad, to: hit.high + pad });
+      }
     };
     const onMove = (param: MouseEventParams) => {
       if (!param.point) {
@@ -193,7 +198,7 @@ export function LearnTab({
         return;
       }
       const hit = overlay.pick(param.point.x, param.point.y);
-      setTip(hit ? explainTip(hit.kind) : null);
+      setTip(hit ? (hit.tip ?? explainTip(hit.kind)) : null);
     };
     chart.subscribeClick(onClick);
     chart.subscribeCrosshairMove(onMove);
@@ -387,8 +392,10 @@ export function LearnTab({
       events: eventMarks,
       focus: ictFocus,
       tags: read ? mergeTags(tagInputs(read.study.lines, read.study.rounds, tagToggles, read.study.atr, read.study.last), read.study.atr, read.study.last).shown : [],
+      showFaint: preset === "full",
+      countdown: axisCountdown(clock, TF_SECONDS[timeframe] ?? 300, replay),
     });
-  }, [eventMarks, ictFocus, labelSwings, layers, notes, picked, read, symbol, tagToggles]);
+  }, [clock, eventMarks, ictFocus, labelSwings, layers, notes, picked, preset, read, replay, symbol, tagToggles, timeframe]);
 
   const dayKey = istClock((replay && cursor != null ? cursor : chartBars.at(-1)?.time) ?? Math.floor(Date.now() / 1000)).day;
   useEffect(() => { setReadDraft(reads[dayKey] ?? ""); }, [dayKey, reads]);
@@ -614,7 +621,7 @@ export function LearnTab({
                       setPicked({ id: zone.id, kind: "zone", detail: zone.detail, time: zone.lastTest ?? 0 });
                       setTab("explain");
                     }}>
-                      <span>{zone.label}{zone.visible ? "" : " · list"}</span>
+                      <span>{zone.label}{zone.visible || (zone.faint && preset === "full") ? "" : " · list"}</span>
                     </button>
                   ))}
                   {read && (() => {

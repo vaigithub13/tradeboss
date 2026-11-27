@@ -30,6 +30,7 @@ export interface IctBox {
   detail: string;
   confirm: number;
   state?: string;
+  guide?: number;
 }
 
 export interface IctLine {
@@ -523,7 +524,7 @@ function oteHits(
   }
   if (draw && picture) {
     const last = bars[bars.length - 1]?.time ?? picture.anchor.time;
-    const { lo, hi, band, up, confirm } = picture;
+    const { lo, hi, band, confirm } = picture;
     boxes.push(box(
       `prem-${picture.anchor.time}`, "premium", picture.anchor.time, last, hi, band.eq, confirm, "active",
       "Premium", "rgba(220,38,38,0.06)", "rgba(220,38,38,0.0)",
@@ -534,12 +535,15 @@ function oteHits(
       "Discount", "rgba(22,163,74,0.06)", "rgba(22,163,74,0.0)",
       `Discount, below EQ ${round(band.eq)} of ${round(lo)}–${round(hi)}.`,
     ));
-    boxes.push(box(
-      `ote-${picture.anchor.time}`, "ote", picture.anchor.time, last, band.high, band.low, confirm, "active",
-      up ? "OTE buy 62–79%" : "OTE sell 62–79%",
-      "rgba(59,130,246,0.12)", "#2563eb",
-      `OTE ${round(band.low)}–${round(band.high)}. Sweet spot 70.5% is ${round(band.sweet)}.`,
-    ));
+    boxes.push({
+      ...box(
+        `ote-${picture.anchor.time}`, "ote", picture.anchor.time, last, band.high, band.low, confirm, "active",
+        "OTE 62–79%",
+        "rgba(59,130,246,0.12)", "#2563eb",
+        `OTE ${round(band.low)}–${round(band.high)}. Sweet spot 70.5% is ${round(band.sweet)}.`,
+      ),
+      guide: band.sweet,
+    });
     lines.push({
       id: `eq-${picture.anchor.time}`, kind: "eq", t1: picture.anchor.time, t2: last, price: band.eq,
       color: "#2563eb", dashed: true, label: "EQ 50%",

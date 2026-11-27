@@ -47,11 +47,58 @@ describe("Learn view", () => {
     expect(support?.flipped).toBe(true);
     expect(support?.role).toBe("resistance");
     expect(support?.label.startsWith("R ")).toBe(true);
+    expect(support?.label).toMatch(/PDL\+EQL/);
+    expect(support?.label).toMatch(/●/);
     expect(support?.detail).toMatch(/Sources: PDL, EQL, Swing low/);
     expect(support?.detail).toMatch(/Touches:/);
     expect(flips.some((flip) => flip.text === "Support flipped to resistance")).toBe(true);
-    expect(zones.filter((zone) => zone.visible)).toHaveLength(2);
+    expect(zones.filter((zone) => zone.visible)).toHaveLength(1);
+    expect(support?.visible).toBe(true);
     expect(zones.filter((zone) => !zone.visible).every((zone) => zone.detail.length > 0)).toBe(true);
+  });
+
+  it("colours a zone by where the last close sits", () => {
+    const bar: LearnBar = { time: at(26, 10, 0), open: 100, high: 101, low: 99, close: 100 };
+    const level = [{ name: "PDH", price: 100, time: bar.time }];
+    expect(clusterZones(level, [bar], 20, 90).zones[0]?.role).toBe("resistance");
+    expect(clusterZones(level, [bar], 20, 110).zones[0]?.role).toBe("support");
+    const inside = clusterZones(level, [bar], 20, 100).zones[0];
+    expect(inside?.role).toBe("inside");
+    expect(inside?.detail).toMatch(/price inside zone/);
+    expect(inside?.label.startsWith("In ")).toBe(true);
+  });
+
+  it("merges zones closer than 0.25 ATR and keeps a strong zone with a nearer faint one", () => {
+    const bar: LearnBar = { time: at(26, 11, 0), open: 80, high: 80.4, low: 79.6, close: 80 };
+    const merged = clusterZones([
+      { name: "PDH", price: 100, time: bar.time },
+      { name: "EQH", price: 115, time: bar.time },
+    ], [bar], 80, 80);
+    expect(merged.zones).toHaveLength(1);
+    expect(merged.zones[0]?.role).toBe("resistance");
+    expect(merged.zones[0]?.sources).toEqual(["PDH", "EQH"]);
+    expect(merged.zones.filter((zone) => zone.visible)).toHaveLength(1);
+
+    const names = (price: number, count: number, title: string) => (
+      Array.from({ length: count }, () => ({ name: title, price, time: bar.time }))
+    );
+    const picked = clusterZones([
+      ...names(102, 1, "Round 50"),
+      ...names(130, 3, "PDH"),
+      ...names(180, 6, "PWH"),
+    ], [bar], 80, 100);
+    const solid = picked.zones.filter((zone) => zone.visible).map((zone) => Math.round(zone.low)).sort((a, b) => a - b);
+    expect(solid).toEqual([130, 180]);
+    expect(picked.zones.find((zone) => Math.round(zone.low) === 102)?.faint).toBe(true);
+    expect(picked.zones.find((zone) => Math.round(zone.low) === 102)?.visible).toBe(false);
+  });
+
+  it("does not flip a zone on a candle that is left out of the closed set", () => {
+    const known: LearnBar = { time: at(26, 10, 0), open: 110, high: 112, low: 108, close: 110 };
+    const future: LearnBar = { time: at(26, 10, 5), open: 100, high: 101, low: 90, close: 90 };
+    const levels = [{ name: "PDL", price: 100, time: known.time }];
+    expect(clusterZones(levels, [known], 20, 110).flips).toEqual([]);
+    expect(clusterZones(levels, [known, future], 20, 90).flips[0]?.text).toBe("Support flipped to resistance");
   });
 
   it("merges axis tags within 0.15 ATR and keeps only six on the axis", () => {

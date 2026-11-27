@@ -38,6 +38,16 @@ export function nextEvent(now: number, symbol: string): { title: string; at: num
   return null;
 }
 
+/** mm:ss until the open candle closes. Replay and a shut market stay blank. */
+export function axisCountdown(now: number, tfSeconds: number, replay: boolean): string | null {
+  if (replay) return null;
+  const clock = istClock(now);
+  const [year, month, date] = clock.day.split("-").map(Number);
+  const close = istEpoch(year ?? 1970, month ?? 1, date ?? 1, 15, 30);
+  if (clock.weekday === 0 || clock.weekday === 6 || now >= close) return null;
+  return mmss(nextBarClose(now, tfSeconds) - now);
+}
+
 export function countdownLine(now: number, tfLabel: string, tfSeconds: number, replay: boolean, symbol: string): string {
   if (replay) return "Replay — countdowns pause in replay";
   const clock = istClock(now);
@@ -48,5 +58,9 @@ export function countdownLine(now: number, tfLabel: string, tfSeconds: number, r
   const eventText = event ? `${event.title} in ${hhmm(event.at - now)}` : "no further event listed";
   if (weekend || now >= close) return `Market closed · ${eventText}`;
   const candle = nextBarClose(now, tfSeconds);
-  return `${tfLabel} candle closes in ${mmss(candle - now)} · Market closes in ${hhmm(close - now)} · ${eventText}`;
+  const at = istClock(candle);
+  const hour = Math.floor(at.minutes / 60);
+  const minute = at.minutes % 60;
+  const when = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+  return `${tfLabel} candle closes in ${mmss(candle - now)} (at ${when} IST — signals are checked on 5m closes) · Market closes in ${hhmm(close - now)} (15:30) · ${eventText}`;
 }
