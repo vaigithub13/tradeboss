@@ -22,6 +22,9 @@ export interface SymbolBook {
   OTE?: SavedStats;
   "FVG★"?: SavedStats;
   "FVG·"?: SavedStats;
+  CRT75?: SavedStats;
+  CRTD?: SavedStats;
+  CRT?: SavedStats;
   breakdown?: BreakdownRow[];
 }
 

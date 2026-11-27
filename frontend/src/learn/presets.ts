@@ -23,6 +23,7 @@ const OFF: StudyLayers = {
   ote: false,
   killzones: false,
   gaps: false,
+  crt: false,
   pattern: false,
   patternAll: false,
   round: false,
@@ -41,7 +42,7 @@ export function viewFor(preset: LearnPreset): LearnView {
   if (preset === "amd") return { layers: { ...OFF, amd: true }, tags: NO_TAGS };
   if (preset === "ict") {
     return {
-      layers: { ...OFF, fvg: true, ict: true, breaker: true, unicorn: true, ote: true, killzones: true, gaps: true },
+      layers: { ...OFF, fvg: true, ict: true, breaker: true, unicorn: true, ote: true, killzones: true, gaps: true, crt: true },
       tags: NO_TAGS,
     };
   }

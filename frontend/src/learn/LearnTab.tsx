@@ -68,6 +68,7 @@ const LAYER_GROUPS: { title: string; rows: { key: keyof StudyLayers; label: stri
       { key: "ote", label: "OTE 62–79% + EQ (premium / discount)" },
       { key: "killzones", label: "Killzones + Silver Bullet (adapted for NSE)" },
       { key: "gaps", label: "NDOG and NWOG" },
+      { key: "crt", label: "CRT (75m / Daily)" },
     ],
   },
   { title: "Context", rows: [{ key: "zones", label: "Key zones" }, { key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }, { key: "events", label: "Calendar events" }] },
@@ -368,6 +369,7 @@ export function LearnTab({
       now: shown.at(-1)?.time ?? 0,
       m5: closedBars(signalSource, replay ? cursor : null),
       signalNow: (replay && cursor != null ? cursor : signalSource.at(-1)?.time) ?? 0,
+      tfSeconds: TF_SECONDS[timeframe] ?? 300,
     };
     const id = ++req.current;
     if (workerRef.current) {
@@ -694,6 +696,8 @@ export function LearnTab({
                 book={read?.signals ?? emptyBook()}
                 summary={summary}
                 reviewNote={reviewNote}
+                clock={replay && cursor != null ? cursor : clock}
+                paused={replay}
                 onReview={() => {
                   setReviewNote("Running the review…");
                   void runSignalReview()

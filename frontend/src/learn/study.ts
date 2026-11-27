@@ -50,6 +50,7 @@ export interface StudyLine {
   detail: string;
   confirm: number;
   short: boolean;
+  tip?: string;
 }
 
 export interface StudyLabel {
@@ -64,6 +65,7 @@ export interface StudyLabel {
   detail: string;
   confirm: number;
   key?: boolean;
+  tip?: string;
 }
 
 export interface StudySession {
@@ -601,6 +603,7 @@ export interface StudyLayers {
   ote: boolean;
   killzones: boolean;
   gaps: boolean;
+  crt: boolean;
   pattern: boolean;
   patternAll: boolean;
   round: boolean;
@@ -625,6 +628,7 @@ export const DEFAULT_LAYERS: StudyLayers = {
   ote: true,
   killzones: true,
   gaps: true,
+  crt: true,
   pattern: true,
   patternAll: false,
   round: true,
@@ -646,6 +650,8 @@ export interface StudyInput {
   low: number;
   high: number;
   last: number;
+  /** CRT lines, labels and events, read from closed 5m candles. */
+  extra?: { lines: StudyLine[]; labels: StudyLabel[]; events: StudyEvent[] };
 }
 
 export function buildStudy(input: StudyInput): Study {
@@ -662,11 +668,13 @@ export function buildStudy(input: StudyInput): Study {
     ...lesson.sweeps.map(sweepLabel),
     ...candlePatterns(bars, keyLevels(lesson), gaps),
     ...ict.labels.map(mssLabel),
+    ...(input.extra?.labels ?? []),
   ];
   const lines: StudyLine[] = [
     ...lesson.liquidity.map((level) => lineOf(level, bars, end)),
     ...structure.events.map(breakLine),
     ...ict.lines.map(ictLine),
+    ...(input.extra?.lines ?? []),
   ];
   const boxes: StudyBox[] = [...gaps, ...blocks, ...ict.boxes];
   const today = istClock(end).day;
@@ -694,6 +702,7 @@ export function buildStudy(input: StudyInput): Study {
   const events = [
     ...collectEvents(bars, structure, lesson, gaps, labels, latest, failed),
     ...ict.events.map(ictEvent),
+    ...(input.extra?.events ?? []),
     ...clustered.flips.map((flip) => ({
       time: flip.time,
       kind: "zone",

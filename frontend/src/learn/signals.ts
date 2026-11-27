@@ -11,6 +11,7 @@ import { readStructure, type BreakEvent, type LearnBar, type Structure } from ".
 import { isExpiryDay } from "./events";
 import { scanIct, tradesZone, type OverlapZone } from "./ict";
 import { istClock, istEpoch } from "./time";
+import { crtName, crtPairs, nextSession, type CrtPair, type CrtTf } from "./crt";
 
 export const M5 = 300;
 export const RR = 2;
@@ -22,7 +23,16 @@ const FVG_BARS = 150;
 
 const LEVELS = new Set(["PDH", "PDL", "Week high", "Week low", "OR high", "OR low", "EQH", "EQL"]);
 
-export type SetupName = "SWP" | "FVG" | "AMD" | "UNI" | "OTE";
+export type SetupName = "SWP" | "FVG" | "AMD" | "UNI" | "OTE" | "CRT75" | "CRTD";
+export type StatKey = "all" | SetupName | "FVG★" | "FVG·" | "CRT";
+/** A CRT signal needs its range target at least this many R away. Same rule as AurumBoss. */
+export const CRT_MIN_R = 2;
+
+export function setupLabel(setup: string): string {
+  if (setup === "CRT75") return "CRT 75m";
+  if (setup === "CRTD") return "CRT D1";
+  return setup;
+}
 export type SignalSide = "buy" | "sell";
 export type SignalStatus = "open" | "TP" | "SL" | "expired";
 export type PlanState = "waiting" | "in_zone";
@@ -73,6 +83,11 @@ export interface PlanCard {
   distance: number;
   state: PlanState;
   tpNote: string;
+  /** CRT: the close that decides the plan, shown as a countdown. */
+  waitUntil?: number;
+  waitText?: string;
+  /** Reward to risk from the current price, for plans with a fixed target. */
+  r?: number;
 }
 
 export interface PlanDone {
@@ -114,7 +129,7 @@ export interface SignalBook {
   done: PlanDone[];
   notes: string[];
   signals: WatchSignal[];
-  stats: Record<"all" | SetupName | "FVG★" | "FVG·", SetupStats>;
+  stats: Record<StatKey, SetupStats>;
   trend: "up" | "down" | null;
   price: number | null;
   breakdown: BreakdownRow[];
@@ -133,6 +148,7 @@ export function emptyBook(): SignalBook {
     stats: {
       all: emptyStats(), SWP: emptyStats(), FVG: emptyStats(), AMD: emptyStats(),
       UNI: emptyStats(), OTE: emptyStats(), "FVG★": emptyStats(), "FVG·": emptyStats(),
+      CRT75: emptyStats(), CRTD: emptyStats(), CRT: emptyStats(),
     },
     trend: null,
     price: null,
@@ -449,7 +465,97 @@ function amdSignals(bars: readonly LearnBar[], structure: Structure, lesson: Les
   return signals;
 }
 
-export function tally(signals: readonly WatchSignal[]): Record<"all" | SetupName | "FVG★" | "FVG·", SetupStats> {
+function crtSetup(tf: CrtTf): SetupName {
+  return tf === "75m" ? "CRT75" : "CRTD";
+}
+
+function sideWord(bias: "up" | "down"): string {
+  return bias === "up" ? "bullish" : "bearish";
+}
+
+/** Closes after candle 2 that cancel a confirmed CRT before its entry. */
+function crtCancel(pair: CrtPair, bars: readonly LearnBar[], until: number): { at: number; text: string } | null {
+  const up = pair.bias === "up";
+  for (const bar of bars) {
+    if (bar.time < pair.c2.end) continue;
+    if (bar.time >= until) break;
+    if (pair.ext != null && (up ? bar.close < pair.ext : bar.close > pair.ext)) {
+      return { at: closeOf(bar), text: `a 5m candle closed back beyond the sweep ${round2(pair.ext)}` };
+    }
+    if (pair.target != null && (up ? bar.high >= pair.target : bar.low <= pair.target)) {
+      return { at: closeOf(bar), text: `the target ${round2(pair.target)} was reached before an entry` };
+    }
+  }
+  return null;
+}
+
+/**
+ * CRT ✓ → the first 5m BOS/CHoCH toward the target after candle 2 closes is the
+ * entry. 75m: during candle 3. Daily: during the next session only. SL beyond
+ * the sweep extreme (below it for a BUY, above it for a SELL). TP = the other
+ * side of candle 1, taken only when that is at least 2R.
+ */
+export function crtSignals(
+  bars: readonly LearnBar[],
+  events: readonly BreakEvent[],
+  now: number,
+  symbol: string,
+): { signals: WatchSignal[]; done: PlanDone[] } {
+  const closed = bars.filter((bar) => closeOf(bar) <= now);
+  const breaks = events
+    .filter((event) => closeOf({ time: event.time, high: 0, low: 0, close: 0 }) <= now && event.index < closed.length)
+    .sort((a, b) => a.time - b.time);
+  const signals: WatchSignal[] = [];
+  const done: PlanDone[] = [];
+  for (const tf of ["75m", "D1"] as const) {
+    const setup = crtSetup(tf);
+    const used = new Set<string>();
+    for (const pair of crtPairs(closed, now, tf)) {
+      if (pair.status !== "crt" || pair.bias == null || pair.target == null || pair.ext == null) continue;
+      const side: SignalSide = pair.bias === "up" ? "buy" : "sell";
+      const title = `${crtName(tf)} ✓ — ${pair.swept} swept, closed back inside`;
+      const entry = breaks.find((event) => {
+        const at = closeOf({ time: event.time, high: 0, low: 0, close: 0 });
+        return event.direction === pair.bias && at > pair.c2.end && at <= pair.c3End && entryAllowed(at);
+      });
+      if (!entry) continue;
+      const bar = closed[entry.index];
+      if (!bar || bar.time !== entry.time) continue;
+      const cancel = crtCancel(pair, closed, bar.time);
+      if (cancel) {
+        done.push({ setup, side, title, text: `Cancelled ${clockText(cancel.at)} — ${cancel.text}`, result: "cancelled", time: cancel.at });
+        continue;
+      }
+      const key = istClock(bar.time).day;
+      if (used.has(key)) {
+        done.push({ setup, side, title, text: `Not counted — ${setupLabel(setup)} already has today's one signal`, result: "not_counted", time: closeOf(bar) });
+        continue;
+      }
+      const signal = makeSignal(
+        setup, side, symbol, bar, pair.ext, atrAtBar(closed, entry.index), pair.target, "other side of the range",
+        `${crtName(tf)}: candle swept the ${pair.swept} ${round2(pair.ext)} and closed back inside ${round2(pair.lo)}–${round2(pair.hi)}, `
+          + `then ${entry.kind === "bos" ? "BOS" : "CHoCH"} ${entry.direction} on 5m → target the other side ${round2(pair.target)}.`,
+      );
+      if (!signal) continue;
+      const reward = Math.abs(signal.tp - signal.entry);
+      if (reward < CRT_MIN_R * signal.risk) {
+        done.push({
+          setup, side, title,
+          text: `Not taken — target under 2R (${round2(reward / signal.risk)}R from ${signal.entry})`,
+          result: "cancelled", time: signal.time,
+        });
+        continue;
+      }
+      used.add(key);
+      signal.tpNote = `other side of the range, ${round2(reward / signal.risk)}R`;
+      signals.push(signal);
+      done.push({ setup, side, title, text: "Triggered — signal", result: "signal", time: signal.time });
+    }
+  }
+  return { signals, done };
+}
+
+export function tally(signals: readonly WatchSignal[]): Record<StatKey, SetupStats> {
   const block = (rows: readonly WatchSignal[]): SetupStats => {
     const done = rows.filter((row) => row.status === "TP" || row.status === "SL" || row.status === "expired");
     const tp = rows.filter((row) => row.status === "TP").length;
@@ -478,6 +584,9 @@ export function tally(signals: readonly WatchSignal[]): Record<"all" | SetupName
     OTE: block(signals.filter((row) => row.setup === "OTE")),
     "FVG★": block(signals.filter((row) => row.setup === "FVG" && row.star)),
     "FVG·": block(signals.filter((row) => row.setup === "FVG" && !row.star)),
+    CRT75: block(signals.filter((row) => row.setup === "CRT75")),
+    CRTD: block(signals.filter((row) => row.setup === "CRTD")),
+    CRT: block(signals.filter((row) => row.setup === "CRT75" || row.setup === "CRTD")),
   };
 }
 
@@ -620,12 +729,166 @@ function buildPlans(
       }
     }
   }
+  const crt = crtPlans(bars, structure, signals, now, price, atr);
+  plans.push(...crt.plans);
+  notes.push(...crt.notes);
   const ordered = [...plans].sort((a, b) => Math.abs(a.distance) - Math.abs(b.distance));
   const first = (["buy", "sell"] as const)
     .map((side) => ordered.find((plan) => plan.side === side))
     .filter((plan): plan is PlanCard => plan != null);
   const rest = ordered.filter((plan) => !first.includes(plan));
-  return { plans: [...first, ...rest].slice(0, 6).map((plan, index) => ({ ...plan, n: index + 1 })), notes };
+  return { plans: [...first, ...rest].slice(0, 8).map((plan, index) => ({ ...plan, n: index + 1 })), notes };
+}
+
+function crtCard(input: {
+  tf: CrtTf;
+  side: SignalSide;
+  title: string;
+  trigger: string;
+  invalid: string;
+  zone: [number, number];
+  entry: number;
+  sl: number;
+  tp: number;
+  price: number;
+  approx: boolean;
+  waitUntil: number;
+  waitText: string;
+  inZone: boolean;
+}): PlanCard {
+  const risk = Math.abs(input.entry - input.sl);
+  const reward = input.side === "buy" ? input.tp - input.entry : input.entry - input.tp;
+  const mid = (input.zone[0] + input.zone[1]) / 2;
+  return {
+    n: 0,
+    setup: crtSetup(input.tf),
+    side: input.side,
+    title: input.title,
+    trigger: input.trigger,
+    invalid: input.invalid,
+    zone: [round2(Math.min(...input.zone)), round2(Math.max(...input.zone))],
+    entry: round2(input.entry),
+    sl: round2(input.sl),
+    tp: round2(input.tp),
+    approx: input.approx,
+    distance: input.inZone ? 0 : round2(mid - input.price),
+    state: input.inZone ? "in_zone" : zoneState(input.zone, input.price),
+    tpNote: `other side of the range ${round2(input.tp)} (needs ≥ ${CRT_MIN_R}R)`,
+    waitUntil: input.waitUntil,
+    waitText: input.waitText,
+    r: risk > 0 ? round2(reward / risk) : 0,
+  };
+}
+
+/** Watch-only CRT plans: the live candle 2 and a confirmed CRT waiting for its 5m entry. */
+function crtPlans(
+  bars: readonly LearnBar[],
+  structure: Structure,
+  signals: readonly WatchSignal[],
+  now: number,
+  price: number,
+  atr: number,
+): { plans: PlanCard[]; notes: string[] } {
+  const plans: PlanCard[] = [];
+  const notes: string[] = [];
+  const today = istClock(now).day;
+  const lastEntry = istEpoch(...dayParts(today), 15, 0);
+  for (const tf of ["75m", "D1"] as const) {
+    const setup = crtSetup(tf);
+    const name = crtName(tf);
+    if (signals.some((signal) => signal.setup === setup && istClock(signal.time).day === today)) {
+      notes.push(`${setupLabel(setup)}: today's signal already fired — max 1 a day.`);
+      continue;
+    }
+    const pairs = crtPairs(bars, now, tf);
+    const unit = tf === "75m" ? "75m" : "day";
+    const live = pairs.at(-1);
+    if (live && !live.c2.complete && live.c2.day === today) {
+      const closes = clockText(live.c2.end);
+      const valid = tf === "D1" ? " (plan valid next session only)" : "";
+      if (tf === "75m" && live.c2.end > lastEntry) {
+        notes.push(`75m CRT: this candle closes at ${closes}, after the last entry at 15:00 — no 75m plan.`);
+      } else if (live.status === "outside") {
+        notes.push(`${name}: this ${unit} candle took both sides of ${round2(live.lo)}–${round2(live.hi)} — cancelled.`);
+      } else if (live.status === "pending" && tf === "75m") {
+        for (const sell of [true, false]) {
+          const level = sell ? live.hi : live.lo;
+          const sl = sell ? level + 0.6 * atr : level - 0.6 * atr;
+          const tp = sell ? live.lo : live.hi;
+          if (Math.abs(tp - level) < CRT_MIN_R * Math.abs(level - sl)) continue;
+          plans.push(crtCard({
+            tf, side: sell ? "sell" : "buy", price, approx: true, inZone: false,
+            title: `${name}: sweep of the previous 75m ${sell ? "high" : "low"} ${round2(level)}`,
+            trigger: `Price takes ${round2(level)}, this 75m candle CLOSES back inside ${round2(live.lo)}–${round2(live.hi)} at ${closes} IST, then the first ${sell ? "bearish" : "bullish"} 5m BOS/CHoCH → ${sell ? "SELL" : "BUY"} on that close. Target = the other side ${round2(tp)}.`,
+            invalid: `Cancelled if this 75m candle closes ${sell ? "above" : "below"} ${round2(level)} (breakout) or also takes the ${sell ? "low" : "high"}.`,
+            zone: sell ? [level, level + 0.5 * atr] : [level - 0.5 * atr, level],
+            entry: level, sl, tp,
+            waitUntil: live.c2.end,
+            waitText: `⏰ 75m closes ${closes} IST — needs a sweep of ${round2(level)} and a close back ${sell ? "below" : "above"} it for a CRT ${sell ? "SELL" : "BUY"}`,
+          }));
+        }
+      } else if (live.status === "pending") {
+        notes.push(`D1 CRT: today has not traded beyond the previous day's high ${round2(live.hi)} or low ${round2(live.lo)} yet.`);
+      } else if (live.status === "forming" && live.ext != null) {
+        const sell = live.swept === "high";
+        const bound = sell ? live.hi : live.lo;
+        const sl = sell ? live.ext + SL_BUFFER * atr : live.ext - SL_BUFFER * atr;
+        const tp = sell ? live.lo : live.hi;
+        plans.push(crtCard({
+          tf, side: sell ? "sell" : "buy", price, approx: false, inZone: true,
+          title: `${name} forming: previous ${unit} ${live.swept} swept to ${round2(live.ext)}`,
+          trigger: `Needs this ${unit} candle to CLOSE back inside ${round2(live.lo)}–${round2(live.hi)} at ${closes} IST, then the first ${sell ? "bearish" : "bullish"} 5m BOS/CHoCH${tf === "D1" ? " in the next session" : ""} → ${sell ? "SELL" : "BUY"} on that close. Target ${round2(tp)}.`,
+          invalid: `Cancelled if the ${unit} candle closes ${sell ? "above" : "below"} ${round2(bound)} or also takes the ${sell ? "low" : "high"}.`,
+          zone: [Math.min(price, bound), Math.max(price, bound)],
+          entry: price, sl, tp,
+          waitUntil: live.c2.end,
+          waitText: `⏰ ${tf === "75m" ? "75m" : "D1"} closes ${closes} IST — must close ${sell ? "below" : "above"} ${round2(bound)} for a ${tf === "D1" ? "D1 " : ""}CRT ${sell ? "SELL" : "BUY"}${valid}`,
+        }));
+      }
+    }
+    const confirmed = [...pairs].reverse().find((pair) => pair.status === "crt" && now >= pair.c2.end && now < pair.c3End);
+    if (!confirmed || confirmed.bias == null || confirmed.target == null || confirmed.ext == null) continue;
+    if (tf === "D1" && nextSession(confirmed.c2.day) !== today) continue;
+    const sell = confirmed.bias === "down";
+    const until = Math.min(confirmed.c3End, lastEntry);
+    if (confirmed.hitAt != null) {
+      notes.push(`${name} target ${round2(confirmed.target)} reached — no plan.`);
+      continue;
+    }
+    const cancel = crtCancel(confirmed, bars, now);
+    if (cancel) {
+      notes.push(`${name}: cancelled — ${cancel.text}.`);
+      continue;
+    }
+    if (now >= until) {
+      notes.push(`${name}: no 5m entry before ${clockText(until)} — expired.`);
+      continue;
+    }
+    const tookBreak = structure.events.some((event) => {
+      const at = closeOf({ time: event.time, high: 0, low: 0, close: 0 });
+      return event.direction === confirmed.bias && at > confirmed.c2.end && at <= now;
+    });
+    if (tookBreak) continue;
+    const sl = sell ? confirmed.ext + SL_BUFFER * atr : confirmed.ext - SL_BUFFER * atr;
+    const reach = crtCard({
+      tf, side: sell ? "sell" : "buy", price, approx: false, inZone: true,
+      title: `${name} ✓ (${confirmed.swept} swept, closed back inside)`,
+      trigger: `Waiting for the first ${sideWord(confirmed.bias)} 5m BOS/CHoCH before ${clockText(until)} IST → ${sell ? "SELL" : "BUY"} on that close. Target ${round2(confirmed.target)} (needs ≥ ${CRT_MIN_R}R).`,
+      invalid: `Cancelled if a 5m candle closes back beyond the sweep ${round2(confirmed.ext)}. Expires ${clockText(until)}.`,
+      zone: [Math.min(price, confirmed.mid), Math.max(price, confirmed.mid)],
+      entry: price, sl, tp: confirmed.target,
+      waitUntil: until,
+      waitText: `CRT ✓ — 5m ${sideWord(confirmed.bias)} BOS/CHoCH needed before ${clockText(until)} IST`,
+    });
+    if ((reach.r ?? 0) < CRT_MIN_R) reach.title += ` — only ${reach.r}R from here, skipped unless price pulls back`;
+    plans.push(reach);
+  }
+  return { plans, notes };
+}
+
+function dayParts(day: string): [number, number, number] {
+  const [year, month, date] = day.split("-").map(Number);
+  return [year ?? 1970, month ?? 1, date ?? 1];
 }
 
 export interface BookParts {
@@ -663,6 +926,7 @@ export function bookFromParts(input: BookParts): SignalBook {
   const swp = swpSignals(bars, structure, lesson, input.symbol);
   const fvg = fvgSignals(bars, structure, gaps, input.symbol, scan.overlaps);
   const amd = amdSignals(bars, structure, lesson, input.symbol);
+  const crt = crtSignals(bars, structure.events, input.now, input.symbol);
   const models = scan.hits.flatMap((hit) => {
     const bar = bars[hit.index];
     if (!bar) return [];
@@ -670,7 +934,7 @@ export function bookFromParts(input: BookParts): SignalBook {
     return signal ? [signal] : [];
   });
   const scored = attachContext(
-    [...swp.signals, ...fvg.signals, ...amd, ...models]
+    [...swp.signals, ...fvg.signals, ...amd, ...models, ...crt.signals]
       .map((signal) => scoreSignal(signal, bars, input.now))
       .sort((a, b) => a.time - b.time),
     bars,
@@ -681,7 +945,7 @@ export function bookFromParts(input: BookParts): SignalBook {
   const planned = buildPlans(bars, structure, lesson, gaps, scored, input.now, price, atr);
   return {
     plans: planned.plans,
-    done: [...swp.done, ...fvg.done].filter((item) => item.time <= input.now).sort((a, b) => b.time - a.time).slice(0, 8),
+    done: [...swp.done, ...fvg.done, ...crt.done].filter((item) => item.time <= input.now).sort((a, b) => b.time - a.time).slice(0, 8),
     notes: planned.notes,
     signals: scored,
     stats: tally(scored),

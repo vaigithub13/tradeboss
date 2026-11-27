@@ -384,7 +384,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
       ctx.fillText(lineText, line.kind === "eq" ? width - 52 : end + 4, y - 3);
       hits.push({
         x: start, y: y - 6, w: Math.max(end - start, 8), h: 12,
-        mark: { id: line.id, kind: line.kind, detail: line.detail, time: line.confirm },
+        mark: { id: line.id, kind: line.kind, detail: line.detail, time: line.confirm, tip: line.tip },
       });
     }
     if (layers.round) {
@@ -443,7 +443,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
         ctx.strokeStyle = "#b45309";
         ctx.strokeRect(x - 1, top - 1, w + 2, h + 2);
       }
-      hits.push({ x, y: top, w, h, mark: { id: label.id, kind: label.kind, detail: label.detail, time: label.time } });
+      hits.push({ x, y: top, w, h, mark: { id: label.id, kind: label.kind, detail: label.detail, time: label.time, tip: label.tip } });
     }
     if (layers.events) {
       ctx.font = "600 10px sans-serif";
@@ -641,6 +641,7 @@ function showBox(box: { kind: string; state?: string; p1: number; p2: number }, 
 
 function showLine(line: { kind: string }, layers: StudyLayers): boolean {
   if (line.kind === "eq") return layers.ote;
+  if (line.kind.startsWith("crt")) return layers.crt;
   if (line.kind === "bos" || line.kind === "choch") return layers.structure;
   return layers.liquidity;
 }
@@ -656,6 +657,7 @@ function focused(kind: string, focus: string): boolean {
 
 function showLabel(label: { kind: string; key?: boolean }, layers: StudyLayers): boolean {
   if (label.kind === "mss") return layers.structure;
+  if (label.kind.startsWith("crt")) return layers.crt;
   if (label.kind === "sweep") return layers.liquidity;
   if (label.kind === "amd_m") return layers.amd;
   if (label.kind === "hh" || label.kind === "hl" || label.kind === "lh" || label.kind === "ll" || label.kind === "swing_high" || label.kind === "swing_low") {

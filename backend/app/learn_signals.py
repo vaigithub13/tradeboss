@@ -26,7 +26,7 @@ log = logging.getLogger("tradeboss.learn.signals")
 IST = ZoneInfo("Asia/Kolkata")
 SYMBOLS = ("NIFTY50", "SENSEX", "BANKNIFTY")
 SETUPS = ("SWP", "FVG", "AMD")
-COMPARE = ("UNI", "OTE", "FVG★", "FVG·")
+COMPARE = ("UNI", "OTE", "FVG★", "FVG·", "CRT75", "CRTD", "CRT")
 FIELDS = ["id", "symbol", "setup", "side", "time", "entry", "sl", "tp", "risk", "tpNote", "why", "status", "exitTime", "exit", "r", "star"]
 _BUNDLE: Path | None = None
 
@@ -172,7 +172,8 @@ def _star(row: dict[str, Any]) -> bool:
 
 
 def stats_book(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    book = {"all": _stats_of(rows), **{name: _stats_of([row for row in rows if row.get("setup") == name]) for name in (*SETUPS, "UNI", "OTE")}}
+    book = {"all": _stats_of(rows), **{name: _stats_of([row for row in rows if row.get("setup") == name]) for name in (*SETUPS, "UNI", "OTE", "CRT75", "CRTD")}}
+    book["CRT"] = _stats_of([row for row in rows if row.get("setup") in ("CRT75", "CRTD")])
     fvg = [row for row in rows if row.get("setup") == "FVG"]
     book["FVG★"] = _stats_of([row for row in fvg if _star(row)])
     book["FVG·"] = _stats_of([row for row in fvg if not _star(row)])

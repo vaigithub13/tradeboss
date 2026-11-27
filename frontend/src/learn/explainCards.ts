@@ -326,6 +326,36 @@ export const EXPLAIN_CARDS: Record<string, ExplainCard> = {
     why: "The plan says what would confirm it and what would cancel it, so the chart is read before the move.",
     next: "A plan is not a signal until the confirming candle closes. After 15:00 a new one is not taken.",
   },
+  crt_lvl: {
+    title: "CRT range (Candle Range Theory)",
+    what: "The high, low and 50% of candle 1 on a higher timeframe: a 75-minute candle anchored at 09:15, or the previous day. The next candle (candle 2) is watched against this range.",
+    why: "Stops sit just beyond a big candle's high and low. CRT expects candle 2 to grab one side and then travel to the other side.",
+    next: "Wait for candle 2 to trade beyond one side and then CLOSE back inside the range. Only then is it a CRT.",
+  },
+  crt_sweep: {
+    title: "CRT sweep",
+    what: "Candle 2 traded beyond candle 1's high or low and took the liquidity there.",
+    why: "This is the manipulation part of CRT. On its own it means nothing yet.",
+    next: "If candle 2 closes back inside the range, the CRT is confirmed. If it closes outside, it is a breakout and there is no CRT.",
+  },
+  crt_ok: {
+    title: "CRT confirmed ✓",
+    what: "Candle 2 swept one side of candle 1 and closed back inside the range. The target is the opposite side of candle 1.",
+    why: "The failed break traps traders on the wrong side. Candle 3 often runs to the other side of the range.",
+    next: "Entry idea: the first 5m BOS or CHoCH toward the target after the close. The stop goes beyond the sweep: below the sweep low for a BUY, above the sweep high for a SELL. Only worth it if the target is at least 2R away.",
+  },
+  crt_target: {
+    title: "CRT target",
+    what: "The opposite side of candle 1's range, where CRT expects candle 3 to go. A daily CRT is known at 15:30 and its target is for the next session.",
+    why: "That side still has its liquidity, the stops, untouched.",
+    next: "A ✓ on the line means price reached it.",
+  },
+  crt_cancel: {
+    title: "CRT cancelled",
+    what: "Candle 2 closed outside candle 1's range (a breakout), or it took both the high and the low (an outside bar).",
+    why: "Without a close back inside there is no trapped side, so the CRT idea is gone.",
+    next: "Wait for the next candle pair. The breakout side may now act as support or resistance.",
+  },
   note: {
     title: "My note",
     what: "A note you placed on a candle.",

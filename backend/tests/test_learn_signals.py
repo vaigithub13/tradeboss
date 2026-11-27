@@ -60,3 +60,33 @@ def test_engine_reads_closed_bars_only():
     book = run_book(bars, bars[-1]["time"] + 300, "NIFTY50")
     assert book["signals"] == []
     assert "plans" in book
+
+
+def _row(setup: str, status: str, r: float | None) -> dict[str, object]:
+    return {"id": f"{setup}-{status}", "symbol": "NIFTY50", "setup": setup, "status": status, "r": r, "star": ""}
+
+
+def test_stats_book_splits_crt_75m_and_daily():
+    from app.learn_signals import stats_book
+
+    book = stats_book([_row("CRT75", "TP", 2.5), _row("CRT75", "SL", -1), _row("CRTD", "TP", 3), _row("SWP", "SL", -1)])
+    assert book["CRT75"]["signals"] == 2
+    assert book["CRT75"]["winRate"] == 50
+    assert book["CRTD"]["signals"] == 1
+    assert book["CRT"]["signals"] == 3
+    assert book["CRT"]["totalR"] == 4.5
+    assert book["all"]["signals"] == 4
+
+
+def test_history_keeps_the_crt_rows_from_the_engine(tmp_path, monkeypatch):
+    import app.learn_signals as ls
+
+    start = int(datetime(2026, 11, 26, 9, 15, tzinfo=IST).timestamp())
+    monkeypatch.setattr(ls, "load_m5", lambda *_: [{"time": start + i * 300, "open": 1, "high": 1, "low": 1, "close": 1} for i in range(5)])
+    stats = {"signals": 7, "tp": 3, "sl": 4, "expired": 0, "winRate": 42.86, "totalR": 1.2, "avgR": 0.17, "avgRNet": 0.1}
+    monkeypatch.setattr(ls, "run_book", lambda *_: {"stats": {"CRT75": stats, "CRTD": stats, "CRT": stats}, "breakdown": []})
+    summary = ls.write_history(tmp_path, tmp_path, datetime(2022, 1, 1).date(), datetime(2026, 11, 27).date())
+    nifty = summary["history"]["bySymbol"]["NIFTY50"]
+    for key in ("CRT75", "CRTD", "CRT"):
+        assert nifty[key]["signals"] == 7
+        assert nifty[key]["avgRNet"] == 0.1

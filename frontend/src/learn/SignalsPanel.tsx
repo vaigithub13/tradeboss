@@ -1,6 +1,7 @@
 import { useState } from "react";
 
-import type { BreakdownRow, SignalBook, WatchSignal } from "./signals";
+import { mmss } from "./countdown";
+import { setupLabel, type BreakdownRow, type PlanCard, type SignalBook, type WatchSignal } from "./signals";
 import { emptySymbolBook, type SavedStats, type SignalsSummary, type SymbolBook } from "./signalLog";
 import { learnAxisTime } from "./time";
 
@@ -58,12 +59,17 @@ export function SignalsPanel({
   summary,
   reviewNote,
   onReview,
+  clock,
+  paused = false,
 }: {
   symbol: string;
   book: SignalBook;
   summary: SignalsSummary | null;
   reviewNote: string | null;
   onReview: () => void;
+  /** Seconds since epoch for the plan countdowns. Replay passes the cursor. */
+  clock?: number;
+  paused?: boolean;
 }) {
   const live = summary?.live.bySymbol[symbol] ?? emptySymbolBook();
   const history = summary?.history?.bySymbol[symbol] ?? null;
@@ -78,13 +84,15 @@ export function SignalsPanel({
       {book.plans.length === 0 && <p>No plan on the closed 5-minute candles yet.</p>}
       {book.plans.map((plan) => (
         <article key={`${plan.setup}-${plan.side}-${plan.n}`} className="plan">
-          <b>{plan.state === "in_zone" ? "📍 In zone" : "⏳ Waiting"} · {plan.setup} {plan.side.toUpperCase()}</b>
+          <b>{plan.state === "in_zone" ? "📍 In zone" : "⏳ Waiting"} · {setupLabel(plan.setup)} {plan.side.toUpperCase()}</b>
           <p>{plan.title}</p>
+          {plan.waitText && <p data-testid="learn-plan-wait"><b>{waitLine(plan, clock, paused)}</b></p>}
           <p>{plan.trigger}</p>
           <p className="muted">{plan.invalid}</p>
           <p>
             {plan.distance === 0 ? "At the zone" : `${Math.abs(Math.round(plan.distance))} pts ${plan.distance > 0 ? "above" : "below"} price`}
             {" · "}SL {plan.sl}{plan.approx ? " (approx)" : ""} · TP {plan.tpNote}
+            {plan.r != null ? ` · ${plan.r}R from here` : ""}
           </p>
         </article>
       ))}
@@ -132,6 +140,7 @@ export function SignalsPanel({
           })}
         </tbody>
       </table>
+      <CrtTable book={book} summary={summary} />
       <WhatWorks rows={history?.breakdown ?? []} windowRows={book.breakdown} />
       <h3>By symbol</h3>
       <table className="mini">
@@ -165,6 +174,57 @@ export function SignalsPanel({
   );
 }
 
+export function waitLine(plan: Pick<PlanCard, "waitText" | "waitUntil">, clock: number | undefined, paused: boolean): string {
+  if (!plan.waitText) return "";
+  if (plan.waitUntil == null || clock == null) return plan.waitText;
+  if (paused) return `${plan.waitText} — replay, clock paused`;
+  const left = plan.waitUntil - clock;
+  return left > 0 ? `${plan.waitText} — in ${mmss(left)}` : `${plan.waitText} — closing now`;
+}
+
+const CRT_ROWS = ["CRT75", "CRTD"] as const;
+
+function CrtTable({ book, summary }: { book: SignalBook; summary: SignalsSummary | null }) {
+  return (
+    <>
+      <h3>CRT — Candle Range Theory</h3>
+      <p className="muted">
+        75m candles from 09:15 and the daily candle. Candle 2 sweeps one side and closes back inside, then the first 5m BOS/CHoCH toward the other side is the entry. SL beyond the sweep. TP the other side of the range, taken only at 2R or more. One per timeframe per day. History {summary?.history ? `${summary.history.from} – ${summary.history.to}` : "fills in after the backfill"}; avg R with no costs and after ₹110.
+      </p>
+      <table className="mini" data-testid="learn-crt-table">
+        <thead>
+          <tr><th>Setup</th><th>Index</th><th>n</th><th>Win</th><th>Avg R</th><th>After ₹110</th></tr>
+        </thead>
+        <tbody>
+          {CRT_ROWS.map((name) => (
+            <tr key={`${name}-window`}>
+              <td>{setupLabel(name)}</td>
+              <td>this window</td>
+              <td>{book.stats[name].signals}</td>
+              <td>{pct(book.stats[name].winRate)}</td>
+              <td>{num(book.stats[name].avgR)}</td>
+              <td>{num(book.stats[name].avgRNet)}</td>
+            </tr>
+          ))}
+          {CRT_ROWS.flatMap((name) => NAMES.map((index) => {
+            const past = summary?.history?.bySymbol[index]?.[name];
+            return (
+              <tr key={`${name}-${index}`} className={past && past.signals < 50 ? "dim" : ""}>
+                <td>{setupLabel(name)}</td>
+                <td>{index === "NIFTY50" ? "NIFTY" : index}</td>
+                <td>{past?.signals ?? "—"}</td>
+                <td>{pct(past?.winRate ?? null)}</td>
+                <td>{past ? num(past.avgR) : "—"}</td>
+                <td>{past ? num(past.avgRNet ?? null) : "—"}</td>
+              </tr>
+            );
+          }))}
+        </tbody>
+      </table>
+    </>
+  );
+}
+
 function WhatWorks({ rows, windowRows }: { rows: BreakdownRow[]; windowRows: BreakdownRow[] }) {
   const [net, setNet] = useState(false);
   const shown = rows.length ? rows : windowRows;
@@ -189,7 +249,7 @@ function WhatWorks({ rows, windowRows }: { rows: BreakdownRow[]; windowRows: Bre
           <tbody>
             {shown.slice(0, 24).map((row) => (
               <tr key={`${row.setup}-${row.slot}-${row.trend15}-${row.level}-${row.expiry}`} className={row.n < 50 ? "dim" : ""}>
-                <td>{row.setup} · {row.slot} · {row.trend15 === "flat" ? "no 15m trend" : `${row.trend15} 15m`} · {row.level} · {row.expiry ? "expiry" : "not expiry"}</td>
+                <td>{setupLabel(row.setup)} · {row.slot} · {row.trend15 === "flat" ? "no 15m trend" : `${row.trend15} 15m`} · {row.level} · {row.expiry ? "expiry" : "not expiry"}</td>
                 <td>{row.n}</td>
                 <td>{pct(row.winRate)}</td>
                 <td>{num(net ? row.avgRNet : row.avgR)}</td>
@@ -209,7 +269,7 @@ function SignalList({ signals }: { signals: WatchSignal[] }) {
     <ul className="sig-list">
       {[...signals].reverse().map((signal) => (
         <li key={signal.id}>
-          <b>{learnAxisTime(signal.time)} IST · {signal.setup} {signal.side.toUpperCase()} · {signal.status}</b>
+          <b>{learnAxisTime(signal.time)} IST · {setupLabel(signal.setup)} {signal.side.toUpperCase()} · {signal.status}</b>
           <br />
           {signal.why}
           <br />

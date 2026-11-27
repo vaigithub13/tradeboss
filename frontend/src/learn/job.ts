@@ -2,6 +2,7 @@
 
 import { readLesson, type Lesson } from "./lesson";
 import { buildStudy, type Study } from "./study";
+import { crtMarks } from "./crtMarks";
 import { readSignalBook, type SignalBook } from "./signals";
 import { readLevels, type LevelLine } from "./levels";
 import {
@@ -25,6 +26,8 @@ export interface LearnJob {
   /** Closed 5-minute candles for the watch-only signal book. */
   m5?: LearnBar[];
   signalNow?: number;
+  /** Chart timeframe in seconds. 75m CRT is drawn up to 15m charts. */
+  tfSeconds?: number;
 }
 
 export interface LearnRead {
@@ -82,6 +85,12 @@ export function runJob(job: LearnJob, state: JobState | null): { read: LearnRead
       low,
       high,
       last,
+      extra: crtMarks(
+        job.m5 ?? (job.timeframe === "5m" ? job.bars : []),
+        job.signalNow ?? job.now ?? 0,
+        job.bars,
+        job.tfSeconds ?? 300,
+      ),
     }),
     signals: readSignalBook(
       job.m5 ?? (job.timeframe === "5m" ? job.bars : []),
