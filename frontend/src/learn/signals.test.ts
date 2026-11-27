@@ -48,6 +48,7 @@ function signal(patch: Partial<WatchSignal> = {}): WatchSignal {
     level: "other",
     expiry: false,
     costR: 0,
+    star: false,
     ...patch,
   };
 }

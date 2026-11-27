@@ -2565,6 +2565,16 @@ The Signals history splits by setup, time slot, the 15-minute trend, the level, 
 
 Export for review writes `data/learn/exports/<date>/session.md` and a PNG of the chart. The note carries the Now banner, the AMD read, the day's events, the signals, the notes, "My read of today", and the practice scores. The folder stays untracked. Practice asks for a written read before the next six candles are shown, then scores the direction and an optional level, and keeps a per-tag tally. Those scores stay in `data/learn/practice/scores.json`, also untracked.
 
+## 27 Nov 2026 — Learn tab, phase N4
+
+Education only, on the Learn tab. The Chart tab, the Sensex tab, paper slots, the assist, the scanner, and the live path were not changed. No order is sent. `LIVE_TRADING` stays false. The backend was not started. AurumBoss was read and not modified.
+
+The ICT tab lists the same terms as the AurumBoss glossary, written for the Nifty session. Each term says what it is and how it is drawn. Inversion FVG, balanced price range, the mitigation block, and the 2022 mentorship model stay concepts and are not drawn. Opening a drawn term highlights its marks.
+
+ICT MODELS draws, on closed candles and in index points: the OB+FVG overlap, breaker blocks, Unicorn boxes, the OTE 62–79% band with equilibrium and premium/discount shading, NDOG and NWOG with a filled state, and an MSS tag when a CHoCH body is at least 1.2 × ATR. Killzone times live in `frontend/src/learn/killzones.json` and are labelled adapted for NSE: opening 09:15–10:30, Silver Bullet 10:00–11:00 and 13:30–14:30, closing 14:30–15:15. The filled-gap toggle also shows finished ICT zones. Each drawn mark has an explain card, and the event list records an overlap, a Unicorn, a first touch of OTE, and a filled opening gap.
+
+An FVG signal inside an OB+FVG zone is FVG★. The others are FVG·. Unicorn and OTE rejections are scored the same way as the other watch-only signals, one per setup per day, and they appear in the what-works split. The header counts down the candle close, the 15:30 close, and the next calendar event. Replay pauses that line.
+
 ## 25 Nov 2026 — Similar snapshots use the studied 15m window
 
 Record only. No signal, no slot, no order. `LIVE_TRADING` stays false.

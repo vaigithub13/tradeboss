@@ -7,6 +7,7 @@
 
 import type { AmdSession, Lesson, Liquidity, Sweep } from "./lesson";
 import type { BreakEvent, LearnBar, Structure, Swing } from "./structure";
+import { scanIct, type IctEvent, type IctLabel, type IctLine, type Killzone } from "./ict";
 import { istClock, istEpoch } from "./time";
 
 export const FVG_MIN_ATR = 0.1;
@@ -94,6 +95,7 @@ export interface Study {
   events: StudyEvent[];
   banner: string;
   rounds: { price: number; major: boolean }[];
+  killzones?: Killzone[];
 }
 
 const GREEN = "#15803d";
@@ -579,6 +581,12 @@ export interface StudyLayers {
   fvg: boolean;
   fvgFilled: boolean;
   ob: boolean;
+  ict: boolean;
+  breaker: boolean;
+  unicorn: boolean;
+  ote: boolean;
+  killzones: boolean;
+  gaps: boolean;
   pattern: boolean;
   patternAll: boolean;
   round: boolean;
@@ -596,6 +604,12 @@ export const DEFAULT_LAYERS: StudyLayers = {
   fvg: true,
   fvgFilled: false,
   ob: false,
+  ict: true,
+  breaker: true,
+  unicorn: true,
+  ote: true,
+  killzones: true,
+  gaps: true,
   pattern: true,
   patternAll: false,
   round: true,
@@ -626,16 +640,19 @@ export function buildStudy(input: StudyInput): Study {
   const sessions = [...new Set(days)].flatMap((day) => daySessions(day));
   const gaps = fairValueGaps(bars);
   const blocks = orderBlocks(bars, structure.events);
+  const ict = scanIct(bars, structure.events, structure.swings, true);
   const labels: StudyLabel[] = [
     ...structure.swings.map((swing) => swingLabel(swing, bars)),
     ...lesson.sweeps.map(sweepLabel),
     ...candlePatterns(bars, keyLevels(lesson), gaps),
+    ...ict.labels.map(mssLabel),
   ];
   const lines: StudyLine[] = [
     ...lesson.liquidity.map((level) => lineOf(level, bars, end)),
     ...structure.events.map(breakLine),
+    ...ict.lines.map(ictLine),
   ];
-  const boxes: StudyBox[] = [...gaps, ...blocks];
+  const boxes: StudyBox[] = [...gaps, ...blocks, ...ict.boxes];
   for (const session of lesson.sessions) {
     boxes.push(...amdBoxes(session, end));
     const mark = manipLabel(session);
@@ -643,7 +660,7 @@ export function buildStudy(input: StudyInput): Study {
   }
   const latest = lesson.sessions.at(-1) ?? null;
   const failed = latest ? sweepFailed(latest, bars) : false;
-  const events = collectEvents(bars, structure, lesson, gaps, labels, latest, failed);
+  const events = [...collectEvents(bars, structure, lesson, gaps, labels, latest, failed), ...ict.events.map(ictEvent)];
   events.sort((a, b) => b.time - a.time || a.text.localeCompare(b.text));
   return {
     sessions,
@@ -653,7 +670,32 @@ export function buildStudy(input: StudyInput): Study {
     events: events.slice(0, 300),
     banner: bannerText(latest, now || end, failed),
     rounds: roundMarks(input.low, input.high, input.last || bars[bars.length - 1]?.close || 0),
+    killzones: ict.killzones,
   };
+}
+
+function ictLine(line: IctLine): StudyLine {
+  return { ...line, short: false };
+}
+
+function mssLabel(label: IctLabel): StudyLabel {
+  return {
+    id: label.id,
+    kind: label.kind,
+    time: label.time,
+    price: label.price,
+    text: label.text,
+    color: "#7c3aed",
+    textColor: "#7c3aed",
+    pos: "above",
+    detail: label.detail,
+    confirm: label.confirm,
+    key: true,
+  };
+}
+
+function ictEvent(event: IctEvent): StudyEvent {
+  return { ...event, ref: { time: event.time, price: 0 } };
 }
 
 function collectEvents(

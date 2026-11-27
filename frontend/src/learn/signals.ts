@@ -9,6 +9,7 @@ import { readLevels } from "./levels";
 import { gapSeeds, type StudyBox } from "./study";
 import { readStructure, type BreakEvent, type LearnBar, type Structure } from "./structure";
 import { isExpiryDay } from "./events";
+import { scanIct, tradesZone, type OverlapZone } from "./ict";
 import { istClock, istEpoch } from "./time";
 
 export const M5 = 300;
@@ -21,7 +22,7 @@ const FVG_BARS = 150;
 
 const LEVELS = new Set(["PDH", "PDL", "Week high", "Week low", "OR high", "OR low", "EQH", "EQL"]);
 
-export type SetupName = "SWP" | "FVG" | "AMD";
+export type SetupName = "SWP" | "FVG" | "AMD" | "UNI" | "OTE";
 export type SignalSide = "buy" | "sell";
 export type SignalStatus = "open" | "TP" | "SL" | "expired";
 export type PlanState = "waiting" | "in_zone";
@@ -54,6 +55,7 @@ export interface WatchSignal {
   level: LevelGroup;
   expiry: boolean;
   costR: number;
+  star: boolean;
 }
 
 export interface PlanCard {
@@ -91,6 +93,7 @@ export interface SetupStats {
   winRate: number | null;
   totalR: number;
   avgR: number | null;
+  avgRNet: number | null;
 }
 
 export interface BreakdownRow {
@@ -111,14 +114,14 @@ export interface SignalBook {
   done: PlanDone[];
   notes: string[];
   signals: WatchSignal[];
-  stats: Record<"all" | SetupName, SetupStats>;
+  stats: Record<"all" | SetupName | "FVG★" | "FVG·", SetupStats>;
   trend: "up" | "down" | null;
   price: number | null;
   breakdown: BreakdownRow[];
 }
 
 export function emptyStats(): SetupStats {
-  return { signals: 0, tp: 0, sl: 0, expired: 0, open: 0, winRate: null, totalR: 0, avgR: null };
+  return { signals: 0, tp: 0, sl: 0, expired: 0, open: 0, winRate: null, totalR: 0, avgR: null, avgRNet: null };
 }
 
 export function emptyBook(): SignalBook {
@@ -127,7 +130,10 @@ export function emptyBook(): SignalBook {
     done: [],
     notes: [],
     signals: [],
-    stats: { all: emptyStats(), SWP: emptyStats(), FVG: emptyStats(), AMD: emptyStats() },
+    stats: {
+      all: emptyStats(), SWP: emptyStats(), FVG: emptyStats(), AMD: emptyStats(),
+      UNI: emptyStats(), OTE: emptyStats(), "FVG★": emptyStats(), "FVG·": emptyStats(),
+    },
     trend: null,
     price: null,
     breakdown: [],
@@ -245,6 +251,7 @@ function makeSignal(
     level: "other",
     expiry: false,
     costR: 0,
+    star: false,
   };
 }
 
@@ -339,7 +346,13 @@ function gapEdges(gap: StudyBox): { up: boolean; top: number; bottom: number } {
   return { up: gap.kind === "fvg_bull", top: Math.max(gap.p1, gap.p2), bottom: Math.min(gap.p1, gap.p2) };
 }
 
-function fvgSignals(bars: readonly LearnBar[], structure: Structure, gaps: readonly StudyBox[], symbol: string): { signals: WatchSignal[]; done: PlanDone[] } {
+function fvgSignals(
+  bars: readonly LearnBar[],
+  structure: Structure,
+  gaps: readonly StudyBox[],
+  symbol: string,
+  overlaps: readonly OverlapZone[],
+): { signals: WatchSignal[]; done: PlanDone[] } {
   const signals: WatchSignal[] = [];
   const done: PlanDone[] = [];
   const used = new Set<string>();
@@ -379,6 +392,10 @@ function fvgSignals(bars: readonly LearnBar[], structure: Structure, gaps: reado
         `${up ? "Bullish" : "Bearish"} FVG ${round2(bottom)}–${round2(top)}: rejection with the M5 ${up ? "up" : "down"}trend. SL beyond the gap. TP 2R.`,
       );
       if (!signal) continue;
+      if (overlaps.some((zone) => tradesZone(zone, bar, signal.time, up))) {
+        signal.star = true;
+        signal.why += " · inside an OB+FVG zone";
+      }
       used.add(key);
       signals.push(signal);
       done.push({ setup: "FVG", side, title: signal.why, text: "Triggered — signal", result: "signal", time: signal.time });
@@ -432,13 +449,14 @@ function amdSignals(bars: readonly LearnBar[], structure: Structure, lesson: Les
   return signals;
 }
 
-export function tally(signals: readonly WatchSignal[]): Record<"all" | SetupName, SetupStats> {
+export function tally(signals: readonly WatchSignal[]): Record<"all" | SetupName | "FVG★" | "FVG·", SetupStats> {
   const block = (rows: readonly WatchSignal[]): SetupStats => {
     const done = rows.filter((row) => row.status === "TP" || row.status === "SL" || row.status === "expired");
     const tp = rows.filter((row) => row.status === "TP").length;
     const sl = rows.filter((row) => row.status === "SL").length;
     const expired = rows.filter((row) => row.status === "expired").length;
     const totalR = round2(done.reduce((sum, row) => sum + (row.r ?? 0), 0));
+    const net = done.length ? round2(done.reduce((sum, row) => sum + (row.r ?? 0) - row.costR, 0) / done.length) : null;
     return {
       signals: rows.length,
       tp,
@@ -448,6 +466,7 @@ export function tally(signals: readonly WatchSignal[]): Record<"all" | SetupName
       winRate: tp + sl ? round2((100 * tp) / (tp + sl)) : null,
       totalR,
       avgR: done.length ? round2(totalR / done.length) : null,
+      avgRNet: net,
     };
   };
   return {
@@ -455,6 +474,10 @@ export function tally(signals: readonly WatchSignal[]): Record<"all" | SetupName
     SWP: block(signals.filter((row) => row.setup === "SWP")),
     FVG: block(signals.filter((row) => row.setup === "FVG")),
     AMD: block(signals.filter((row) => row.setup === "AMD")),
+    UNI: block(signals.filter((row) => row.setup === "UNI")),
+    OTE: block(signals.filter((row) => row.setup === "OTE")),
+    "FVG★": block(signals.filter((row) => row.setup === "FVG" && row.star)),
+    "FVG·": block(signals.filter((row) => row.setup === "FVG" && !row.star)),
   };
 }
 
@@ -628,7 +651,7 @@ export function bookFromParts(input: BookParts): SignalBook {
     events: input.structure.events
       .filter((event) => closeOf({ time: event.time, high: 0, low: 0, close: 0 }) <= input.now && event.index < bars.length)
       .sort((a, b) => a.time - b.time || a.index - b.index),
-    swings: input.structure.swings.filter((swing) => swing.index < bars.length),
+    swings: input.structure.swings.filter((swing) => swing.confirmIndex < bars.length),
   };
   const lesson: Lesson = {
     liquidity: input.lesson.liquidity,
@@ -636,11 +659,18 @@ export function bookFromParts(input: BookParts): SignalBook {
     sessions: input.lesson.sessions,
   };
   const gaps = input.gaps.filter((gap) => gap.confirm + M5 <= input.now);
+  const scan = scanIct(bars, structure.events, structure.swings, false);
   const swp = swpSignals(bars, structure, lesson, input.symbol);
-  const fvg = fvgSignals(bars, structure, gaps, input.symbol);
+  const fvg = fvgSignals(bars, structure, gaps, input.symbol, scan.overlaps);
   const amd = amdSignals(bars, structure, lesson, input.symbol);
+  const models = scan.hits.flatMap((hit) => {
+    const bar = bars[hit.index];
+    if (!bar) return [];
+    const signal = makeSignal(hit.setup, hit.side, input.symbol, bar, hit.slLevel, atrAtBar(bars, hit.index), null, "2R", hit.why);
+    return signal ? [signal] : [];
+  });
   const scored = attachContext(
-    [...swp.signals, ...fvg.signals, ...amd]
+    [...swp.signals, ...fvg.signals, ...amd, ...models]
       .map((signal) => scoreSignal(signal, bars, input.now))
       .sort((a, b) => a.time - b.time),
     bars,

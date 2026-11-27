@@ -101,6 +101,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
   private notes: StudyNote[] = [];
   private signals: WatchSignal[] = [];
   private events: { time: number; title: string; verified: boolean }[] = [];
+  private focus = "";
   private selected: string | null = null;
   hits: HitBox[] = [];
   private chart: IChartApi | null = null;
@@ -149,6 +150,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     selected: string | null;
     signals?: WatchSignal[];
     events?: { time: number; title: string; verified: boolean }[];
+    focus?: string;
   }): void {
     this.study = input.study;
     this.layers = input.layers;
@@ -156,6 +158,7 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
     this.notes = input.notes;
     this.signals = input.signals ?? [];
     this.events = input.events ?? [];
+    this.focus = input.focus ?? "";
     this.selected = input.selected;
     this.requestUpdate();
   }
@@ -255,6 +258,26 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
         hits.push({ x: left, y: 0, w, h: height, mark: { id: `ses-${session.t1}`, kind: "session", detail: session.name, time: session.t1 } });
       }
     }
+    if (layers.killzones) {
+      for (const zone of study.killzones ?? []) {
+        const x1 = xOf(zone.t1);
+        const x2 = xOf(zone.t2);
+        if (x1 == null || x2 == null) continue;
+        const left = Math.min(x1, x2);
+        const w = Math.max(Math.abs(x2 - x1), 2);
+        const silver = zone.kind === "sb";
+        const y = silver ? height - 12 : height - 24;
+        const on = !this.focus || this.focus === zone.kind;
+        ctx.globalAlpha = on ? 1 : 0.25;
+        ctx.fillStyle = silver ? "rgba(234,88,12,0.55)" : "rgba(30,64,175,0.30)";
+        ctx.fillRect(left, y, w, 10);
+        ctx.fillStyle = silver ? "#fff" : "#1e3a8a";
+        ctx.font = "600 9px sans-serif";
+        ctx.fillText(zone.name, left + 3, y + 8);
+        ctx.globalAlpha = 1;
+        hits.push({ x: left, y, w, h: 10, mark: { id: `kz-${zone.t1}-${zone.name}`, kind: zone.kind, detail: zone.detail, time: zone.t1 } });
+      }
+    }
     const boxes = study.boxes.filter((box) => showBox(box, layers));
     for (const box of boxes) {
       const x1 = xOf(box.t1);
@@ -266,13 +289,18 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
       const top = Math.min(y1, y2);
       const w = Math.max(Math.abs(x2 - x1), 6);
       const h = Math.max(Math.abs(y2 - y1), 4);
+      const hot = !this.focus || focused(box.kind, this.focus);
+      ctx.globalAlpha = hot ? 1 : 0.2;
       ctx.fillStyle = box.color;
       ctx.fillRect(left, top, w, h);
       ctx.strokeStyle = box.border;
+      ctx.lineWidth = hot && this.focus ? 2 : 1;
       ctx.strokeRect(left, top, w, h);
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = 1;
       hits.push({ x: left, y: top, w, h, mark: { id: box.id, kind: box.kind, detail: box.detail, time: box.confirm } });
     }
-    const lines = study.lines.filter((line) => (line.kind === "bos" || line.kind === "choch" ? layers.structure : layers.liquidity));
+    const lines = study.lines.filter((line) => showLine(line, layers));
     for (const line of lines) {
       const x1 = xOf(line.t1);
       const x2 = xOf(line.t2);
@@ -420,18 +448,40 @@ export class LearnOverlay implements ISeriesPrimitive<Time> {
   }
 }
 
+function finished(state: string | undefined): boolean {
+  return state === "filled" || state === "old" || state === "filled-small" || state === "done" || state === "broken";
+}
+
 function showBox(box: { kind: string; state?: string }, layers: StudyLayers): boolean {
-  if (box.kind.startsWith("fvg")) {
-    if (!layers.fvg) return false;
-    const hidden = box.state === "filled" || box.state === "old" || box.state === "filled-small";
-    return !hidden || layers.fvgFilled;
-  }
+  const faded = finished(box.state);
+  if (box.kind.startsWith("fvg")) return layers.fvg && (!faded || layers.fvgFilled);
   if (box.kind.startsWith("ob")) return layers.ob && box.state !== "broken";
   if (box.kind.startsWith("amd")) return layers.amd;
+  if (box.kind.startsWith("ict")) return layers.ict && (!faded || layers.fvgFilled);
+  if (box.kind.startsWith("brk")) return layers.breaker && (!faded || layers.fvgFilled);
+  if (box.kind.startsWith("uni")) return layers.unicorn && (!faded || layers.fvgFilled);
+  if (box.kind === "ote" || box.kind === "premium" || box.kind === "discount") return layers.ote;
+  if (box.kind === "ndog" || box.kind === "nwog") return layers.gaps && (!faded || layers.fvgFilled);
   return true;
 }
 
+function showLine(line: { kind: string }, layers: StudyLayers): boolean {
+  if (line.kind === "eq") return layers.ote;
+  if (line.kind === "bos" || line.kind === "choch") return layers.structure;
+  return layers.liquidity;
+}
+
+function focused(kind: string, focus: string): boolean {
+  if (!focus) return true;
+  if (focus === "bos") return kind === "bos" || kind === "choch";
+  if (focus === "liq") return kind === "sweep" || kind.startsWith("pd") || kind.startsWith("pw") || kind === "eqh" || kind === "eql" || kind.startsWith("or_");
+  if (focus === "ndog") return kind === "ndog" || kind === "nwog";
+  if (focus === "eq") return kind === "eq" || kind === "premium" || kind === "discount" || kind === "ote";
+  return kind.startsWith(focus);
+}
+
 function showLabel(label: { kind: string; key?: boolean }, layers: StudyLayers): boolean {
+  if (label.kind === "mss") return layers.structure;
   if (label.kind === "sweep") return layers.liquidity;
   if (label.kind === "amd_m") return layers.amd;
   if (label.kind === "hh" || label.kind === "hl" || label.kind === "lh" || label.kind === "ll" || label.kind === "swing_high" || label.kind === "swing_low") {

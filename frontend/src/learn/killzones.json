@@ -1,0 +1,9 @@
+{
+  "note": "adapted for NSE. ICT's New York windows are not used here. Edit the times if the session changes.",
+  "zones": [
+    { "name": "Opening killzone", "kind": "kz", "start": "09:15", "end": "10:30" },
+    { "name": "Silver Bullet (NSE)", "kind": "sb", "start": "10:00", "end": "11:00" },
+    { "name": "Silver Bullet (NSE)", "kind": "sb", "start": "13:30", "end": "14:30" },
+    { "name": "Closing", "kind": "kz", "start": "14:30", "end": "15:15" }
+  ]
+}

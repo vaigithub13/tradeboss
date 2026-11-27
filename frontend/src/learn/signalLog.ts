@@ -10,6 +10,7 @@ export interface SavedStats {
   winRate: number | null;
   totalR: number;
   avgR: number | null;
+  avgRNet?: number | null;
 }
 
 export interface SymbolBook {
@@ -17,6 +18,10 @@ export interface SymbolBook {
   SWP: SavedStats;
   FVG: SavedStats;
   AMD: SavedStats;
+  UNI?: SavedStats;
+  OTE?: SavedStats;
+  "FVG★"?: SavedStats;
+  "FVG·"?: SavedStats;
   breakdown?: BreakdownRow[];
 }
 

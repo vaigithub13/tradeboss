@@ -1,10 +1,11 @@
 import { useState } from "react";
 
-import type { BreakdownRow, SignalBook, SetupName, WatchSignal } from "./signals";
+import type { BreakdownRow, SignalBook, WatchSignal } from "./signals";
 import { emptySymbolBook, type SavedStats, type SignalsSummary, type SymbolBook } from "./signalLog";
 import { learnAxisTime } from "./time";
 
-const SETUPS: SetupName[] = ["SWP", "FVG", "AMD"];
+const SETUPS = ["SWP", "FVG", "AMD"] as const;
+const COMPARE = ["FVG★", "FVG·", "UNI", "OTE"] as const;
 const NAMES = ["NIFTY50", "SENSEX", "BANKNIFTY"] as const;
 
 function pct(rate: number | null): string {
@@ -105,6 +106,32 @@ export function SignalsPanel({
           <SetupTable book={history} />
         </>
       ) : <p className="muted">Historical scores appear here after the backfill is written.</p>}
+      <h3>FVG★ and FVG·</h3>
+      <p className="muted">FVG★ is an FVG signal inside an OB+FVG zone. FVG· is a plain FVG. After enough signals this shows whether the overlap really helps. UNI is a Unicorn rejection. OTE is a rejection inside the 62–79% band. The last column subtracts ₹110.</p>
+      <table className="mini">
+        <thead>
+          <tr><th>Setup</th><th>n</th><th>Win</th><th>Avg R</th><th>Avg R after ₹110</th><th>History n</th><th>History win</th><th>History avg R</th><th>History after ₹110</th></tr>
+        </thead>
+        <tbody>
+          {COMPARE.map((name) => {
+            const here = book.stats[name];
+            const past = history?.[name];
+            return (
+              <tr key={name}>
+                <td>{name}</td>
+                <td>{here.signals}</td>
+                <td>{pct(here.winRate)}</td>
+                <td>{num(here.avgR)}</td>
+                <td>{num(here.avgRNet)}</td>
+                <td>{past?.signals ?? "—"}</td>
+                <td>{pct(past?.winRate ?? null)}</td>
+                <td>{past ? num(past.avgR) : "—"}</td>
+                <td>{past ? num(past.avgRNet ?? null) : "—"}</td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
       <WhatWorks rows={history?.breakdown ?? []} windowRows={book.breakdown} />
       <h3>By symbol</h3>
       <table className="mini">

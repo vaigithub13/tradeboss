@@ -12,7 +12,9 @@ import { capCandlesQuery } from "../replay/cap";
 import { fetchCandles, type Candle, type Timeframe } from "../api/client";
 import type { LiveView } from "../live/protocol";
 import { subscribeLearnBars, useLiveStore } from "../store/liveStore";
+import { countdownLine } from "./countdown";
 import { sessionMarkdown } from "./exportSession";
+import { IctPanel } from "./IctPanel";
 import { explainCard, explainTip } from "./explainCards";
 import { eventsOn, todayLine } from "./events";
 import { runJob, type JobState, type LearnRead } from "./job";
@@ -49,10 +51,21 @@ const LAYER_GROUPS: { title: string; rows: { key: keyof StudyLayers; label: stri
       { key: "structure", label: "BOS / CHoCH" },
       { key: "liquidity", label: "Liquidity and sweeps" },
       { key: "fvg", label: "Fair value gaps" },
-      { key: "fvgFilled", label: "Show filled and older gaps" },
+      { key: "fvgFilled", label: "show filled / older FVGs & finished ICT zones" },
       { key: "ob", label: "Order blocks" },
       { key: "pattern", label: "Candle patterns at key levels" },
       { key: "patternAll", label: "Show all patterns" },
+    ],
+  },
+  {
+    title: "ICT MODELS",
+    rows: [
+      { key: "ict", label: "★ OB + FVG overlap" },
+      { key: "breaker", label: "Breaker blocks" },
+      { key: "unicorn", label: "🦄 Unicorn (breaker + FVG)" },
+      { key: "ote", label: "OTE 62–79% + EQ (premium / discount)" },
+      { key: "killzones", label: "Killzones + Silver Bullet (adapted for NSE)" },
+      { key: "gaps", label: "NDOG and NWOG" },
     ],
   },
   { title: "Context", rows: [{ key: "round", label: "Round numbers, 50 and 100" }, { key: "notes", label: "My notes" }, { key: "events", label: "Calendar events" }] },
@@ -93,7 +106,13 @@ export function LearnTab({
   const [cursor, setCursor] = useState<number | null>(null);
   const [candles, setCandles] = useState<LearnBar[]>(bars ?? []);
   const [read, setRead] = useState<LearnRead | null>(null);
-  const [tab, setTab] = useState<"layers" | "events" | "explain" | "notes" | "signals" | "practice">("layers");
+  const [tab, setTab] = useState<"layers" | "events" | "explain" | "notes" | "ict" | "signals" | "practice">("layers");
+  const [ictFocus, setIctFocus] = useState("");
+  const [clock, setClock] = useState(() => Math.floor(Date.now() / 1000));
+  useEffect(() => {
+    const id = window.setInterval(() => setClock(Math.floor(Date.now() / 1000)), 1000);
+    return () => window.clearInterval(id);
+  }, []);
   const [practiceHold, setPracticeHold] = useState(false);
   const [practiceRows, setPracticeRows] = useState<PracticeRow[]>([]);
   const [bannerLog, setBannerLog] = useState<string[]>([]);
@@ -356,8 +375,9 @@ export function LearnTab({
       selected: picked?.id ?? null,
       signals: read.signals.signals,
       events: eventMarks,
+      focus: ictFocus,
     });
-  }, [eventMarks, labelSwings, layers, notes, picked, read, symbol]);
+  }, [eventMarks, ictFocus, labelSwings, layers, notes, picked, read, symbol]);
 
   const dayKey = istClock((replay && cursor != null ? cursor : chartBars.at(-1)?.time) ?? Math.floor(Date.now() / 1000)).day;
   useEffect(() => { setReadDraft(reads[dayKey] ?? ""); }, [dayKey, reads]);
@@ -457,6 +477,9 @@ export function LearnTab({
           </button>
           {exportNote && <span className="status">{exportNote}</span>}
         </div>
+        <p className="countdown" data-testid="learn-countdown">
+          {countdownLine(clock, timeframe, TF_SECONDS[timeframe] ?? 300, replay, symbol)}
+        </p>
       </header>
       <div className={`banner${warn ? " warn" : ""}`} data-testid="learn-banner">{banner}</div>
       {replay && cursor != null && (
@@ -476,13 +499,13 @@ export function LearnTab({
         </div>
         <aside>
           <div className="tabs" role="tablist">
-            {(["layers", "events", "explain", "notes", "signals", "practice"] as const).map((name) => (
+            {(["layers", "events", "explain", "notes", "ict", "signals", "practice"] as const).map((name) => (
               <button key={name} type="button" role="tab" aria-selected={tab === name} onClick={() => {
                 if (name === "practice") setPracticeHold(true);
                 else setPracticeHold(false);
                 setTab(name);
               }}>
-                {name[0]!.toUpperCase() + name.slice(1)}
+                {name === "ict" ? "ICT" : name[0]!.toUpperCase() + name.slice(1)}
               </button>
             ))}
           </div>
@@ -572,6 +595,7 @@ export function LearnTab({
                 }}
               />
             )}
+            {tab === "ict" && <IctPanel focus={ictFocus} onFocus={setIctFocus} />}
             {tab === "practice" && (
               <PracticePanel
                 bars={candles}

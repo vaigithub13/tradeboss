@@ -334,6 +334,9 @@
 .learn .sig-list { list-style: none; padding: 0; margin: 0; font-size: 12px; }
 .learn .sig-list li { padding: 6px 0; border-bottom: 1px solid #f3f4f6; }
 .learn h3 { font-size: 12px; margin: 12px 0 4px; }
+.learn .countdown { flex: 1 0 100%; margin: 2px 0 0; font-size: 12px; color: #374151; }
+.learn details { margin: 6px 0; }
+.learn details p { margin: 4px 0; }
 .learn tr.dim { color: #9ca3af; }
 .learn-dark .watch { background: #2a2112; color: #fde68a; border-color: #92400e; }
 .learn-dark .plan { border-color: #2a3142; }

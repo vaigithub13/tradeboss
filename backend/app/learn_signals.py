@@ -26,7 +26,8 @@ log = logging.getLogger("tradeboss.learn.signals")
 IST = ZoneInfo("Asia/Kolkata")
 SYMBOLS = ("NIFTY50", "SENSEX", "BANKNIFTY")
 SETUPS = ("SWP", "FVG", "AMD")
-FIELDS = ["id", "symbol", "setup", "side", "time", "entry", "sl", "tp", "risk", "tpNote", "why", "status", "exitTime", "exit", "r"]
+COMPARE = ("UNI", "OTE", "FVG★", "FVG·")
+FIELDS = ["id", "symbol", "setup", "side", "time", "entry", "sl", "tp", "risk", "tpNote", "why", "status", "exitTime", "exit", "r", "star"]
 _BUNDLE: Path | None = None
 
 
@@ -51,7 +52,7 @@ def summary_path(data_dir: Path) -> Path:
 
 
 def _empty_stats() -> dict[str, Any]:
-    return {"signals": 0, "tp": 0, "sl": 0, "expired": 0, "winRate": None, "totalR": 0, "avgR": None}
+    return {"signals": 0, "tp": 0, "sl": 0, "expired": 0, "winRate": None, "totalR": 0, "avgR": None, "avgRNet": None}
 
 
 def empty_symbol_book() -> dict[str, Any]:
@@ -162,11 +163,20 @@ def _stats_of(rows: list[dict[str, Any]]) -> dict[str, Any]:
         "winRate": round(100 * tp / (tp + sl), 2) if tp + sl else None,
         "totalR": total,
         "avgR": round(total / len(done), 2) if done else None,
+        "avgRNet": None,
     }
 
 
+def _star(row: dict[str, Any]) -> bool:
+    return str(row.get("star", "")).lower() == "true"
+
+
 def stats_book(rows: list[dict[str, Any]]) -> dict[str, Any]:
-    return {"all": _stats_of(rows), **{name: _stats_of([row for row in rows if row.get("setup") == name]) for name in SETUPS}}
+    book = {"all": _stats_of(rows), **{name: _stats_of([row for row in rows if row.get("setup") == name]) for name in (*SETUPS, "UNI", "OTE")}}
+    fvg = [row for row in rows if row.get("setup") == "FVG"]
+    book["FVG★"] = _stats_of([row for row in fvg if _star(row)])
+    book["FVG·"] = _stats_of([row for row in fvg if not _star(row)])
+    return book
 
 
 def _read_csv(data_dir: Path) -> list[dict[str, str]]:
@@ -293,7 +303,7 @@ def write_history(data_dir: Path, candles_dir: Path, start: date, end: date) -> 
         stats = book.get("stats") or {}
         by_symbol[symbol] = {
             "all": _from_engine(stats.get("all")),
-            **{name: _from_engine(stats.get(name)) for name in SETUPS},
+            **{name: _from_engine(stats.get(name)) for name in (*SETUPS, *COMPARE)},
             "breakdown": book.get("breakdown") or [],
         }
     summary["history"] = {
@@ -317,6 +327,7 @@ def _from_engine(stats: Any) -> dict[str, Any]:
         "winRate": stats.get("winRate"),
         "totalR": stats.get("totalR", 0),
         "avgR": stats.get("avgR"),
+        "avgRNet": stats.get("avgRNet"),
     }
 
 
