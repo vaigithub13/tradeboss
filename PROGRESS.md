@@ -2624,3 +2624,13 @@ Learn tab only. On 27 Nov NIFTY 5m the old support cluster 25,467–25,550 was n
 ## 28 Nov 2026 — Learn zone merge step 0.35 ATR
 
 Learn tab only. Levels now merge within 0.35 × ATR(14) of the chart timeframe. The width cap stays max(0.5 × ATR, 0.1% of price), and wider clusters are still split. On 27 Nov NIFTY 5m (ATR 22.6, step 7.9 points) EQH 25,543 and Round 50 25,550 join into one band, S 25,543–25,550 · EQH+50 ●●, 6.7 points wide. That band is now the nearest strength-2 support, so S 25,345 is no longer drawn and stays in the Levels list. Drawn zones are S 25,543–25,550, R 25,600, R 25,644, and R 25,721.
+
+## 28 Nov 2026 — App theme switch and chart attribution
+
+UI only. No paper slot, assist rule, order, strategy, or backend logic changed.
+
+The header has a Light / Dark switch next to the market status. Light is the default and matches the Learn look: white chart background, light grey grid, dark text, green and red candles. The choice is kept in localStorage under `tradeboss-theme`, and storage errors fall back to light. `frontend/src/ui/theme.ts` holds the chart palette and `chartThemeOptions()`, and every chart is created from it and recoloured in place with `applyOptions()` when the theme changes. The charts are the Chart tab and SENSEX (`ChartView`), the Paper equity curve (`PaperEquityChart`), and the Stock Scanner signal chart (`ScannerChart`). The Learn tab keeps its own look and toggle. The Options tab has no Lightweight Charts instance; its OI bar chart gridlines now use the text colour so they show on white.
+
+Panels follow the theme through `frontend/src/theme.css`. In light, Tailwind's white and black swap, each colour scale is mirrored (300 ↔ 700 and so on) so light text becomes dark text, the fixed dark backgrounds map to light ones, muted text uses fixed slate colours for contrast, and popup backdrops stay a dim veil. The Real assist bar, its settings, and the Move SL and trade popups were checked in both themes in the built preview; buy stays green and sell red.
+
+Every chart sets `attributionLogo: false`. The credit "Charts: TradingView Lightweight Charts™ (Apache 2.0)" with a link to tradingview.com is in one footer line under the app.

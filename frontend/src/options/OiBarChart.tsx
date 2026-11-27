@@ -55,7 +55,8 @@ export function OiBarChart({ data }: { data: OptionsChainResponse }) {
           x2={W - PAD.r}
           y1={H - PAD.b}
           y2={H - PAD.b}
-          stroke="rgba(255,255,255,0.12)"
+          stroke="currentColor"
+          strokeOpacity={0.12}
         />
         {rows.map((row, i) => {
           const cx = PAD.l + geometry.slot * (i + 0.5);
@@ -90,7 +91,8 @@ export function OiBarChart({ data }: { data: OptionsChainResponse }) {
                   width={geometry.barW}
                   height={Math.max(0, callH - yScale(prevCall, peak))}
                   fill={row.call.oi_chg < 0 ? "rgba(239,68,68,0.35)" : "rgba(52,211,153,0.25)"}
-                  stroke="rgba(255,255,255,0.15)"
+                  stroke="currentColor"
+                  strokeOpacity={0.15}
                   strokeWidth={0.5}
                   strokeDasharray="2 1"
                 />
@@ -110,7 +112,8 @@ export function OiBarChart({ data }: { data: OptionsChainResponse }) {
                   width={geometry.barW}
                   height={Math.max(0, putH - yScale(prevPut, peak))}
                   fill={row.put.oi_chg < 0 ? "rgba(239,68,68,0.35)" : "rgba(248,113,113,0.25)"}
-                  stroke="rgba(255,255,255,0.15)"
+                  stroke="currentColor"
+                  strokeOpacity={0.15}
                   strokeWidth={0.5}
                   strokeDasharray="2 1"
                 />

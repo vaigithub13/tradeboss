@@ -1,6 +1,5 @@
 import {
   CandlestickSeries,
-  ColorType,
   CrosshairMode,
   HistogramSeries,
   LineSeries,
@@ -80,13 +79,15 @@ import {
   isAwayFromLive,
 } from "./controls";
 import { candleCountdown } from "./countdown";
+import { useThemeStore } from "../store/themeStore";
+import { candleColors, chartPalette, chartThemeOptions, type AppTheme } from "../ui/theme";
 
 const NO_DRAWINGS: Drawing[] = [];
-const UP = "#26a69a";
-const DOWN = "#ef5350";
-const BG = "#0b0e14";
-const GRID = "#1a1f2b";
-const BORDER = "#2a2e39";
+/** Volume bars: the theme's up/down colour at half opacity. */
+function volumeColor(theme: AppTheme, up: boolean): string {
+  const p = chartPalette(theme);
+  return `${up ? p.up : p.down}80`;
+}
 
 const TICK_KIND: Record<TickMarkType, TickKind> = {
   [TickMarkType.Year]: "year",
@@ -136,6 +137,9 @@ export function ChartView({
   const candles = useMemo(() => seriesThroughCursor(loadedCandles, cursor).bars, [loadedCandles, cursor]);
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
+  const theme = useThemeStore((s) => s.theme);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
   const candleSeriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
   const volumeSeriesRef = useRef<ISeriesApi<"Histogram"> | null>(null);
   const whitespaceRef = useRef<ISeriesApi<"Line"> | null>(null);
@@ -265,24 +269,35 @@ export function ChartView({
     syncChrome();
   };
 
+  // ---- theme switch: recolour the live chart in place, no remount
+  useEffect(() => {
+    chartRef.current?.applyOptions(chartThemeOptions(theme));
+    candleSeriesRef.current?.applyOptions(candleColors(theme));
+    // Recolour the volume bars already shown (replay may clip them), keeping up/down.
+    const vol = volumeSeriesRef.current;
+    if (vol) {
+      const downs = new Set([volumeColor("light", false), volumeColor("dark", false)]);
+      vol.setData(vol.data().map((point) => {
+        const bar = point as HistogramData<UTCTimestamp>;
+        return { ...bar, color: volumeColor(theme, !downs.has(bar.color ?? "")) };
+      }));
+    }
+  }, [theme]);
+
   // ---- create the chart once
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
 
+    const look = chartThemeOptions(themeRef.current);
     const chart = createChart(el, {
       autoSize: true,
-      layout: {
-        background: { type: ColorType.Solid, color: BG },
-        textColor: "#d1d4dc",
-        fontSize: 12,
-        panes: { separatorColor: BORDER, separatorHoverColor: "#3b4252" },
-      },
-      grid: { vertLines: { color: GRID }, horzLines: { color: GRID } },
+      layout: { ...look.layout, fontSize: 12 },
+      grid: look.grid,
       crosshair: { mode: CrosshairMode.Normal },
-      rightPriceScale: { borderColor: BORDER },
+      rightPriceScale: look.rightPriceScale,
       timeScale: {
-        borderColor: BORDER,
+        ...look.timeScale,
         timeVisible: true,
         secondsVisible: false,
         rightOffset: DEFAULT_RIGHT_OFFSET,
@@ -303,10 +318,7 @@ export function ChartView({
     });
 
     const candleSeries = chart.addSeries(CandlestickSeries, {
-      upColor: UP,
-      downColor: DOWN,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
+      ...candleColors(themeRef.current),
       borderVisible: false,
       priceLineVisible: true,
       priceFormat: { type: "price", precision: 2, minMove: 0.05 },
@@ -488,7 +500,7 @@ export function ChartView({
         volumeSeriesRef.current?.update({
           time: c.time as UTCTimestamp,
           value: c.volume,
-          color: c.close >= c.open ? `${UP}80` : `${DOWN}80`,
+          color: volumeColor(themeRef.current, c.close >= c.open),
         });
       }
       snapshotRef.current = snapshotOf(scope, candles);
@@ -542,7 +554,7 @@ export function ChartView({
         candles.map<HistogramData<UTCTimestamp>>((c) => ({
           time: c.time as UTCTimestamp,
           value: c.volume,
-          color: c.close >= c.open ? `${UP}80` : `${DOWN}80`,
+          color: volumeColor(themeRef.current, c.close >= c.open),
         })),
       );
     } else if (volumeSeriesRef.current) {
@@ -872,7 +884,7 @@ export function ChartView({
   const shownIndex = (hoverTime === null ? undefined : indexOfTime(candles, hoverTime)) ?? lastIndex;
   const shown = candles[shownIndex];
   const lastCandle = candles[lastIndex];
-  const priceLabelColor = lastCandle && lastCandle.close >= lastCandle.open ? UP : DOWN;
+  const priceLabelColor = lastCandle && lastCandle.close >= lastCandle.open ? chartPalette(theme).up : chartPalette(theme).down;
   const legend = useMemo(
     () => (shown ? legendValues(shown, shownIndex > 0 ? (candles[shownIndex - 1]?.close ?? null) : null, volumeVisible) : null),
     [shown, shownIndex, candles, volumeVisible],

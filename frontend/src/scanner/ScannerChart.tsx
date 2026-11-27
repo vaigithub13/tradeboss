@@ -1,7 +1,6 @@
 import { useEffect, useRef } from "react";
 import {
   CandlestickSeries,
-  ColorType,
   createChart,
   createSeriesMarkers,
   type IChartApi,
@@ -10,6 +9,8 @@ import {
 } from "lightweight-charts";
 
 import { fetchCandles, type Candle } from "../api/client";
+import { useThemeStore } from "../store/themeStore";
+import { candleColors, chartThemeOptions } from "../ui/theme";
 import type { ScannerSignal } from "../api/scanner";
 
 const UP = "#26a69a";
@@ -20,22 +21,23 @@ export function ScannerChart({ signal }: { signal: ScannerSignal }) {
   const ref = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const seriesRef = useRef<ISeriesApi<"Candlestick"> | null>(null);
+  const theme = useThemeStore((s) => s.theme);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
+    const look = chartThemeOptions(themeRef.current);
     const chart = createChart(el, {
       autoSize: true,
-      layout: { background: { type: ColorType.Solid, color: "#0b0e14" }, textColor: "#d1d4dc" },
-      grid: { vertLines: { color: "#1c2230" }, horzLines: { color: "#1c2230" } },
-      rightPriceScale: { borderColor: "#2a3142" },
-      timeScale: { borderColor: "#2a3142", timeVisible: true, secondsVisible: false },
+      layout: look.layout,
+      grid: look.grid,
+      rightPriceScale: look.rightPriceScale,
+      timeScale: { ...look.timeScale, timeVisible: true, secondsVisible: false },
     });
     const series = chart.addSeries(CandlestickSeries, {
-      upColor: UP,
-      downColor: DOWN,
-      wickUpColor: UP,
-      wickDownColor: DOWN,
+      ...candleColors(themeRef.current),
       borderVisible: false,
     });
     chartRef.current = chart;
@@ -46,6 +48,11 @@ export function ScannerChart({ signal }: { signal: ScannerSignal }) {
       seriesRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    chartRef.current?.applyOptions(chartThemeOptions(theme));
+    seriesRef.current?.applyOptions(candleColors(theme));
+  }, [theme]);
 
   useEffect(() => {
     const series = seriesRef.current;

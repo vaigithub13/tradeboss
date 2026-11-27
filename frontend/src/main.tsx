@@ -6,6 +6,11 @@ import "./index.css";
 import { useChartStore } from "./store/chartStore";
 import { applyBar, useLiveStore } from "./store/liveStore";
 import { useIndicatorStore } from "./store/indicatorStore";
+import { useThemeStore } from "./store/themeStore";
+import { applyDocumentTheme } from "./ui/theme";
+
+// Mark <html> before the first paint so the saved theme applies at once.
+applyDocumentTheme(useThemeStore.getState().theme);
 
 // Dev-only handles for manual checks / performance measurements from the browser console.
 if (import.meta.env.DEV) {

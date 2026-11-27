@@ -16,6 +16,7 @@ import { BacktestResults, TradeCard } from "./panels/BacktestResults";
 import { IndicatorsMenu } from "./panels/IndicatorsMenu";
 import { DataTokenBadge } from "./panels/DataTokenBadge";
 import { LiveBadge } from "./panels/LiveBadge";
+import { ThemeToggle } from "./components/ThemeToggle";
 import { SnapshotBadge } from "./panels/SnapshotBadge";
 import { PaperPanel } from "./panels/PaperPanel";
 import { PaperTrades } from "./panels/PaperTrades";
@@ -592,6 +593,7 @@ export default function App() {
             <span className={`h-2 w-2 rounded-full ${ui.dot}`} />
             <span className={`text-xs font-medium ${ui.text}`}>{ui.label}</span>
           </div>
+          <ThemeToggle />
         </div>
       </header>
 
@@ -760,6 +762,11 @@ export default function App() {
         <SensexPanel active={mainView === "sensex"} backendReady={backendStatus === "connected"} />
       </div>
       </div>
+      <footer className="shrink-0 border-t border-white/10 px-3 py-0.5 text-[10px] text-white/45" data-testid="app-credits">
+        Charts:{" "}
+        <a className="underline" href="https://www.tradingview.com/" target="_blank" rel="noreferrer">TradingView Lightweight Charts™</a>
+        {" "}(Apache 2.0)
+      </footer>
     </div>
   );
 }

@@ -1,6 +1,8 @@
 import { useEffect, useRef } from "react";
 import { createChart, LineSeries, type IChartApi, type ISeriesApi, type UTCTimestamp } from "lightweight-charts";
 
+import { useThemeStore } from "../store/themeStore";
+import { chartThemeOptions } from "../ui/theme";
 import type { EquityPoint } from "./dashboard";
 import { ACTIVE_PAPER_SLOTS, slotLabel } from "./slots";
 
@@ -38,15 +40,19 @@ export function PaperEquityChart({
   const host = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const linesRef = useRef<Record<string, ISeriesApi<"Line">>>({});
+  const theme = useThemeStore((s) => s.theme);
+  const themeRef = useRef(theme);
+  themeRef.current = theme;
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     let chart: IChartApi | null = null;
     try {
+      const look = chartThemeOptions(themeRef.current, { transparent: true });
       chart = createChart(el, {
-        layout: { background: { color: "transparent" }, textColor: "rgba(255,255,255,0.55)" },
-        grid: { vertLines: { color: "rgba(255,255,255,0.04)" }, horzLines: { color: "rgba(255,255,255,0.04)" } },
+        layout: look.layout,
+        grid: look.grid,
         rightPriceScale: { borderVisible: false },
         timeScale: { borderVisible: false },
         height: 240,
@@ -84,6 +90,14 @@ export function PaperEquityChart({
       linesRef.current = {};
     };
   }, []);
+
+  useEffect(() => {
+    try {
+      chartRef.current?.applyOptions(chartThemeOptions(theme, { transparent: true }));
+    } catch {
+      /* disposed */
+    }
+  }, [theme]);
 
   useEffect(() => {
     for (const slot of ACTIVE_PAPER_SLOTS) {
